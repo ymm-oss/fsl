@@ -21,8 +21,10 @@
 //! - acceptance 3: each glossary diagnostic, and an alias inside
 //!   `implements`, fails with its code at the offending text.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -103,7 +105,7 @@ fn source(example: &str, name: &str) -> PathBuf {
 
 /// `(stdout, exit)` of `fslc <args...> <path>` run in `path`'s directory.
 fn fslc(args: &[&str], path: &Path) -> (String, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command
         .args(args)
         .arg(path.file_name().expect("file name"))

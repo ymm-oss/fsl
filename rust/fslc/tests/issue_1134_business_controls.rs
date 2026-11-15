@@ -17,8 +17,10 @@
 //! at the control, and a declared-and-satisfied catalog stays accepted and
 //! warning-free.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -33,7 +35,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn check(fixture: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("check")
         .arg(format!("{FIXTURE_DIR}/{fixture}"))
         .current_dir(repository_root())
@@ -130,7 +132,7 @@ fn a_satisfied_control_is_accepted_without_a_warning() {
 /// the new gate did not become an over-detection on the corpus.
 #[test]
 fn the_repository_business_catalog_still_checks_clean() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "check",
             "rust/fslc/tests/fixtures/manifest_vocabulary/business.fsl",

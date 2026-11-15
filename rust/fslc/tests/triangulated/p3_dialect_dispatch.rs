@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -120,7 +120,7 @@ fn manifest() -> Vec<Value> {
 }
 
 fn run(arguments: &[String]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    crate::fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()

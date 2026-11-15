@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fsl_core::{FsResolver, KernelExpr, ProjectionDef, build_model, parse_kernel_source};
@@ -38,7 +40,7 @@ fn scratch_dir(name: &str) -> PathBuf {
 }
 
 fn run_cli(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(repo_root())
         .output()
@@ -59,7 +61,7 @@ fn at_method_output(command: &str, index: &str) -> std::process::Output {
     );
     let path = scratch_dir("at-method").join("spec.fsl");
     fs::write(&path, source).expect("write source");
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .arg(command)
         .arg(&path)
         .current_dir(repo_root())
@@ -323,8 +325,6 @@ fn native_cli_typestate_outputs_match_the_v1_golden_files() {
         .parent()
         .and_then(Path::parent)
         .expect("workspace root");
-    let binary = env!("CARGO_BIN_EXE_fslc");
-
     for (extra, expected) in [
         (
             Vec::<&str>::new(),
@@ -335,7 +335,7 @@ fn native_cli_typestate_outputs_match_the_v1_golden_files() {
             include_bytes!("fixtures/typestate_order.v1.ts").as_slice(),
         ),
     ] {
-        let output = Command::new(binary)
+        let output = fslc_cli::command()
             .current_dir(workspace)
             .args(["typestate", "specs/order_workflow.fsl"])
             .args(extra)
@@ -480,7 +480,7 @@ fn native_cli_exports_lowered_requirements_without_python() {
         .and_then(Path::parent)
         .expect("workspace root");
     let requirements = workspace.join("examples/e2e/2_requirements.fsl");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["kernel", requirements.to_str().expect("UTF-8 path")])
         .output()
         .expect("run native CLI");
@@ -499,7 +499,7 @@ fn native_cli_exports_lowered_requirements_without_python() {
 #[test]
 fn native_cli_conformance_output_matches_the_v1_golden_vector() {
     let input = fixture("conformance_failures.fsl");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "conformance",
             input.to_str().expect("UTF-8 path"),
@@ -521,7 +521,7 @@ fn native_cli_conformance_output_matches_the_v1_golden_vector() {
 #[test]
 fn native_cli_conformance_output_matches_the_v2_golden_vector() {
     let input = fixture("conformance_failures.fsl");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "conformance",
             input.to_str().expect("UTF-8 path"),
@@ -559,7 +559,7 @@ fn native_cli_kernel_output_matches_the_v1_golden_contract() {
         .and_then(Path::parent)
         .expect("workspace root");
     let relative = "rust/fslc/tests/fixtures/kernel_contract.fsl";
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .current_dir(workspace)
         .args(["kernel", relative])
         .output()
@@ -581,7 +581,7 @@ fn native_cli_kernel_v2_output_matches_the_origin_golden_contract() {
         .and_then(Path::parent)
         .expect("workspace root");
     let relative = "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl";
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .current_dir(workspace)
         .args(["kernel", relative, "--kernel-version", "2"])
         .output()
@@ -614,7 +614,7 @@ fn native_cli_kernel_v2_output_matches_the_origin_golden_contract() {
             .expect("golden JSON");
     assert_eq!(actual, expected);
 
-    let from_rust_directory = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let from_rust_directory = fslc_cli::command()
         .current_dir(workspace.join("rust"))
         .args([
             "kernel",
@@ -637,7 +637,7 @@ fn native_cli_negotiates_kernel_and_conformance_majors_fail_closed() {
         .and_then(Path::parent)
         .expect("workspace root");
     let relative = "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl";
-    let conformance = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let conformance = fslc_cli::command()
         .current_dir(workspace)
         .args([
             "conformance",
@@ -655,7 +655,7 @@ fn native_cli_negotiates_kernel_and_conformance_majors_fail_closed() {
     assert_eq!(conformance["schema_version"], "2.0.0");
     assert_eq!(conformance["kernel_schema_version"], "2.0.0");
 
-    let unsupported = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let unsupported = fslc_cli::command()
         .current_dir(workspace)
         .args(["kernel", relative, "--kernel-version", "3"])
         .output()
@@ -670,7 +670,7 @@ fn native_cli_negotiates_kernel_and_conformance_majors_fail_closed() {
             .is_some_and(|message| { message.contains("unsupported public Kernel major") })
     );
 
-    let unsupported_spelling = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let unsupported_spelling = fslc_cli::command()
         .current_dir(workspace)
         .args(["kernel", relative, "--kernel-version", "2.0.0"])
         .output()

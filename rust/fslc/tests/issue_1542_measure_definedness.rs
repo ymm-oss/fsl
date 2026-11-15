@@ -4,8 +4,10 @@
 //! Refusal expectations follow the approved pending/path-sensitive contract;
 //! BMC/explicit verdicts and non-partial solver counts preserve c79016ef.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -30,7 +32,7 @@ impl Fixture {
     }
 
     fn run(&self, engine: &str, extra: &[&str]) -> (Value, i32) {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        let mut command = fslc_cli::command();
         command.env_remove("FSLC_CACHE");
         if engine == "check" {
             command.arg("check").arg(&self.0);

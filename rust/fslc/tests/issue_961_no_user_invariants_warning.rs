@@ -6,8 +6,10 @@
 //! `reachable`, and must be suppressed only when invariant / trans / forbidden /
 //! `implements` safety declarations are present.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -26,7 +28,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn run_check(path: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["check", path])
         .current_dir(root())
         .output()

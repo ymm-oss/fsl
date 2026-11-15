@@ -3,8 +3,11 @@
 
 //! CLI coverage for the deterministic structural-analysis DOT/Mermaid exporter.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::Value;
 
@@ -19,7 +22,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn run(arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()

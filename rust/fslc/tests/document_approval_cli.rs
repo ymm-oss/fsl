@@ -8,6 +8,9 @@
 //! (schema v3/v4, `claim_set_digest`, signing) is exercised in
 //! `rust/fslc/tests/issue_333_approval_requirements_document.rs`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,7 +29,7 @@ fn repository_file(relative: &str) -> PathBuf {
 }
 
 fn run(cwd: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

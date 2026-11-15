@@ -13,13 +13,14 @@
 //! read apart from a second read that landed on a different-but-still-valid
 //! snapshot; only content bound to A proves the fix.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[cfg(unix)]
 #[path = "support/fifo_snapshot.rs"]
 mod fifo_snapshot;
 
 #[cfg(unix)]
-use std::process::Command;
-
 #[cfg(unix)]
 use fifo_snapshot::{ReapedChild, TwoSnapshotFifo, WriterOutcome, wait_for_output};
 #[cfg(unix)]
@@ -106,7 +107,7 @@ fn spawn_against_two_snapshot_fifo(
     args.push(&path);
     args.extend(remaining);
     let mut child = ReapedChild::new(
-        Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             .args(&args)
             .current_dir(fifo_snapshot::root())
             .stdout(Stdio::piped())

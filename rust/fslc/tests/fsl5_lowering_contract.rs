@@ -47,9 +47,11 @@
 //!
 //! Acceptance scenarios do not reach the kernel and are not part of K.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -195,7 +197,7 @@ fn example_dir(name: &str) -> PathBuf {
 /// `fslc refine <implementation> <abstraction> <mapping> --depth 8` in
 /// `dir`.
 fn refine(dir: &Path, implementation: &str, abstraction: &str, mapping: &str) -> (Value, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command
         .args([
             "refine",
@@ -487,7 +489,7 @@ fn kernel_requirements(kernel: &Value) -> BTreeMap<String, Option<String>> {
 /// it holds the findings of no requirement, such as the warnings only a
 /// next-edition source has.
 fn ledger_rows(dir: &Path, file: &str) -> Vec<(String, String)> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(["ledger", file]).current_dir(dir);
     let output = command.output().expect("run fslc ledger");
     let ledger = String::from_utf8(output.stdout).expect("UTF-8 ledger");

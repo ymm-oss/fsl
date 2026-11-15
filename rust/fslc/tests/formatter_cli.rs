@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::{collections::BTreeMap, ffi::OsStr};
 
 use serde_json::Value;
@@ -21,7 +24,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -29,7 +32,7 @@ fn run(args: &[&str]) -> Output {
 }
 
 fn run_stdin(args: &[&str], source: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let mut child = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .stdin(Stdio::piped())
@@ -196,7 +199,7 @@ fn fmt_prints_requirement_ids_as_written() {
         let source = fs::read_to_string(root().join(path)).expect("corpus source");
         let ids = compact_hyphen_runs(&source);
         assert!(!ids.is_empty(), "{path} spells no IDs");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        let mut command = fslc_cli::command();
         command.args(["fmt", path]).current_dir(root());
         let formatted = command.output().expect("run fslc");
         assert!(

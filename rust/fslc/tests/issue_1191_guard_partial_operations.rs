@@ -7,8 +7,10 @@
 //! enumeration (explicit, and the BMC boundary pre-pass) used to stop with a
 //! raw `result: error, kind: semantics` instead.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fsl_core::{FsResolver, KernelModel, build_model, parse_kernel_source};
@@ -53,7 +55,7 @@ fn verify(fixture: &Fixture, engine: &str) -> (Value, i32) {
 }
 
 fn verify_with(fixture: &Fixture, engine: &str, depth: &str, deadlock: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             fixture.text(),
@@ -146,7 +148,7 @@ fn kernel_partial_location(fixture: &Fixture) -> Value {
 
 /// Every `partial_operations` site of action `a`, in Kernel order.
 fn kernel_partial_locations(fixture: &Fixture) -> Vec<Value> {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["kernel", fixture.text()])
         .output()
         .expect("run native CLI");
@@ -558,7 +560,7 @@ fn refine_reports_an_impl_guard_partial_op_as_a_self_violation() {
     let implementation = Fixture::new("refine-impl", REFINE_IMPL);
     let abstraction = Fixture::new("refine-abs", REFINE_ABS);
     let mapping = Fixture::new("refine-map", REFINE_MAP);
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "refine",
             implementation.text(),

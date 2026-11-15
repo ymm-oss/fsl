@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use fsl_core::WRITE_DISTINCTNESS_UNPROVED_CODE;
 use serde_json::{Value, json};
@@ -11,10 +13,7 @@ const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures")
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 
 fn run_cli(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(args)
-        .output()
-        .expect("run fslc");
+    let output = fslc_cli::command().args(args).output().expect("run fslc");
     let status = output.status.code().unwrap_or(-1);
     let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(

@@ -3,9 +3,11 @@
 
 //! Native contract coverage for inline `implements` bounds propagation (#1003).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -24,7 +26,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn run_verify(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()

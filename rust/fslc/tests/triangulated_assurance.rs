@@ -2,6 +2,9 @@
 
 //! Federated Triangulated Assurance registry and aggregator (#670).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "triangulated/claim.rs"]
 mod claim;
 #[allow(dead_code)]

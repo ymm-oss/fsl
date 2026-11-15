@@ -4,6 +4,9 @@
 //! AP4–AP7: raw-input rejection only after an otherwise-approved evaluation.
 //! The working record pathname is fixed across every paired comparison.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -271,7 +274,7 @@ fn corrupt_signature(record: &mut Value) {
 }
 
 fn run(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(cwd)
         .output()

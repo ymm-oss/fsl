@@ -12,8 +12,10 @@
 //! Every pre-existing native mutate test passed an explicit `--max-mutants`,
 //! which is exactly why none of them saw the default.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -67,7 +69,7 @@ fn mutate(extra: &[&str]) -> Value {
         "2".to_owned(),
     ];
     args.extend(extra.iter().map(|value| (*value).to_owned()));
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(&args)
         .current_dir(workspace_root())
         .output()

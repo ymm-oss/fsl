@@ -14,8 +14,10 @@
 //! the rule `fslc ledger` already applies
 //! (`docs/design/DESIGN-assurance-classes.md`).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -45,7 +47,7 @@ fn scratch_dir(label: &str) -> PathBuf {
 /// Render one induction report and return its `#properties` table rows.
 fn property_rows(spec: &str, label: &str) -> Vec<String> {
     let output_path = scratch_dir(label).join("report.html");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "html",
             &fixture(spec).display().to_string(),

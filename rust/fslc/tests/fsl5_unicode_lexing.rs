@@ -12,8 +12,10 @@
 //! the Worker, which receive the options from the edition-wiring stage
 //! (`docs/design/parse-entry-inventory.md`).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -42,7 +44,7 @@ impl Drop for Scratch {
 
 /// `(stdout, exit)` of `fslc <subcommand> <path>`.
 fn fslc(subcommand: &str, path: &Path) -> (Vec<u8>, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.arg(subcommand).arg(path);
     let output = command.output().expect("run fslc");
     (output.stdout, output.status.code().expect("fslc exit code"))

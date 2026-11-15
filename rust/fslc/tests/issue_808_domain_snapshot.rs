@@ -8,13 +8,14 @@
 //! an illegal second open. Every test asserts that second open did not happen
 //! before cleanup, then checks an observable unique to source A.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[cfg(unix)]
 #[path = "support/fifo_snapshot.rs"]
 mod fifo_snapshot;
 
 #[cfg(unix)]
-use std::process::Command;
-
 #[cfg(unix)]
 use fifo_snapshot::{ReapedChild, TwoSnapshotFifo, WriterOutcome, wait_for_output};
 #[cfg(unix)]
@@ -36,7 +37,7 @@ fn run_domain_against_two_snapshot_fifo(subcommand: &str, args: &[&str]) -> (Str
     let mut fixture = TwoSnapshotFifo::new(subcommand, &source_a, SOURCE_B);
     let path = fixture.fifo.to_string_lossy().into_owned();
     let mut child = ReapedChild::new(
-        Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             .args(["domain", subcommand, &path])
             .args(args)
             .current_dir(fifo_snapshot::root())

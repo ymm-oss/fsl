@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -35,7 +37,7 @@ fn trace_step_type_errors_share_native_and_lsp_identity() {
         let path = directory.join(format!("{name}.fsl"));
         std::fs::write(&path, source).expect("write step fixture");
         let path = path.to_str().expect("UTF-8 path");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        let mut command = fslc_cli::command();
         command.args(["check", path]);
         let options = fsl_syntax::ParseOptions::stable();
         let output = command.output().expect("native check");
@@ -133,7 +135,7 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
     for (name, source, expected_location, expected_hint) in cases {
         let path = directory.join(format!("{name}.fsl"));
         std::fs::write(&path, source).expect("write diagnostic fixture");
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(["check", path.to_str().expect("UTF-8 fixture path")])
             .output()
             .expect("run native check");
@@ -218,7 +220,7 @@ fn japanese_keyword_diagnostics_share_cli_and_lsp_identity() {
         ),
     ] {
         let options = fsl_syntax::ParseOptions::stable();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        let mut command = fslc_cli::command();
         command.args(["check", path]);
         let output = command.output().expect("run native check");
         assert_eq!(output.status.code(), Some(2), "{path}");
@@ -255,7 +257,7 @@ fn distinctness_unproved_diagnostic_shares_cli_and_lsp_identity() {
         env!("CARGO_MANIFEST_DIR")
     );
     let source = std::fs::read_to_string(&fixture).expect("read fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["check", &fixture])
         .output()
         .expect("run native check");
@@ -337,7 +339,7 @@ fn nested_option_payload_diagnostics_have_cli_lsp_identity() {
             directory.join(format!("{position}-{payload}.fsl").replace(['<', '>', ',', ' '], "_"));
         std::fs::write(&path, &source).expect("write nested Option fixture");
         let path = path.to_str().expect("UTF-8 fixture path");
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(["check", path])
             .output()
             .expect("run native check");

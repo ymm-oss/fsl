@@ -7,8 +7,10 @@
 //! calls stable `lex` without FSL 5 identifier options. Collision detectors live
 //! in fsl-tools/tests/issue_1430_graph_ids.rs through public JSON functions.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -21,7 +23,7 @@ fn root() -> PathBuf {
 }
 
 fn cli(path: &Path, format: &str, expected_status: i32) -> Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["causal", "analyze"])
         .arg(path)
         .args(["--projection", "causal_graph", "--format", format])

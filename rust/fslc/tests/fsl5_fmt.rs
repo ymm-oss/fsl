@@ -13,8 +13,10 @@
 //! the input (the one comparison of `support/kernel_compare.rs`). The two
 //! Japanese fixtures are each other's `--lang` translation, comments aside.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -90,7 +92,7 @@ fn repository() -> PathBuf {
 
 /// `(stdout, exit)` of `fslc fmt <path> <args>`.
 fn fmt_raw(path: &Path, args: &[&str]) -> (String, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command
         .arg("fmt")
         .arg(path.file_name().expect("file name"))
@@ -562,7 +564,7 @@ fn fmt_inserts_the_space_a_particle_needs() {
     assert_ne!(joined, fixture);
     let path = directory.join("joined.fsl");
     std::fs::write(&path, &joined).expect("write joined source");
-    let check = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let check = fslc_cli::command()
         .args(["check", "joined.fsl"])
         .current_dir(&directory)
         .output()

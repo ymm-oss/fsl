@@ -8,8 +8,11 @@
 //! `-o`/no-`-o` output convention shared with `ledger`/`html`/`testgen`,
 //! `--strict`/`--strict-rendering` diagnostics, and the JSON envelope shape.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,7 +29,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -346,7 +349,7 @@ const REJECTION: &str = "rust/fslc/tests/fixtures/fsl5/rejection/fsl5_en.fsl";
 
 /// `fslc <args>` in the repository root.
 fn run_fslc(args: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(args).current_dir(root());
     command.output().expect("run native fslc")
 }

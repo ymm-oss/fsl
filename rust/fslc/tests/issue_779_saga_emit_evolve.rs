@@ -14,8 +14,10 @@
 //! that exist only to witness the fix (see the fixture's own header comment
 //! for why they are not added to the corpus example itself: #772).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fsl_core::domain_kernel_source;
 use fsl_syntax::{SurfaceDocument, parse_surface_document};
@@ -31,7 +33,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn run_cli(args: &[&str]) -> (i32, Value) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .current_dir(repo_root())
         .args(args)
         .output()

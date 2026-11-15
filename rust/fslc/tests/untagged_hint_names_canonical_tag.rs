@@ -16,8 +16,10 @@
 //! and the legacy form it used to propose is the negative control — accepted
 //! by `--strict-tags`, rejected by `lint`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -37,7 +39,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
-use std::process::Command;
 use std::task::{Context, Poll, Waker};
 
 use fsl_core::{
@@ -353,7 +355,7 @@ fn generated_fragments(domain: &DomainSpec, needles: &[&str]) -> Value {
 }
 
 fn run_cli(args: &[&str]) -> (i32, Value) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .current_dir(workspace())
         .args(args)
         .output()

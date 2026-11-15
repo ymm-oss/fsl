@@ -11,8 +11,10 @@
 //! target (the same mapping in a standalone refinement file) must keep
 //! checking progress.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -31,7 +33,7 @@ fn fixture_dir() -> PathBuf {
 }
 
 fn run(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(fixture_dir())
         .output()

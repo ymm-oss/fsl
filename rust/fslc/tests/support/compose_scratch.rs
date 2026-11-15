@@ -4,7 +4,6 @@
 //! Small CLI fixture shared only by the compose rewrite regression tests.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -31,7 +30,7 @@ pub fn scratch(label: &str, files: &[(&str, &str)]) -> PathBuf {
 }
 
 pub fn run(dir: &Path, args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args(args)
         .current_dir(dir)
         .output()

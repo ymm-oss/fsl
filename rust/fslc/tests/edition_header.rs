@@ -21,8 +21,10 @@
 //! and the header's own contract: conflicts, unknown editions, the dialects
 //! without an edition, the literate fence, `fmt`, `lint` and `migrate`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -34,7 +36,7 @@ use support::{corpus_files, repo_relative, root, top_level_keyword};
 
 /// `(stdout, exit)` of `fslc <arguments>` in `directory`.
 fn fslc(directory: &Path, arguments: &[&str]) -> (String, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(arguments).current_dir(directory);
     let output = command.output().expect("run fslc");
     let exit = output

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_cases.rs"]
 mod common;
 #[path = "support/edition_dependency_cases.rs"]
@@ -19,7 +22,7 @@ fn run(s: &Scratch, command: &str) -> Output {
 }
 
 fn run_args(s: &Scratch, args: &[String]) -> Output {
-    common::invoke(env!("CARGO_BIN_EXE_fslc"), args, &s.0)
+    common::invoke(fslc_cli::command(), args, &s.0)
 }
 
 fn payload(output: &Output) -> Value {
@@ -602,7 +605,7 @@ fn direct_consumers_use_the_captured_stream_instead_of_reopening_it() {
         }
         let command = command.replace("a.fsl", "/dev/stdin");
         let actual = common::invoke_input(
-            env!("CARGO_BIN_EXE_fslc"),
+            fslc_cli::command(),
             &common::split(&command),
             &s.0,
             &format!("fsl 5\n{source}"),
@@ -839,7 +842,7 @@ fn git_batch_borrows_one_live_mapping_for_every_comparison() {
                     expected = expected["comparisons"][0].clone();
                 }
                 let actual = if stream {
-                    common::invoke_input(env!("CARGO_BIN_EXE_fslc"), &selected, &s.0, source)
+                    common::invoke_input(fslc_cli::command(), &selected, &s.0, source)
                 } else {
                     run_args(&s, &selected)
                 };
@@ -905,7 +908,7 @@ fn git_batch_borrows_one_live_mapping_for_every_comparison() {
             args.insert(3, spec.into());
         }
         let actual = common::invoke_input(
-            env!("CARGO_BIN_EXE_fslc"),
+            fslc_cli::command(),
             &args,
             &s.0,
             &format!("fsl 5\n{COLON_MAP}"),
@@ -954,12 +957,8 @@ fn chain_grouping_and_step_share_one_captured_root_stream() {
         let expected = json!({"fsl":"1.0","result":"verified","manifest":"stream.toml","keep_going":false,"layers":[layer]});
         for jobs in [1, 3] {
             let command = format!("chain stream.toml --jobs {jobs}");
-            let output = common::invoke_input(
-                env!("CARGO_BIN_EXE_fslc"),
-                &common::split(&command),
-                &s.0,
-                &source,
-            );
+            let output =
+                common::invoke_input(fslc_cli::command(), &common::split(&command), &s.0, &source);
             expect(
                 &mut r,
                 &format!("chain/captured-grouping/{kind}/{jobs}"),
@@ -1098,7 +1097,7 @@ fn chain_duplicate_grouping_keeps_root_warnings_on_cold_and_warm_cache() {
             );
         }
         for warm in [false, true] {
-            let actual = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
+            let actual = fslc_cli::command()
                 .args(common::split(&command))
                 .current_dir(&s.0)
                 .env("FSLC_CACHE", "on")

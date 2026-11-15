@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_cases.rs"]
 mod cases;
 
@@ -7,7 +10,7 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::json;
 
 fn run(scratch: &Scratch, command: &str) -> std::process::Output {
-    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, command)
+    cases::command(fslc_cli::command(), &scratch.0, command)
 }
 
 #[test]
@@ -139,7 +142,7 @@ fn document_generate_projects_the_captured_stream_without_reopening_its_label() 
     std::os::unix::fs::symlink("/dev/stdin", scratch.0.join("stream.fsl")).unwrap();
     let expected = markdown(source, "stream.fsl", &scratch.0);
     let output = cases::invoke_input(
-        env!("CARGO_BIN_EXE_fslc"),
+        fslc_cli::command(),
         &cases::split("document generate stream.fsl"),
         &scratch.0,
         source,

@@ -6,8 +6,10 @@
 //! spec once the state is within depth; the step case evaluates with a
 //! totalizing evaluator, so it needs its own definedness obligation.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -52,7 +54,7 @@ fn verify(fixture: &Fixture, engine: &str, depth: usize) -> (Value, i32) {
 
 fn verify_with(fixture: &Fixture, engine: &str, depth: usize, extra: &[&str]) -> (Value, i32) {
     let depth = depth.to_string();
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             fixture.text(),

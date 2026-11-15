@@ -4,6 +4,9 @@
 //! Tests of the shared kernel comparison (`support/kernel_compare.rs`). They
 //! live here once instead of in every consumer of the helper.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 
 use serde_json::json;

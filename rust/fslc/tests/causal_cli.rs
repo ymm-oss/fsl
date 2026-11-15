@@ -7,13 +7,16 @@
 //! `do_not_assume` array on every success payload, and no output path that
 //! attaches `proved`/`verified` to a causal claim.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::{Value, json};
 
 fn run_process(arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()
@@ -363,7 +366,7 @@ fn causal_diff_pins_identity_to_ids_and_support_to_not_available() {
 
 #[test]
 fn there_is_no_causal_verify_subcommand() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["causal", "verify", RETENTION])
         .current_dir(repository_root())
         .output()

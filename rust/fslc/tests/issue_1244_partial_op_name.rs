@@ -7,8 +7,10 @@
 //! `_partial_op_<action>`, so a conformance vector could not be matched
 //! against the verify result for the same spec.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -63,10 +65,7 @@ impl Drop for Scratch {
 }
 
 fn fslc(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(args)
-        .output()
-        .expect("run fslc");
+    let output = fslc_cli::command().args(args).output().expect("run fslc");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
             "invalid JSON: {error}; stderr={}",

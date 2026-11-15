@@ -20,8 +20,10 @@
 //! controls pin the names that must still be accepted, including a `process`
 //! name with no `entity` line.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -36,7 +38,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn run(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()

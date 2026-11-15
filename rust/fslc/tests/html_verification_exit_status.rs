@@ -9,8 +9,10 @@
 //! the report is still rendered, and the process exit follows
 //! `outcome::exit_status` on the verification envelope.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -44,7 +46,7 @@ fn scratch_dir(label: &str) -> PathBuf {
 }
 
 fn run_html_to_file(spec: &str, output_path: &Path) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "html",
             spec,
@@ -105,7 +107,7 @@ fn html_exits_zero_on_a_verifying_baseline() {
 /// preservation control: parse errors keep the ordinary spec-error exit.
 #[test]
 fn html_parse_errors_keep_the_spec_error_exit() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["html", PARSE_FIXTURE])
         .current_dir(workspace_root())
         .output()

@@ -6,8 +6,10 @@
 //! not executable function bodies. Runtime-precondition comments quote FSL,
 //! rather than containing executable TS parameter references.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -102,7 +104,7 @@ fn cli(command: &str, source: &str) -> (i32, Value) {
     std::fs::create_dir_all(&directory).expect("local scratch");
     let path = directory.join("model.fsl");
     std::fs::write(&path, source).expect("write source");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg(command)
         .arg(&path)
         .current_dir(root())

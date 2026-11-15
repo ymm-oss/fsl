@@ -13,8 +13,10 @@
 //! relation's role add nothing to it. A `terminal { }` the document writes
 //! replaces the derived one.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -33,7 +35,7 @@ impl Scratch {
 
     fn run(&self, source: &str, args: &[&str]) -> Value {
         std::fs::write(self.0.join("doc.fsl"), source).expect("write scratch source");
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(args)
             .arg("doc.fsl")
             .current_dir(&self.0)

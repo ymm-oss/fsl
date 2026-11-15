@@ -12,8 +12,10 @@
 //! comparison, since skipping genuinely does less work and so legitimately
 //! takes less time).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -26,7 +28,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn run_cli(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()

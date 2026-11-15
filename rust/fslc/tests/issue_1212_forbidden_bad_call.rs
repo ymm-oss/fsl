@@ -11,8 +11,10 @@
 //! does not summarize an unknown final action or a broken setup as an
 //! accepted final step.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -54,7 +56,7 @@ fn pytest_for(final_step: &str, name: &str) -> String {
     let directory = scratch(name);
     let spec = write_spec(&directory, final_step);
     let output_path = directory.join("test_wallet.py");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("testgen")
         .arg(&spec)
         .args(["--depth", "3", "--target", "pytest", "-o"])
@@ -75,7 +77,7 @@ fn pytest_for(final_step: &str, name: &str) -> String {
 fn check(final_step: &str, name: &str) -> (Value, i32) {
     let directory = scratch(name);
     let spec = write_spec(&directory, final_step);
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("check")
         .arg(&spec)
         .output()
@@ -172,7 +174,7 @@ fn diff_with(old: &str, new: &str, name: &str, options: &[&str]) -> (Value, i32)
     let new_path = directory.join("new.fsl");
     std::fs::write(&old_path, old).expect("write OLD fixture");
     std::fs::write(&new_path, new).expect("write NEW fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("diff")
         .arg(&old_path)
         .arg(&new_path)
@@ -471,7 +473,7 @@ fn diff_forbid_unknown_follows_the_bad_call_and_unknown_action_rules() {
 }
 
 fn run_in(directory: &Path, args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(directory)
         .output()

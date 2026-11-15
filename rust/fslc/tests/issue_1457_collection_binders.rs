@@ -5,9 +5,11 @@
 //! Stateful init collection sources are rejected by the shared check boundary
 //! since #1463; all original cells and engine probes remain in this inventory.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
@@ -541,7 +543,7 @@ fn fixture(source: &str) -> PathBuf {
 }
 
 fn run(path: &Path, engine: &str) -> (i32, Value) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     if engine == "check" {
         command.arg("check").arg(path);
     } else {

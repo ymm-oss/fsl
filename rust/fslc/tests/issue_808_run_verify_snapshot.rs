@@ -3,13 +3,14 @@
 
 //! Deterministic CLI read-count control for #808's `run_verify` foundation.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[cfg(unix)]
 #[path = "support/fifo_snapshot.rs"]
 mod fifo_snapshot;
 
 #[cfg(unix)]
-use std::process::Command;
-
 #[cfg(unix)]
 use fifo_snapshot::{ReapedChild, TwoSnapshotFifo, WriterOutcome, wait_for_output};
 #[cfg(unix)]
@@ -24,7 +25,7 @@ fn verify_against_two_snapshot_fifo(engine: &str, edition: &str) -> (Value, i32)
     let mut fixture = TwoSnapshotFifo::new("verify", source_a, source_b);
     let path = fixture.fifo.to_string_lossy().into_owned();
     let mut child = ReapedChild::new(
-        Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             .args([
                 "verify",
                 &path,

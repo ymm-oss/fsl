@@ -9,6 +9,9 @@
 //! `rust/fslc/tests/document_approval_cli.rs`; this file covers the
 //! approval-record side only.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -44,7 +47,7 @@ fn assert_valid_against(record: &Value, schema_relative: &str) {
 }
 
 fn run(cwd: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

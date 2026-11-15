@@ -10,6 +10,9 @@
 //! Sync additions cannot write component state; compose init may initialize it
 //! only when the component does not already initialize the same location.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
 

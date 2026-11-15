@@ -30,8 +30,10 @@
 //! break a correct model, so the tests below pin what the repair must not
 //! say as well as what it must.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -55,7 +57,7 @@ fn replay(logs: &str) -> (Value, i32) {
 }
 
 fn replay_spec(spec: &str, logs: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "domain",
             "replay",

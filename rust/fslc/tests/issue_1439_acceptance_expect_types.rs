@@ -4,8 +4,10 @@
 //! #1439: acceptance expressions and FSL 5 scenario expressions must receive
 //! the same recursive type checking as invariants, before concrete replay.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -52,7 +54,7 @@ fn check(label: &str, predicate: &str, next_edition: bool) -> (Value, i32) {
 "#
     );
     std::fs::write(scratch.0.join("comparison.fsl"), source).expect("write inline fixture");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command
         .args(["check", "comparison.fsl"])
         .current_dir(&scratch.0);

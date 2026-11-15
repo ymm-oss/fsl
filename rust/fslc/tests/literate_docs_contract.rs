@@ -15,6 +15,9 @@
 //! `rust/fslc/src/literate_access.rs` would leave all three documents
 //! silently stale, with nothing to fail. This is the gate.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -363,7 +366,7 @@ fn marked_doc_fences_check_and_the_unmarked_surface_is_reported() {
     let root = workspace_root();
     let script = root.join("tools/check-doc-fences.py");
     for args in [&["selftest"][..], &["check"][..]] {
-        let output = std::process::Command::new("python3")
+        let output = fslc_cli::isolate(&mut std::process::Command::new("python3"))
             .arg(&script)
             .args(args)
             .args(["--fslc", env!("CARGO_BIN_EXE_fslc")])
@@ -498,7 +501,7 @@ fn fsl5_skill_fences_all_check_under_the_fsl5_header() {
     assert!(headed >= 5, "only {headed} skill documents hold fsl fences");
 
     let script = root.join("tools/check-doc-fences.py");
-    let output = std::process::Command::new("python3")
+    let output = fslc_cli::isolate(&mut std::process::Command::new("python3"))
         .arg(&script)
         .args(["check", "--every-fence"])
         .args(FSL5_SKILL_DIRECTORIES)

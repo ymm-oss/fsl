@@ -39,6 +39,9 @@
 //! tracked separately as issue #730). The `Fixture` temp-file pattern below
 //! matches `rust/fslc/tests/issue_651_bmc_partial_operations.rs`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::process::Command;
@@ -83,7 +86,7 @@ impl Drop for Fixture {
 /// Runs the native CLI's `verify` and returns the parsed JSON envelope with
 /// its exit status.
 fn verify(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["verify"])
         .args(args)
         .args(["--deadlock", "ignore", "--no-cache"])
@@ -400,7 +403,7 @@ fn joint_run_completes_under_a_generous_address_space_ceiling() {
         env!("CARGO_BIN_EXE_fslc"),
         fixture.text(),
     );
-    let output = Command::new("sh")
+    let output = fslc_cli::isolate(&mut Command::new("sh"))
         .arg("-c")
         .arg(&command)
         .output()

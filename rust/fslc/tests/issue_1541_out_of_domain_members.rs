@@ -3,6 +3,9 @@
 //! Out-of-carrier values are real members, not absent grid cells.
 //! Monitor expectations and measured base verdicts are recorded beside the cases.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/collection_replay.rs"]
 mod collection_replay;
 

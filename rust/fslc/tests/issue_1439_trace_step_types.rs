@@ -6,8 +6,10 @@
 //! The sixteen detectors fail on the pre-extension implementation's false
 //! greens; five preservation controls protect valid steps and #1241 errors.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -32,7 +34,7 @@ impl Drop for Scratch {
 fn run(label: &str, source: &str, arguments: &[&str]) -> (Value, i32) {
     let scratch = Scratch::new(label);
     std::fs::write(scratch.0.join("trace.fsl"), source).expect("write inline trace fixture");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(arguments).current_dir(&scratch.0);
     let output = command.output().expect("run native fslc");
     assert!(

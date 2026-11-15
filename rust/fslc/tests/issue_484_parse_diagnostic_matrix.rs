@@ -11,8 +11,10 @@
 //! (and did) report the same unparseable file as `kind:"semantics"` with no
 //! `loc` from every command that loaded the spec through `load_kernel_model`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -36,7 +38,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn run_cli(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()
@@ -51,7 +53,7 @@ fn run_cli(arguments: &[&str]) -> (Value, i32) {
 }
 
 fn run_cli_json(arguments: &[&str]) -> Option<Value> {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(repository_root())
         .output()
@@ -197,7 +199,7 @@ fn a_valid_specification_is_never_reclassified_as_a_syntax_error() {
     // `document generate` owns a second loader (`load_document_claims`), so its
     // accepting path is pinned on a real requirements-dialect corpus file. It
     // writes the document to stdout, so only the exit code is asserted.
-    let document = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let document = fslc_cli::command()
         .args([
             "document",
             "generate",

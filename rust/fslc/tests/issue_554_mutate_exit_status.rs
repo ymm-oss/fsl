@@ -13,8 +13,10 @@
 //! The status now comes from `mutate_exit_status`, a total match over the
 //! result vocabulary a mutation run can carry.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -29,7 +31,7 @@ fn workspace_root() -> &'static Path {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(workspace_root())
         .output()

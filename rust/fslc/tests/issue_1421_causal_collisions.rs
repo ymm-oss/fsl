@@ -4,9 +4,12 @@
 //! CO1–CO3 observable publication contracts. Same-candidate reference runs are
 //! controls only: named B/H envelope and raw-byte agreement is captured separately.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -177,7 +180,7 @@ impl Fixture {
         if let Some(path) = lifecycle {
             args.extend(["--lifecycle-out", path.to_str().expect("lifecycle path")]);
         }
-        Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             .args(args)
             .current_dir(&self.root)
             .output()
