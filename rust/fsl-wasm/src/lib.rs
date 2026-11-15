@@ -9,6 +9,7 @@ use fsl_core::{
     finalize_model_warnings, model_warnings,
 };
 use fslc_rust::migration::{DependencyRecords, DependencyResolver};
+use fslc_rust::refine_run::RefineRunError;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
@@ -379,71 +380,50 @@ async fn governance_output(
                 let mapping_source = resolver
                     .read(&preservation.refinement_path)
                     .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
-                let implementation = fslc_rust::checked_build::build_checked_model(
-                    fsl_core::parse_kernel_source_with_file_with_options(
-                        &implementation_source,
-                        resolver,
-                        &preservation.after_path,
-                        options,
+                let load = |source: &str, path: &str| {
+                    fslc_rust::checked_build::build_checked_model(
+                        fsl_core::parse_kernel_source_with_file_with_options(
+                            source, resolver, path, options,
+                        )
+                        .map_err(|failure| failure.to_string())?,
                     )
-                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
-                )
-                .map_err(|failure| {
-                    governance_error(
-                        failure.into_spec_load_error().to_string(),
-                        preservation.span,
-                    )
-                })?;
-                let abstraction = fslc_rust::checked_build::build_checked_model(
-                    fsl_core::parse_kernel_source_with_file_with_options(
-                        &abstraction_source,
-                        resolver,
-                        &preservation.before_path,
-                        options,
-                    )
-                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
-                )
-                .map_err(|failure| {
-                    governance_error(
-                        failure.into_spec_load_error().to_string(),
-                        preservation.span,
-                    )
-                })?;
-                let mapping = fsl_core::parse_refinement_with_options(
-                    &mapping_source,
-                    &implementation,
-                    &abstraction,
+                    .map_err(|failure| failure.into_spec_load_error().to_string())
+                };
+                // The walk and the progress stage both at the fixed depth 8
+                // native governance passes as its refine `--depth`.
+                let run = fslc_rust::refine_run::run_refinement(
+                    || load(&implementation_source, &preservation.after_path),
+                    || load(&abstraction_source, &preservation.before_path),
+                    || Ok(mapping_source),
                     options,
+                    8,
+                    8,
+                    &mut z3js_solver,
                 )
-                .map_err(|failure| governance_error(failure.message, preservation.span))?;
-                let checked =
-                    fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 8)
-                        .map_err(|failure| {
-                            governance_error(failure.to_string(), preservation.span)
-                        })?;
+                .await
+                .map_err(|failure| {
+                    let message = match failure {
+                        RefineRunError::Implementation(message)
+                        | RefineRunError::Abstraction(message)
+                        | RefineRunError::MappingSource(message)
+                        | RefineRunError::Solver(message) => message,
+                        RefineRunError::Mapping { error, .. } => error.message,
+                        RefineRunError::Walk(error) => error.to_string(),
+                        RefineRunError::Progress(error) => error.to_string(),
+                    };
+                    governance_error(message, preservation.span)
+                })?;
                 // The same verdicts, in the same order, native governance
                 // reads off `run_refine`'s `result`: `unknown_budget` for a
                 // walk cut off by its state budget, `impl_violated` for an
                 // impl that breaks its own semantics (#1315), and no progress
                 // stage for either.
-                let outcome = fslc_rust::outcome::refine_outcome(checked.verdict());
+                let outcome = run.outcome();
                 if outcome.verdict().is_some() {
                     return Ok(json!(outcome.result()));
                 }
-                if !mapping.progress.is_empty() {
-                    let mut solver = fsl_solver_z3js::Z3JsSolver::new();
-                    let progress = fsl_verifier::check_refinement_progress(
-                        &implementation,
-                        &abstraction,
-                        &mapping,
-                        &mut solver,
-                        8,
-                    )
-                    .await
-                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
-                    if progress.violation.is_some() {
-                        return Ok(json!("refinement_failed"));
-                    }
+                if run.progress_violation().is_some() {
+                    return Ok(json!("refinement_failed"));
                 }
                 Ok(json!(outcome.result()))
             }
