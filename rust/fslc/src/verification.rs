@@ -2352,7 +2352,7 @@ pub(super) fn run_verify_cli_from_source(
     source: &str,
     options: &CliVerifyOptions,
 ) -> CommandResult {
-    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let dependencies = crate::invocation::DependencyScope::enter();
     let edition = match fslc_rust::migration::admit_source(
         source,
         &cache_identity_path.to_string_lossy(),
@@ -2428,6 +2428,7 @@ fn run_verify_cli_kernel_from_source(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let recorder = fslc_rust::migration::DependencyResolver::native(
         RecordingResolver::new(base),
+        crate::invocation::dependencies(),
         base,
         *parse_options(),
         &envelope,

@@ -820,7 +820,7 @@ fn dependency_edition_private_adapter_executes_all_assigned_rows() {
         "fsl 99\n"
     );
     assert_eq!(
-        log.borrow().warnings,
+        log.lock().warnings,
         vec![
             json!({"code":"unsupported_edition","kind":"parse","severity":"warning","message":"unsupported syntax edition 'fsl 99'; supported editions: 4, 5 at 1:1","loc":{"file":"dep.fsl","line":1,"column":1}})
         ]

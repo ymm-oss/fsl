@@ -30,6 +30,7 @@ mod cli_output;
 mod code_audit;
 mod explain_lowering;
 mod explain_readings;
+mod invocation;
 mod log_replay;
 mod name_display;
 mod output_publication;
@@ -143,7 +144,7 @@ fn parse_optional_output(
 }
 
 fn main() {
-    output_publication::record_inputs();
+    let invocation = invocation::Handoff::command();
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         z3_panic::record(info);
@@ -154,7 +155,10 @@ fn main() {
     let worker = std::thread::Builder::new()
         .stack_size(STACK_SIZE)
         .name("fslc".to_owned())
-        .spawn(run)
+        .spawn(|| {
+            let _invocation = invocation.enter();
+            run();
+        })
         .expect("spawn the fslc worker thread");
     if worker.join().is_err() {
         // The bindings unwrap the null Z3 returns when it cannot allocate a term. No limit
@@ -4205,6 +4209,10 @@ fn chain_step_groups(steps: &[(String, String)], roots: &[ProjectRoot]) -> Vec<V
 /// `fslc verify agentic_rag_design.fsl` for the same file and depth. With a
 /// thread per step, a layer reports what `fslc verify` reports (and what the
 /// verify cache holds), at any job count.
+///
+/// The step works in the chain's invocation but outside any dependency scope
+/// of this thread, so the scope its run opens is outer and delivers the step's
+/// own dependency findings.
 fn run_chain_step_isolated(
     kind: &str,
     layer: &str,
@@ -4212,11 +4220,13 @@ fn run_chain_step_isolated(
     base: &Path,
     roots: &[ProjectRoot],
 ) -> (Value, bool) {
+    let invocation = invocation::Handoff::current().outside_scope();
     std::thread::scope(|scope| {
         let step = std::thread::Builder::new()
             .stack_size(STACK_SIZE)
             .name("fslc-chain-step".to_owned())
             .spawn_scoped(scope, || {
+                let _invocation = invocation.enter();
                 #[cfg(test)]
                 let _observer = install_root_observer(roots, "step", layer);
                 run_chain_step(kind, layer, sections, base, roots)
@@ -4306,10 +4316,12 @@ fn run_chain_steps(
             Arc::clone(&cutoff),
             sender.clone(),
         );
+        let invocation = invocation::Handoff::current().outside_scope();
         std::thread::Builder::new()
             .stack_size(STACK_SIZE)
             .name(format!("fslc-chain-{worker}"))
             .spawn(move || {
+                let _invocation = invocation.enter();
                 let (steps, sections, base, roots) = &*shared;
                 while let Some(group) = groups.get(next_group.fetch_add(1, Ordering::SeqCst)) {
                     for &index in group {
@@ -12476,10 +12488,13 @@ fn run_mutate_from_source(
         None,
     );
     if status != 0 || !matches!(baseline["result"].as_str(), Some("verified" | "proved")) {
+        // Outside the root's dependency scope: the repeated reads report nothing.
+        let invocation = invocation::Handoff::current().outside_scope();
         (baseline, status) = std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .stack_size(STACK_SIZE)
                 .spawn_scoped(scope, || {
+                    let _invocation = invocation.enter();
                     run_verify_admitted_from_source(
                         path,
                         &source,
@@ -13570,7 +13585,7 @@ fn report_verification_from_source(
     options: DerivedRunOptions<'_>,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let dependencies = crate::invocation::DependencyScope::enter();
     let result = if edition.is_some() {
         run_verify_admitted_from_source(
             path,
@@ -13975,7 +13990,7 @@ fn approval_artifact(
             "ledger/html/scenarios approval requires solver generation inputs",
         )));
     };
-    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let dependencies = crate::invocation::DependencyScope::enter();
     let (mut result, status) = dependencies.finish_distinct(match kind {
         "ledger" => {
             let request = LedgerReportRequest {

@@ -711,53 +711,16 @@ impl DependencyLog {
     }
 }
 
-pub type DependencyRecords = std::rc::Rc<std::cell::RefCell<DependencyLog>>;
+/// A handle on one [`DependencyLog`] that the threads of one invocation can share.
+#[derive(Clone, Default)]
+pub struct DependencyRecords(std::sync::Arc<std::sync::Mutex<DependencyLog>>);
 
-thread_local! {
-    static DEPENDENCIES: std::cell::RefCell<Option<DependencyRecords>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Native owners borrow a nested invocation's log; only its outer owner delivers warnings.
-pub struct DependencyScope {
-    log: DependencyRecords,
-    outer: bool,
-}
-
-impl DependencyScope {
-    #[must_use]
-    pub fn enter() -> Self {
-        DEPENDENCIES.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            let outer = slot.is_none();
-            let log = slot.get_or_insert_with(DependencyRecords::default).clone();
-            Self { log, outer }
-        })
-    }
-
-    #[must_use]
-    pub fn finish(&self, result: (Value, i32), stderr: bool) -> (Value, i32) {
-        let log = self.log.borrow();
-        if let Some(refusal) = &log.refusal {
-            return refusal.clone();
-        }
-        if !self.outer {
-            return result;
-        }
-        finish_dependency_reports(&self.log, result, stderr)
-    }
-
-    /// A distinct artifact or baseline needs its own diagnostics even when nested.
-    #[must_use]
-    pub fn finish_distinct(&self, result: (Value, i32)) -> (Value, i32) {
-        self.log.borrow().finish(result)
-    }
-}
-
-impl Drop for DependencyScope {
-    fn drop(&mut self) {
-        if self.outer {
-            DEPENDENCIES.with(|slot| *slot.borrow_mut() = None);
-        }
+impl DependencyRecords {
+    /// The log. Not reentrant: release it before anything that records into it.
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, DependencyLog> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -767,7 +730,7 @@ pub fn finish_dependency_reports(
     result: (Value, i32),
     stderr: bool,
 ) -> (Value, i32) {
-    let log = log.borrow();
+    let log = log.lock();
     if stderr {
         for warning in &log.warnings {
             eprintln!("warning: {warning}");
@@ -794,9 +757,7 @@ impl<'a, R> DependencyResolver<'a, R> {
     }
 
     pub fn refusal(&self) -> Option<(Value, i32)> {
-        self.log
-            .as_ref()
-            .and_then(|log| log.borrow().refusal.clone())
+        self.log.as_ref().and_then(|log| log.lock().refusal.clone())
     }
 
     #[must_use]
@@ -816,14 +777,16 @@ impl<'a, R> DependencyResolver<'a, R> {
         }
     }
 
+    /// A resolver of paths under `base` that records into `log`, the records
+    /// of the open dependency scope, if any.
     #[must_use]
     pub fn native(
         inner: R,
+        log: Option<DependencyRecords>,
         base: &Path,
         options: ParseOptions,
         envelope: &'a dyn Fn() -> Map<String, Value>,
     ) -> Self {
-        let log = DEPENDENCIES.with(|slot| slot.borrow().clone());
         Self {
             base: Some(base.to_owned()),
             inner,
@@ -880,7 +843,7 @@ impl<R: fsl_core::FileResolver> fsl_core::FileResolver for DependencyResolver<'_
                         Some(_) => unreachable!("findings are an array"),
                     };
                     if let Some(log) = &self.log {
-                        let mut log = log.borrow_mut();
+                        let mut log = log.lock();
                         log.sources.insert(path.to_owned(), source.clone());
                         log.refusal.get_or_insert((refusal, status));
                     }
@@ -904,7 +867,7 @@ impl<R: fsl_core::FileResolver> fsl_core::FileResolver for DependencyResolver<'_
         if !findings.is_empty()
             && let Some(log) = &self.log
         {
-            let mut log = log.borrow_mut();
+            let mut log = log.lock();
             log.sources.insert(path.to_owned(), source.clone());
             for finding in findings {
                 let mut identity = finding.clone();
