@@ -40,6 +40,9 @@ pub mod origin_coverage;
 // is the drift this module exists to prevent. It depends on `serde_json` only,
 // so making it unconditional adds no dependency to those crates.
 pub mod outcome;
+// The refinement sequence native `refine`/governance and the Worker's
+// governance preservations share (issue #1870), so not behind `native-cli`.
+pub mod refine_run;
 pub mod replay_trace;
 pub mod reproducer;
 pub mod requirements_solver;

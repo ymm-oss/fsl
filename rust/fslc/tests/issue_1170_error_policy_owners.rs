@@ -105,7 +105,7 @@ const PINNED: &[(&str, &str, usize)] = &[
     ("error-exit-literal", "literate_access.rs", 3),
     ("error-exit-literal", "main.rs", 170),
     ("error-exit-literal", "migration.rs", 3),
-    ("error-exit-literal", "refinement.rs", 3),
+    ("error-exit-literal", "refinement.rs", 2),
     ("error-exit-literal", "spec_loading.rs", 1),
     ("error-exit-literal", "verification.rs", 29),
     ("error-exit-literal", "verification_output.rs", 1),
