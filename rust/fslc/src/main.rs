@@ -4157,40 +4157,37 @@ type ChainStepResults = Vec<Option<(Value, bool)>>;
 
 /// Groups the non-`impl` steps into the units one worker runs in order.
 ///
-/// Two `spec` layers whose files have the same bytes can share verify-cache
-/// entries (the key is content-addressed, issue #1148, and the cross-depth
-/// pointer ignores depth). Run serially, the later one may be a cache hit on
-/// the earlier one's entry, which adds a `cache` annotation to its output; run
-/// concurrently, it would miss. Keeping such layers in one group, in manifest
-/// order, preserves the serial run's cache interaction exactly. Grouping on
-/// the root file's bytes is conservative: it covers every pair that can share
-/// a key, plus some that cannot. Refine and `impl` steps never touch the
-/// cache.
+/// A step joins the group of an earlier step it may share a verify-cache
+/// entry with, as [`verification::chain_steps_may_share_verify_cache_entry`]
+/// answers. Run serially, the later one may be a cache hit on the earlier
+/// one's entry, which adds a `cache` annotation to its output; run
+/// concurrently, it would miss. Keeping such steps in one group, in manifest
+/// order, preserves the serial run's cache interaction exactly. `[impl]` runs
+/// alone after every other step ([`run_chain_steps`]), so it is in no group.
 fn chain_step_groups(steps: &[(String, String)], roots: &[ProjectRoot]) -> Vec<Vec<usize>> {
+    let cache_view = |index: usize| {
+        let (kind, layer) = &steps[index];
+        let root = roots
+            .iter()
+            .find(|root| root.layer == layer && !root.mapping)
+            .and_then(|root| root.source.as_deref().ok());
+        (kind.as_str(), root)
+    };
     let mut groups = Vec::<Vec<usize>>::new();
-    let mut by_source = std::collections::BTreeMap::<Vec<u8>, usize>::new();
-    for (index, (kind, layer)) in steps.iter().enumerate() {
+    for (index, (kind, _)) in steps.iter().enumerate() {
         if kind == "impl" {
             continue;
         }
-        let source = (kind == "spec")
-            .then(|| {
-                roots
-                    .iter()
-                    .find(|root| root.layer == layer && !root.mapping)
+        let shared = groups.iter_mut().find(|group| {
+            group.iter().any(|&member| {
+                verification::chain_steps_may_share_verify_cache_entry(
+                    cache_view(member),
+                    cache_view(index),
+                )
             })
-            .flatten()
-            .and_then(|root| root.source.as_ref().ok())
-            .map(|source| source.as_bytes().to_vec());
-        match source {
-            Some(source) => {
-                if let Some(&group) = by_source.get(&source) {
-                    groups[group].push(index);
-                } else {
-                    by_source.insert(source, groups.len());
-                    groups.push(vec![index]);
-                }
-            }
+        });
+        match shared {
+            Some(group) => group.push(index),
             None => groups.push(vec![index]),
         }
     }
