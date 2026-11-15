@@ -278,6 +278,47 @@ fn scripted(caller: Caller, fault: Fault) -> (SolverResult<SatResult>, Result<bo
     (answer, result)
 }
 
+/// A decided answer keeps each caller's reading. The witness callers are
+/// asked only `unsat`: the stub has no model to project a `sat` trace from.
+#[test]
+fn every_scoped_query_caller_keeps_its_reading_of_sat_and_unsat() {
+    let unsat_witness = Err(VerifyError::new("witness condition became unsatisfiable"));
+    for (caller, sat, unsat) in [
+        (Caller::Probe, Some(Ok(true)), Ok(false)),
+        (Caller::ProbeNot, Some(Ok(true)), Ok(false)),
+        (Caller::Entailed, Some(Ok(false)), Ok(true)),
+        (Caller::TermsAreUnsat, Some(Ok(false)), Ok(true)),
+        (Caller::ProvenUnsat, Some(Ok(false)), Ok(true)),
+        (Caller::PartialWitness, None, Ok(false)),
+        (Caller::BuildWitness, None, unsat_witness),
+        (Caller::RankMeasurePath, Some(Ok(true)), Ok(false)),
+    ] {
+        let answers = [(SatResult::Unsat, Some(unsat))];
+        for (answer, expected) in [(SatResult::Sat, sat)].into_iter().chain(answers) {
+            let Some(expected) = expected else {
+                continue;
+            };
+            let mut solver = Stub {
+                answer: Ok(answer),
+                fail_and: false,
+                fail_assert: false,
+                fail_pop: false,
+                calls: Vec::new(),
+            };
+            assert_eq!(
+                run(caller, &mut solver),
+                expected,
+                "{caller:?} on {answer:?}"
+            );
+            assert_eq!(
+                solver.calls,
+                calls(caller, Fault::None),
+                "{caller:?} on {answer:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_scoped_query_caller_keeps_its_unknown_fold_and_pop_order() {
     for caller in CALLERS {
