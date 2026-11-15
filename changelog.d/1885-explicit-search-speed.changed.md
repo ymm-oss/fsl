@@ -8,9 +8,9 @@ longer evaluated a second time, a successor is no longer copied out of and
 back into a scratch monitor for every candidate, and the visited states and
 parent links are kept packed (one canonical byte string per state, the store
 the refinement searches use since #1247) instead of as full state copies. On
-`specs/order_system.fsl` `--engine auto` explores about 16,000 instead of
-8,100 states per second, `examples/named_predicate.fsl` about 16,700 instead
-of 12,000, and `specs/order_workflow.fsl` about 23,900 instead of 12,500; the
-default `verify specs/order_system.fsl` reports `cost.elapsed_s` 1.7 s instead
-of 2.6 s (medians of three release runs on a shared machine). No migration is
-needed.
+`specs/order_system.fsl` `--engine auto` explores about 21,200 instead of
+11,300 states per second, `examples/named_predicate.fsl` about 21,000 instead
+of 15,500, and `specs/order_workflow.fsl` about 31,500 instead of 16,300; the
+default `verify specs/order_system.fsl` reports `cost.elapsed_s` 1.44 s
+instead of 2.02 s (medians of three release runs on a shared machine). No
+migration is needed.
