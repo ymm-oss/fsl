@@ -1,0 +1,8 @@
+{
+  "name": "fsl-dafny-core-spike",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "bignumber.js": "9.1.2"
+  }
+}
