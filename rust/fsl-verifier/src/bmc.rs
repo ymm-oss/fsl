@@ -2096,7 +2096,7 @@ enum InstanceProbes<'a, T> {
 /// One action instance's guard and enabled-body definedness at `step`, in
 /// the order the errors are reported: guard partial, guard non-partial, body
 /// partial, body non-partial. `probes` decides which are asked.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn probe_instance_definedness<S: SmtSolver>(
     solver: &mut S,
     model: &KernelModel,
