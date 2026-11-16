@@ -199,10 +199,14 @@ ranking obligations as a pre-pass for every `leadsTo` that declares
 (`DESIGN-temporal.md` §2.1–2.2; `check_leadstos` in
 `rust/fsl-verifier/src/bmc.rs`) for each property the ranking discharges.
 A discharge is a position in `model.leadstos`, which the ranking and the
-lasso search both walk in order — never a property name, because `check`
-accepts two `leadsTo` blocks with the same name, and a name key would let one
-block's ranking withdraw the other block's search. That search is `B·D(D+1)(2D+1)/6` probes for `B` bindings at depth `D` — the
-cubic term — and the ranking is a constant number of checks per binding.
+lasso search both walk in order — never a property name. Although `check`
+rejects duplicate property names (#1192), a library-constructed model can
+contain them, and a name key would let one block's ranking withdraw the other
+block's search. That search is one
+combined check per binding, followed by `D(D+1)(2D+1)/6` probes for each
+binding whose combined check is not `unsat` (#1888; `DESIGN-temporal.md`
+§5) — the cubic term — and the ranking is a constant number of checks per
+binding.
 
 **What is still claimed.** For each `leadsTo` block, exactly what the full
 search claims for that block: no fair lasso counterexample with a loop inside

@@ -308,6 +308,24 @@ failure is a transition-progress failure.
     fairness_ok])` → if sat, identify (i, j, p) from the model (attach a
     selector Bool to each (i,j,p) candidate and read it from the model) and
     build the trace.
+  - The native Rust verifier (`check_leadstos` in
+    `rust/fsl-verifier/src/bmc.rs`) asks the same disjunction once per
+    leadsTo × binding (#1888) and asks nothing more when it is `unsat`. On
+    `sat` or `unknown` it does not read the model: it enumerates (i, j, p) in
+    ascending order with one push/pop probe each and reports the first `sat`
+    one, so the reported lasso, `pending_since`, `loop_start`, and witness are
+    the enumeration's. Only solver-work and timing statistics under `cost`
+    may change: `elapsed_s`, per-property `checks`/`elapsed_s`, and solver
+    statistics. Verdicts, witnesses, traces, `pending_since`, `loop_start`,
+    findings, vacuity, coverage, stderr, and exit codes must stay identical.
+    Scoped push/pop restores assertions, not Z3's query history: later
+    bindings and properties can still project witnesses. Complete differential
+    comparison is therefore required; a different valid witness is a failure
+    of this optimization's output-preservation contract.
+    The deadlock-stall probes (§2.4) keep one query
+    per pending step: they run inside the unrolling, and a combined per-step
+    query was observed to change the `reachable` witnesses projected later in
+    the same session.
   - enabled_a reuses the same `_eval_requires` conjunction as the coverage check
     (expr_cache works).
   - The deadlock stall (§2.4) is checked *inside* `_bmc_explore`, per step,

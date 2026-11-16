@@ -198,14 +198,15 @@ fn symmetry_reduction_measurably_reduces_solver_work_on_a_joint_property() {
     //
     // Verified by ablation (replacing both call sites with
     // `solver.bool_value(true)` and restoring them): on this exact spec at
-    // depth 5, Z3's solver-check count is unaffected (97 either way -- the
+    // depth 5, Z3's solver-check count is unaffected (73 either way -- the
     // lasso/stall loop *structure* never depends on symmetry), but
-    // `propagations` is 16771 with the reduction active and 34396 with it
-    // ablated (conflicts: 449 vs. 775; decisions: 767 vs. 1414). The
-    // threshold below sits roughly in the middle, with >30% headroom on
-    // both sides, so ordinary Z3-version/build noise should not flip it;
-    // only removing the constraint (or another regression of comparable
-    // size) would.
+    // `propagations` is 25003 with the reduction active and 32781 with it
+    // ablated (conflicts: 426 vs. 461; decisions: 783 vs. 799). Since #1888
+    // one combined query replaces the 55 unsat lasso probes, which narrowed
+    // the gap between active and ablated symmetry reduction.
+    // The threshold below sits in the middle, with about 13% headroom on
+    // each side; only removing the constraint (or another regression of
+    // comparable size) should flip it.
     let kernel = parse_kernel_source(SYMMETRIC_JOINT_N7, &FsResolver::new(std::env::temp_dir()))
         .expect("parse");
     let model = build_model(kernel).expect("build model");
@@ -221,9 +222,9 @@ fn symmetry_reduction_measurably_reduces_solver_work_on_a_joint_property() {
         .propagations
         .expect("native-z3 backend reports propagations");
     assert!(
-        propagations < 25_000,
+        propagations < 29_000,
         "propagations={propagations} (checks={}); expected well under the ablated-symmetry \
-         baseline of ~34396 -- symmetry reduction may not be reaching check_leadstos/\
+         baseline of ~32781 -- symmetry reduction may not be reaching check_leadstos/\
          check_leadsto_stagnation",
         statistics.solver.checks
     );

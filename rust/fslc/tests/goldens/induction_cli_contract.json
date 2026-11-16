@@ -1203,7 +1203,7 @@
             "name": "XRange"
           },
           {
-            "checks": 76,
+            "checks": 22,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo",
             "name": "ReachFive"
@@ -1342,7 +1342,7 @@
             "name": "XRange"
           },
           {
-            "checks": 76,
+            "checks": 22,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo",
             "name": "ReachFive"
@@ -1632,7 +1632,7 @@
             "name": "NonNeg"
           },
           {
-            "checks": 8,
+            "checks": 9,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo",
             "name": "Responds"
@@ -1924,7 +1924,7 @@
             "name": "initial_state"
           },
           {
-            "checks": 249,
+            "checks": 46,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo",
             "name": "Finishes"
@@ -2114,7 +2114,7 @@
             "name": "NonNeg"
           },
           {
-            "checks": 50,
+            "checks": 51,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo",
             "name": "Finishes"

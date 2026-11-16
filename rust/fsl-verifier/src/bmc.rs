@@ -2496,6 +2496,66 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
     Ok(None)
 }
 
+/// Whether one query proves that no probe of `check_leadstos`'s lasso
+/// enumeration for `binding` can answer `sat` (#1888). The query is the
+/// disjunction, over every (loop start, loop end) pair, of that pair's
+/// probes, which share the loop equality, canonical constraint, and fairness
+/// condition and differ only in the pending step. `unknown` proves nothing.
+#[allow(clippy::too_many_arguments)]
+async fn leadsto_lasso_ruled_out<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &LeadsToDef,
+    binding: &LeadstoBinding<S::Term>,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    canonical: &[S::Term],
+    depth: usize,
+) -> Result<bool, VerifyError> {
+    let mut lassos = Vec::new();
+    for loop_start in 0..depth {
+        for loop_end in (loop_start + 1)..=depth {
+            let loop_equal = states_equal(solver, model, &states[loop_start], &states[loop_end])?;
+            let fair = fairness_condition(
+                solver, model, states, choices, instances, loop_start, loop_end,
+            )?;
+            let pendings = (0..loop_end)
+                .map(|pending| {
+                    let mut terms = vec![leadsto_condition(
+                        solver,
+                        model,
+                        &property.before,
+                        &states[pending],
+                        &binding.symbolic,
+                    )?];
+                    for state in states.iter().take(loop_end).skip(loop_start.min(pending)) {
+                        terms.push(solver.not(&leadsto_condition(
+                            solver,
+                            model,
+                            &property.after,
+                            state,
+                            &binding.symbolic,
+                        )?)?);
+                    }
+                    Ok(solver.and(&terms)?)
+                })
+                .collect::<Result<Vec<_>, VerifyError>>()?;
+            lassos.push(solver.and(&[
+                loop_equal,
+                canonical[loop_start].clone(),
+                fair,
+                solver.or(&pendings)?,
+            ])?);
+        }
+    }
+    if lassos.is_empty() {
+        return Ok(true);
+    }
+    let combined = solver.or(&lassos)?;
+    proven_unsat(solver, &[combined]).await
+}
+
 /// Check whether a `within` deadline expires unmet at `states[step]`.
 ///
 /// At step `t`, the only window whose deadline lands on `t` starts at
@@ -2599,6 +2659,19 @@ async fn check_leadstos<S: SmtSolver>(
         }
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
+            // `sat` and `unknown` run the enumeration below unchanged, so a
+            // reported lasso, `pending_since`, and witness are the ones it
+            // chooses. Later bindings/properties can still project models;
+            // scoped queries restore assertions, not solver search history.
+            // Full-output differential checks must guard witness stability;
+            // only solver-work/timing statistics under `cost` may change.
+            if leadsto_lasso_ruled_out(
+                solver, model, property, &binding, states, choices, instances, &canonical, depth,
+            )
+            .await?
+            {
+                continue;
+            }
             for loop_start in 0..depth {
                 for loop_end in (loop_start + 1)..=depth {
                     let loop_equal =
