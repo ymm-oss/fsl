@@ -14635,7 +14635,8 @@ struct DerivedRunOptions<'a> {
     /// The verification stage's deadlock mode.
     deadlock_mode: &'a str,
     engine: &'a str,
-    /// The witness stage's deadlock mode.
+    /// The witness stage's deadlock mode. By decision #1871, HTML always uses
+    /// `warn`, independently of verification; ledger follows the requested mode.
     witness_deadlock_mode: &'a str,
 }
 
