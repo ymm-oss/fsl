@@ -2661,10 +2661,10 @@ async fn check_leadstos<S: SmtSolver>(
         for binding in leadsto_bindings(solver, model, property)? {
             // `sat` and `unknown` run the enumeration below unchanged, so a
             // reported lasso, `pending_since`, and witness are the ones it
-            // chooses. Skipping on `unsat` is invisible to the evidence only
-            // because everything after this search reads sat/unsat answers
-            // and projects no model (see the vacuity note in
-            // `verify_bounded_config`).
+            // chooses. Later bindings/properties can still project models;
+            // scoped queries restore assertions, not solver search history.
+            // Full-output differential checks must guard witness stability;
+            // only solver-work/timing statistics under `cost` may change.
             if leadsto_lasso_ruled_out(
                 solver, model, property, &binding, states, choices, instances, &canonical, depth,
             )
