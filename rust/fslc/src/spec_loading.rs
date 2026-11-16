@@ -332,11 +332,13 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
 }
 
 /// Scoped lowering deliberately has neither a resolver nor a root file label.
+#[derive(Clone, Copy)]
 enum KernelLowering<'a> {
     Resolved(&'a dyn fsl_core::FileResolver),
     Scoped(&'a ScopeBounds),
 }
 
+#[derive(Clone, Copy)]
 enum ModelBuild {
     Checked,
     Replay,
