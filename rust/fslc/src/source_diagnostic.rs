@@ -104,7 +104,7 @@ pub fn diagnostics_with_model(
     );
     let (mut diagnostics, mut model) =
         diagnostics_admitted(source, source_file, &admitted, *options, &edition);
-    let log = log.borrow();
+    let log = log.lock();
     if log.refusal.is_some() {
         diagnostics.clear();
         model = None;

@@ -66,7 +66,7 @@ pub(crate) fn run_prepared_roots(
     stderr_on_success: bool,
     run: impl FnOnce() -> (Value, i32),
 ) -> (Value, i32) {
-    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let dependencies = crate::invocation::DependencyScope::enter();
     let result = run();
     let stderr = stderr_on_success && raw_delivery_allowed(&result);
     let result = dependencies.finish(result, stderr);
@@ -103,6 +103,7 @@ pub(crate) fn dependency_resolver(
             files: fsl_core::FsResolver::new(base),
             base: base.to_owned(),
         },
+        crate::invocation::dependencies(),
         base,
         *crate::process::parse_options(),
         &envelope,
@@ -213,14 +214,6 @@ pub(crate) fn z3_solver() -> Result<fsl_solver_z3::Z3Solver, String> {
     fsl_solver_z3::Z3Solver::new().map_err(|error| error.to_string())
 }
 
-/// The questions of [`reject_refuted_requirements`] already asked in this
-/// process: a source, the model it was asked of, and the answer.
-type AskedRequirements = Vec<(
-    String,
-    KernelModel,
-    Option<fslc_rust::requirements_solver::Rejection>,
-)>;
-
 /// Reject `source` when the solver refutes a requirements check the
 /// finite-domain enumeration deferred (decisions/048 J3), with the diagnostic
 /// `check` reports. Every native command that loads a spec passes through
@@ -228,14 +221,14 @@ type AskedRequirements = Vec<(
 /// rejected by all of them.
 ///
 /// A command may load one spec more than once (`verify` lowers it again for
-/// the compose warnings); the answer for a source and model already asked is
-/// reused, so the solver runs once per question. Only a `fsl 5` document
-/// has such checks, so for any other document nothing is asked or kept.
+/// the compose warnings); the invocation keeps the answer for a source and
+/// model ([`crate::invocation::ask`]), so the solver runs once per question.
+/// Only a `fsl 5` document has such checks, so for any other document nothing
+/// is asked or kept.
 pub(crate) fn reject_refuted_requirements(
     source: &str,
     model: &KernelModel,
 ) -> Result<(), SpecLoadError> {
-    static ASKED: std::sync::Mutex<AskedRequirements> = std::sync::Mutex::new(Vec::new());
     let options = crate::process::parse_options();
     if !matches!(
         fsl_syntax::edition_header(source, options),
@@ -243,22 +236,14 @@ pub(crate) fn reject_refuted_requirements(
     ) {
         return Ok(());
     }
-    let mut asked = ASKED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rejection =
-        if let Some((_, _, rejection)) = asked
-            .iter()
-            .find(|(asked_source, asked_model, _)| asked_source == source && asked_model == model)
-        {
-            rejection.clone()
-        } else {
-            let rejection = crate::process::block_on_native(
-                fslc_rust::requirements_solver::refute(source, model, options, &mut z3_solver),
-            );
-            asked.push((source.to_owned(), model.clone(), rejection.clone()));
-            rejection
-        };
+    let rejection = crate::invocation::ask(source, model, || {
+        crate::process::block_on_native(fslc_rust::requirements_solver::refute(
+            source,
+            model,
+            options,
+            &mut z3_solver,
+        ))
+    });
     rejection.map_or(Ok(()), |rejection| Err(rejection.load_error()))
 }
 

@@ -243,7 +243,7 @@ async fn check_with<S: fsl_solver::SmtSolver>(
     };
     let log = fslc_rust::migration::DependencyRecords::default();
     let output = check_kernel(request, solver_version, new_solver, &edition, &log).await;
-    log.borrow().finish(edition.finish((output, 0))).0
+    log.lock().finish(edition.finish((output, 0))).0
 }
 
 async fn check_kernel<S: fsl_solver::SmtSolver>(
@@ -513,7 +513,7 @@ async fn verify_with<S: fsl_solver::SmtSolver>(
     )
     .await;
     let output = fold_governance(solver_version, output, governance);
-    log.borrow().finish(edition.finish((output, 0))).0
+    log.lock().finish(edition.finish((output, 0))).0
 }
 
 #[allow(clippy::too_many_lines)]
@@ -600,7 +600,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
     };
     *governance = governance_output(request, solver_version, log).await;
     if let Err(failure) = governance.as_ref()
-        && log.borrow().refusal.is_some()
+        && log.lock().refusal.is_some()
     {
         return fslc_rust::verification_output::render_governance_error(
             envelope(solver_version),
