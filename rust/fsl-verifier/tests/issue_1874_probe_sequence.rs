@@ -467,6 +467,23 @@ fn definedness_probe_sequences_are_unchanged() {
 /// the search's guard-undefined term lifetime changes this deadlock witness.
 #[test]
 fn search_probe_term_lifetimes_preserve_witnesses() {
+    // Base measurements (d1df480b / 0cb57b69), before #1874:
+    // Linux aarch64, this machine, bundled Z3: 15723122683289713882
+    // Linux x86_64, CI ubuntu-latest, bundled Z3: 15856676758750849773
+    // Windows x86_64, CI windows-latest, native Z3 4.16: 15856676758750849773
+    // macOS aarch64, CI macos-15, native Z3 4.16: 15856676758750849773
+    let expected = if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Some(15_723_122_683_289_713_882)
+    } else if cfg!(all(
+        any(target_os = "linux", target_os = "windows"),
+        target_arch = "x86_64"
+    )) || cfg!(all(target_os = "macos", target_arch = "aarch64"))
+    {
+        Some(15_856_676_758_750_849_773)
+    } else {
+        None
+    };
+    let mut first = None;
     for _ in 0..2 {
         // Z3's default context is thread-local. Give each run a fresh context
         // so previous runs' AST allocation history cannot select the witness.
@@ -484,9 +501,18 @@ fn search_probe_term_lifetimes_preserve_witnesses() {
         })
         .join()
         .unwrap();
-        assert_eq!(
-            digest, 15_723_122_683_289_713_882,
-            "full BMC evidence differs from base"
-        );
+        if let Some(first) = first {
+            assert_eq!(digest, first, "full BMC evidence is not deterministic");
+        }
+        first = Some(digest);
+        if let Some(expected) = expected {
+            assert_eq!(digest, expected, "full BMC evidence differs from base");
+        } else {
+            eprintln!(
+                "unmeasured platform {} {}: full BMC evidence digest {digest}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            );
+        }
     }
 }
