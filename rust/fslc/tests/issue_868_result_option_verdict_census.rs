@@ -337,6 +337,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-verifier/src/bmc.rs",
+        2100,
+        "probe_instance_definedness",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
         1215,
         "check_leadsto_stagnation",
         ResultOption
