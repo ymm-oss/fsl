@@ -196,36 +196,33 @@ fn symmetry_reduction_measurably_reduces_solver_work_on_a_joint_property() {
     // `symmetry::canonical_constraint` call sites are removed from
     // `check_leadstos`/`check_leadsto_stagnation` in bmc.rs.
     //
-    // Verified by ablation (replacing both call sites with
-    // `solver.bool_value(true)` and restoring them): on this exact spec at
-    // depth 5, Z3's solver-check count is unaffected (73 either way -- the
-    // lasso/stall loop *structure* never depends on symmetry), but
-    // `propagations` is 25003 with the reduction active and 32781 with it
-    // ablated (conflicts: 426 vs. 461; decisions: 783 vs. 799). Since #1888
-    // one combined query replaces the 55 unsat lasso probes, which narrowed
-    // the gap between active and ablated symmetry reduction.
-    // The threshold below sits in the middle, with about 13% headroom on
-    // each side; only removing the constraint (or another regression of
-    // comparable size) should flip it.
-    let kernel = parse_kernel_source(SYMMETRIC_JOINT_N7, &FsResolver::new(std::env::temp_dir()))
-        .expect("parse");
-    let model = build_model(kernel).expect("build model");
-    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
-    let result =
-        block_on(fsl_verifier::verify_bounded(&model, &mut solver, 5)).expect("verify_bounded");
-    assert!(result.violation.is_none(), "{result:?}");
-    assert!(result.leadsto_violation.is_none(), "{result:?}");
+    // Absolute propagation counts differ between bundled and native Z3.
+    // Compare fresh solvers in the same process instead: removing only the
+    // symmetric marker makes canonical_constraint return true, with the same
+    // transition relation and joint property. Require at least 10% less work;
+    // ablation of both call sites must erase that advantage and fail here.
+    fn propagations(source: &str) -> u64 {
+        let kernel =
+            parse_kernel_source(source, &FsResolver::new(std::env::temp_dir())).expect("parse");
+        let model = build_model(kernel).expect("build model");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+        let result =
+            block_on(fsl_verifier::verify_bounded(&model, &mut solver, 5)).expect("verify_bounded");
+        assert!(result.violation.is_none(), "{result:?}");
+        assert!(result.leadsto_violation.is_none(), "{result:?}");
+        fsl_solver::SmtSolver::statistics(&solver)
+            .solver
+            .propagations
+            .expect("native-z3 backend reports propagations")
+    }
 
-    let statistics = fsl_solver::SmtSolver::statistics(&solver);
-    let propagations = statistics
-        .solver
-        .propagations
-        .expect("native-z3 backend reports propagations");
+    let symmetric = propagations(SYMMETRIC_JOINT_N7);
+    let plain = propagations(&SYMMETRIC_JOINT_N7.replace("symmetric type TaskId", "type TaskId"));
+    // Keep the paired counts visible for native-backend CI calibration.
+    eprintln!("symmetry propagations: active={symmetric}, plain={plain}");
     assert!(
-        propagations < 29_000,
-        "propagations={propagations} (checks={}); expected well under the ablated-symmetry \
-         baseline of ~32781 -- symmetry reduction may not be reaching check_leadstos/\
-         check_leadsto_stagnation",
-        statistics.solver.checks
+        u128::from(symmetric) * 10 < u128::from(plain) * 9,
+        "propagations: active={symmetric}, plain={plain}; expected at least 10% reduction -- \
+         symmetry reduction may not be reaching check_leadstos/check_leadsto_stagnation"
     );
 }
