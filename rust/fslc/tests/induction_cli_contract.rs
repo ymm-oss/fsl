@@ -11,6 +11,10 @@
 //! The update path executes the same roster, cache handling, normalization,
 //! and exit capture as the ordinary comparison. Ordinary test/CI runs never
 //! write the golden. Review the complete golden diff after regeneration.
+//!
+//! #1888 changes only the pinned unranked leadsTo check counts: an unsat
+//! combined query replaces the cubic enumeration; sat/unknown adds one query
+//! before the existing ordered search. Regenerate rather than editing counts.
 
 #[path = "support/fslc_cli.rs"]
 mod fslc_cli;

@@ -10,7 +10,8 @@
 //! `docs/design/DESIGN-induction.md` §2.5 carries the soundness argument.
 //!
 //! Check counts, from `bmc.rs`'s loop structure, for one binding at depth D:
-//! stagnation `(D+1)(D+2)/2`, lasso `D(D+1)(2D+1)/6`.
+//! stagnation `(D+1)(D+2)/2`; lasso one combined check, followed by the
+//! `D(D+1)(2D+1)/6` enumeration only when that check is not `unsat` (#1888).
 
 #[path = "support/fslc_cli.rs"]
 mod fslc_cli;
@@ -73,9 +74,9 @@ fn stagnation(depth: u64) -> u64 {
     (depth + 1) * (depth + 2) / 2
 }
 
-fn lasso(depth: u64) -> u64 {
-    depth * (depth + 1) * (2 * depth + 1) / 6
-}
+/// The lasso search of a true unranked `leadsTo`: the one combined check
+/// answers `unsat` and the cubic enumeration is skipped (#1888).
+const UNRANKED_TRUE_LASSO_CHECKS: u64 = 1;
 
 /// Every envelope field except `cost` (solver counts and timings).
 fn without_cost(output: &Value) -> Value {
@@ -122,10 +123,10 @@ fn a_ranked_leadsto_drops_the_lasso_search_and_keeps_the_envelope() {
         // number of ranking checks independent of depth (`RANK_CHECKS`).
         assert_eq!(checks(&ranked, "leadsTo", "Reach"), stagnation(depth));
         assert_eq!(checks(&ranked, "leadsTo_rank", "Reach"), RANK_CHECKS);
-        // Negative control: without `decreases` the full cubic search runs.
+        // Negative control: without `decreases` the lasso search runs.
         assert_eq!(
             checks(&plain, "leadsTo", "Reach"),
-            stagnation(depth) + lasso(depth)
+            stagnation(depth) + UNRANKED_TRUE_LASSO_CHECKS
         );
         assert_eq!(checks(&plain, "leadsTo_rank", "Reach"), 0);
 
@@ -190,7 +191,7 @@ fn an_inconclusive_ranking_falls_back_to_the_full_search() {
     assert_eq!(checks(&output, "leadsTo_rank", "Reach"), RANK_CHECKS);
     assert_eq!(
         checks(&output, "leadsTo", "Reach"),
-        stagnation(8) + lasso(8)
+        stagnation(8) + UNRANKED_TRUE_LASSO_CHECKS
     );
 }
 
