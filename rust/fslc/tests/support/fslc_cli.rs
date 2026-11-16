@@ -25,6 +25,10 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Never recycle a name after Drop: Windows may still be completing deletion.
+static NEXT_CACHE_DIR: AtomicU64 = AtomicU64::new(0);
 
 struct TestCacheDir(PathBuf);
 
@@ -33,15 +37,23 @@ impl TestCacheDir {
         let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fslc-test-cache");
         std::fs::create_dir_all(&root).expect("create test cache root");
         let process = std::process::id();
-        let mut attempt = 0_u64;
-        loop {
+        for _ in 0..1024 {
+            let attempt = NEXT_CACHE_DIR.fetch_add(1, Ordering::Relaxed);
             let dir = root.join(format!("{process}-{attempt}"));
             match std::fs::create_dir(&dir) {
                 Ok(()) => return Self(dir),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => attempt += 1,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied
+                    ) => {}
                 Err(error) => panic!("create test cache dir {}: {error}", dir.display()),
             }
         }
+        panic!(
+            "could not claim test cache dir under {} after 1024 attempts",
+            root.display()
+        );
     }
 }
 
