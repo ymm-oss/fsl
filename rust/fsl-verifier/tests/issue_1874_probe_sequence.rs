@@ -3,7 +3,8 @@
 //! operations in guards, bodies and `ensures` (#1874). The expected values
 //! were recorded on `4c664d89`, before the per-instance definedness probes
 //! moved into one function; a change that adds, drops, reorders or rebuilds a
-//! query changes them.
+//! query changes them. The separate witness regression also pins evidence
+//! affected by native SMT term lifetimes even when formulas stay identical.
 use fsl_core::{FsResolver, KernelModel, build_model, parse_kernel_source};
 use fsl_solver::{
     CheckFuture, ModelValue, SatResult, SmtSolver, SolverResult, Sort, VerificationStatistics,
@@ -459,5 +460,33 @@ fn definedness_probe_sequences_are_unchanged() {
         let second = record(source, depth);
         assert_eq!(first, second, "{name}: the recording is not deterministic");
         assert_eq!(first, expected, "{name}");
+    }
+}
+
+/// Full BMC evidence from the base, rather than only query text. Shortening
+/// the search's guard-undefined term lifetime changes this deadlock witness.
+#[test]
+fn search_probe_term_lifetimes_preserve_witnesses() {
+    for _ in 0..2 {
+        // Z3's default context is thread-local. Give each run a fresh context
+        // so previous runs' AST allocation history cannot select the witness.
+        let digest = std::thread::spawn(|| {
+            let model = model(include_str!(
+                "../../../examples/gallery/adversarial/option_struct_set_seq_combo.fsl"
+            ));
+            let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
+            let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 8)).unwrap();
+            let mut digest = 0xcbf2_9ce4_8422_2325_u64;
+            for byte in format!("{result:?}").bytes() {
+                digest = (digest ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+            digest
+        })
+        .join()
+        .unwrap();
+        assert_eq!(
+            digest, 15_723_122_683_289_713_882,
+            "full BMC evidence differs from base"
+        );
     }
 }

@@ -2119,11 +2119,27 @@ async fn probe_instance_definedness<S: SmtSolver>(
         InstanceProbes::Search { .. } => true,
         InstanceProbes::DefinednessPass { .. } => has_partial_operation,
     };
+    let asks_guard_partial = asks_partial(guard_evaluation.has_partial_operation);
+    let asks_body_partial = asks_partial(body_status.has_partial_operation);
+    let is_search = matches!(probes, InstanceProbes::Search { .. });
+    let (any_undefined, range_lemmas, pass_guard_undefined, pass_body_undefined) = match probes {
+        InstanceProbes::Search { .. } => (false, &[][..], None, None),
+        InstanceProbes::DefinednessPass {
+            any_undefined,
+            range_lemmas,
+            guard_undefined,
+            body_undefined,
+        } => (
+            any_undefined,
+            range_lemmas,
+            Some(guard_undefined),
+            Some(body_undefined),
+        ),
+    };
     let action = &model.actions[instance.action_index];
     let guard_failure = guard_evaluation.first_partial;
     solver.set_query_context("partial_op", &action.name);
-    if asks_partial(guard_evaluation.has_partial_operation) && probe(solver, &guard_failure).await?
-    {
+    if asks_guard_partial && probe(solver, &guard_failure).await? {
         return Ok(Some(
             make_action_partial_operation_violation(
                 solver,
@@ -2139,21 +2155,25 @@ async fn probe_instance_definedness<S: SmtSolver>(
             .await?,
         ));
     }
-    let guard_undefined = match &probes {
-        InstanceProbes::Search { .. } => Some(solver.not(&guard_evaluation.defined)?),
-        InstanceProbes::DefinednessPass {
-            any_undefined: false,
-            ..
-        } => None,
-        InstanceProbes::DefinednessPass {
-            range_lemmas,
-            guard_undefined,
-            ..
-        } => Some(with_lemmas(solver, range_lemmas, guard_undefined.clone())?),
+    // Keep the search terms alive through the body probes, as in the original
+    // search loop. Z3 AST owner lifetimes can affect witness selection. The
+    // definedness pass instead keeps its lemma conjunctions statement-local.
+    let (_guard_undefined, guard_is_undefined) = if is_search {
+        let term = solver.not(&guard_evaluation.defined)?;
+        let answer = probe(solver, &term).await?;
+        (Some(term), answer)
+    } else {
+        (
+            None,
+            any_undefined
+                && probe(
+                    solver,
+                    &with_lemmas(solver, range_lemmas, pass_guard_undefined.unwrap())?,
+                )
+                .await?,
+        )
     };
-    if let Some(guard_undefined) = guard_undefined
-        && probe(solver, &guard_undefined).await?
-    {
+    if guard_is_undefined {
         return Err(VerifyError::new(format!(
             "action '{}' guard evaluation has a non-partial failure",
             model.action_display_name(&action.name)
@@ -2162,7 +2182,7 @@ async fn probe_instance_definedness<S: SmtSolver>(
 
     let body_failure =
         solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
-    if asks_partial(body_status.has_partial_operation) && probe(solver, &body_failure).await? {
+    if asks_body_partial && probe(solver, &body_failure).await? {
         return Ok(Some(
             make_action_partial_operation_violation(
                 solver,
@@ -2178,24 +2198,25 @@ async fn probe_instance_definedness<S: SmtSolver>(
             .await?,
         ));
     }
-    let body_undefined = match &probes {
-        InstanceProbes::Search { .. } => Some(solver.and(&[
+    let (_body_undefined, body_is_undefined) = if is_search {
+        let term = solver.and(&[
             guard_evaluation.enabled.clone(),
             solver.not(&body_status.fully_defined)?,
-        ])?),
-        InstanceProbes::DefinednessPass {
-            any_undefined: false,
-            ..
-        } => None,
-        InstanceProbes::DefinednessPass {
-            range_lemmas,
-            body_undefined,
-            ..
-        } => Some(with_lemmas(solver, range_lemmas, body_undefined.clone())?),
+        ])?;
+        let answer = probe(solver, &term).await?;
+        (Some(term), answer)
+    } else {
+        (
+            None,
+            any_undefined
+                && probe(
+                    solver,
+                    &with_lemmas(solver, range_lemmas, pass_body_undefined.unwrap())?,
+                )
+                .await?,
+        )
     };
-    if let Some(body_undefined) = body_undefined
-        && probe(solver, &body_undefined).await?
-    {
+    if body_is_undefined {
         return Err(VerifyError::new(format!(
             "action '{}' body evaluation has a non-partial failure",
             model.action_display_name(&action.name)
