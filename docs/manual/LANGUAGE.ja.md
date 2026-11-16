@@ -1913,6 +1913,9 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。
+  `fslc html` の検証セクションは `--deadlock` に従いますが、witness セクションは
+  常に `--deadlock warn` として生成します。検出された `deadlock_terminal` witness は
+  `ignore` でも表示され、`error` でも witness を生成します。
 - **意図された終端状態**(処理の完了や最終結果など、停止することが正しい状態)は
   `terminal { <predicate> }` ブロックで宣言します。述語を満たす停止状態はデッド
   ロック検査から除外され、それ以外の予期しないデッドロックは引き続き検出されます。
@@ -5996,7 +5999,11 @@ DESIGN-*.md があります)。
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
-  非専門家によるプロジェクトレビューに使うためのものです。既定では非決定的な
+  非専門家によるプロジェクトレビューに使うためのものです。検証セクションは
+  `--deadlock` に従いますが、witness セクションは常に `--deadlock warn` として
+  生成します (#1871)。そのため、`ignore` でも検出された `deadlock_terminal` witness は
+  表示され、`error` で検証がデッドロック違反を報告しても witness は生成されます。
+  既定では非決定的な
   timing を保持します。HTML 専用の `--no-timing`(既定 false、別名なし)は、
   `verification.cost.elapsed_s`、
   `verification.cost.solver.check_elapsed_s`、

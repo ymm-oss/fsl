@@ -2381,7 +2381,10 @@ additional removals in #1463.</p></div></details>
   (<code>MIN % -1</code>) is integer overflow, including in property contexts where only
   zero divisors are totalized to <code>0</code>.</li>
 <li>A deadlock warning includes which state you got stuck in (e.g. <code>deadlock reachable at
-  step 1 (state: status=ToolFault, ...)</code>). The full trace is also in the JSON <code>deadlock.trace</code>.</li>
+  step 1 (state: status=ToolFault, ...)</code>). The full trace is also in the JSON <code>deadlock.trace</code>.
+  In <code>fslc html</code>, the verification section follows <code>--deadlock</code>, but the witness
+  section is always built as if <code>--deadlock warn</code>: a detected <code>deadlock_terminal</code>
+  witness still appears with <code>ignore</code>, and witnesses are still built with <code>error</code>.</li>
 <li><strong>Intended terminal states</strong> (states where stopping is correct, such as
   processing complete or a final result) are declared in a
   <code>terminal { &lt;predicate&gt; }</code> block. Stopping states satisfying the predicate are
@@ -6825,7 +6828,11 @@ DESIGN-*.md).</p>
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and
   raw JSON. It is meant for PRs, design reviews, and non-specialist project
-  review without requiring the reader to run the CLI. By default it retains
+  review without requiring the reader to run the CLI. The verification section
+  follows <code>--deadlock</code>; the witness section is always built as if <code>--deadlock warn</code>
+  (#1871). Thus <code>ignore</code> does not hide a detected <code>deadlock_terminal</code> witness,
+  and <code>error</code> does not prevent witnesses from being built even when verification
+  reports a deadlock violation. By default it retains
   nondeterministic timings. HTML-only <code>--no-timing</code> (default false, no alias)
   omits only <code>verification.cost.elapsed_s</code>,
   <code>verification.cost.solver.check_elapsed_s</code>,

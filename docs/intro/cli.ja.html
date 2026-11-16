@@ -524,6 +524,10 @@ options:
   --depth DEPTH
   -o, --output OUTPUT
   --deadlock {warn,error,ignore}
+                        verification follows this policy; the witness section
+                        is always built as if --deadlock warn, so a detected
+                        deadlock_terminal witness appears even with ignore,
+                        and witnesses are still built with error
   --engine {bmc,induction}
                         use k-induction so a proved report can show assurance
                         class &#x27;proved&#x27;

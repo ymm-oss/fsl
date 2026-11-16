@@ -2083,6 +2083,9 @@ additional removals in #1463.
   zero divisors are totalized to `0`.
 - A deadlock warning includes which state you got stuck in (e.g. `deadlock reachable at
   step 1 (state: status=ToolFault, ...)`). The full trace is also in the JSON `deadlock.trace`.
+  In `fslc html`, the verification section follows `--deadlock`, but the witness
+  section is always built as if `--deadlock warn`: a detected `deadlock_terminal`
+  witness still appears with `ignore`, and witnesses are still built with `error`.
 - **Intended terminal states** (states where stopping is correct, such as
   processing complete or a final result) are declared in a
   `terminal { <predicate> }` block. Stopping states satisfying the predicate are
@@ -6383,7 +6386,11 @@ DESIGN-*.md).
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and
   raw JSON. It is meant for PRs, design reviews, and non-specialist project
-  review without requiring the reader to run the CLI. By default it retains
+  review without requiring the reader to run the CLI. The verification section
+  follows `--deadlock`; the witness section is always built as if `--deadlock warn`
+  (#1871). Thus `ignore` does not hide a detected `deadlock_terminal` witness,
+  and `error` does not prevent witnesses from being built even when verification
+  reports a deadlock violation. By default it retains
   nondeterministic timings. HTML-only `--no-timing` (default false, no alias)
   omits only `verification.cost.elapsed_s`,
   `verification.cost.solver.check_elapsed_s`,

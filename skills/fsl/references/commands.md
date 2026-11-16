@@ -190,6 +190,8 @@ fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html] [--deadlock warn|error|ignore] [--engine bmc|induction] [--no-timing]  # self-contained HTML review report (dev audience)
+                                                # verification follows --deadlock; witnesses always use warn (#1871):
+                                                # detected deadlock_terminal appears even with ignore; error still builds witnesses
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--deadlock warn|error|ignore] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                 [--trust-key public.pem]...
                                                         # business audit ledger by requirement id (PM/audit)
