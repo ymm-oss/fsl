@@ -2357,8 +2357,8 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     .copied()
                     .filter(|&index| !model.actions[instances[index].action_index].fair)
                     .collect::<Vec<_>>();
-                if !nonfair.is_empty() {
-                    if let Some(failure) = scoped_query(
+                if !nonfair.is_empty()
+                    && let Some(failure) = scoped_query(
                         solver,
                         [&pending],
                         PopFailure::First,
@@ -2369,8 +2369,14 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                                 return Ok(None);
                             }
                             let measure_value = model_int(solver, &measure0)?;
-                            let trace =
-                                project_trace(solver, model, &[state0.clone()], &[], &instances, 0)?;
+                            let trace = project_trace(
+                                solver,
+                                model,
+                                std::slice::from_ref(&state0),
+                                &[],
+                                &instances,
+                                0,
+                            )?;
                             Ok(Some(RankFailure {
                                     name: property.name.clone(),
                                     bindings: binding.concrete.clone(),
@@ -2397,7 +2403,6 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                             proofs,
                             failure: Some(failure),
                         });
-                    }
                 }
             }
 

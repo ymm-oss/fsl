@@ -4,6 +4,7 @@
 //! failed pop. The optional transcript is also compared against the base SHA.
 
 use std::cell::RefCell;
+use std::fmt::Write;
 use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
@@ -158,12 +159,13 @@ fn source(actions: &str, trigger: &str, helpful: &str, invariant: &str) -> Strin
     )
 }
 
-#[test]
-fn ranked_obligation_sequences_and_unknown_pop_precedence() {
+type Fixture = (&'static str, String, Option<&'static str>, usize);
+
+fn cases() -> [Fixture; 8] {
     let dec = "action dec() { requires x > 0 x = x - 1 }";
     let fair = "fair action dec() { requires x > 0 x = x - 1 }";
     let nonneg = "invariant NonNeg { x >= 0 }";
-    let cases = [
+    [
         ("proved", source(dec, "x > 0", "", nonneg), None, 3),
         (
             "negative",
@@ -222,9 +224,13 @@ fn ranked_obligation_sequences_and_unknown_pop_precedence() {
             Some("non_decreasing_helpful_action"),
             3,
         ),
-    ];
+    ]
+}
+
+#[test]
+fn ranked_obligation_sequences_and_unknown_pop_precedence() {
     let mut transcript = String::new();
-    for (name, text, expected, checks) in cases {
+    for (name, text, expected, checks) in cases() {
         let model = build_model(parse_kernel_source(&text, &FsResolver::new(".")).expect("parse"))
             .expect("model");
         for unknown_at in std::iter::once(None).chain((1..=checks).map(Some)) {
@@ -279,10 +285,12 @@ fn ranked_obligation_sequences_and_unknown_pop_precedence() {
                         checks
                     );
                 }
-                transcript.push_str(&format!(
-                    "{name} unknown={unknown_at:?} pop={fail_pop}\n{result:?}\n{:#?}\n",
+                writeln!(
+                    transcript,
+                    "{name} unknown={unknown_at:?} pop={fail_pop}\n{result:?}\n{:#?}",
                     solver.calls.borrow()
-                ));
+                )
+                .expect("write transcript");
             }
         }
     }
