@@ -269,12 +269,10 @@ fn build_refinement(
                 span,
             }),
             RefinementItem::PreserveProgress { responses, .. } => {
-                progress.extend(responses.into_iter().map(|(leads_to, actions, span)| {
-                    ProgressMap {
-                        leads_to,
-                        actions: actions.into_iter().map(ActionRef).collect(),
-                        span,
-                    }
+                progress.extend(responses.into_iter().map(|response| ProgressMap {
+                    leads_to: response.leads_to,
+                    actions: response.actions.into_iter().map(ActionRef).collect(),
+                    span: response.span,
                 }));
             }
         }

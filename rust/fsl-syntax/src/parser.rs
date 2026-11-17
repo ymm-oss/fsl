@@ -14,8 +14,8 @@ use crate::{
     BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute,
     CorrespondenceOrigin, Edition, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
     GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem,
-    ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName,
-    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, ProgressResponse,
+    QualifiedName, RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
     RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
     SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
     SurfaceRequirements, SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem,
@@ -1654,7 +1654,11 @@ impl<'a> Parser<'a> {
                     }
                     actions.push(self.expect_ident()?);
                 }
-                responses.push((name, actions, response_span));
+                responses.push(ProgressResponse {
+                    leads_to: name,
+                    actions,
+                    span: response_span,
+                });
             }
             return Ok(RefinementItem::PreserveProgress { responses, span });
         }
@@ -2840,10 +2844,19 @@ verify { values Id = 0..2 }
                 _ => None,
             })
             .expect("preserve progress");
+        let progress = refinement
+            .items
+            .iter()
+            .find(|item| matches!(item, RefinementItem::PreserveProgress { .. }))
+            .expect("preserve progress");
+        assert_eq!(
+            progress.kernel_ast_v1().to_string(),
+            r#"["preserve_progress",[["progress_respond","POL-WAIT-001",["go","stop"],{"line":2,"column":23}],["progress_respond","L",["go"],{"line":2,"column":56}]],{"line":2,"column":3}]"#
+        );
         assert_eq!(
             responses
                 .iter()
-                .map(|(name, actions, _)| (name.as_str(), actions.clone()))
+                .map(|response| (response.leads_to.as_str(), response.actions.clone()))
                 .collect::<Vec<_>>(),
             [
                 ("POL-WAIT-001", vec!["go".to_owned(), "stop".to_owned()]),
