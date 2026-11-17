@@ -31,6 +31,15 @@ const KEYWORDS = new Set([
   "None", "Wf", "Inv", "Init", "c", "st", "st2",
 ]);
 
+// Dafny keywords: a struct field or enum member may not be one (they are
+// always qualified or accessed as members, so generated names do not clash).
+const RESERVED = new Set([...KEYWORDS].filter((k) => !["Config", "State", "Option", "Some", "None", "Wf", "Inv", "Init", "c", "st", "st2"].includes(k)));
+function member(name) {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) fail(`identifier ${JSON.stringify(name)}`);
+  if (RESERVED.has(name)) fail(`identifier ${name} is a Dafny keyword`);
+  return name;
+}
+
 function ident(name) {
   if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) fail(`identifier ${JSON.stringify(name)}`);
   if (KEYWORDS.has(name)) fail(`identifier ${name} collides with a Dafny or generated name`);
@@ -61,12 +70,31 @@ export function translate(kernel, widen = []) {
   }
 
   // ---- types -------------------------------------------------------------
-  const types = new Map();
+  const types = new Map(); // domain types
+  const enums = new Map(); // name -> { name, members }
+  const structs = new Map(); // name -> { name, fields: [{ name, type }] }
+  const members = new Map(); // enum member -> enum name
   for (const t of kernel.types) {
     const d = t.definition;
-    if (d.kind !== "domain") fail(`type ${t.name}: definition kind ${d.kind}`);
-    types.set(t.name, { name: ident(t.name), lo: d.lo, hi: d.hi, widened: false });
+    if (d.kind === "domain") types.set(t.name, { name: ident(t.name), lo: d.lo, hi: d.hi, widened: false });
+    else if (d.kind === "enum") {
+      enums.set(t.name, { name: ident(t.name), members: d.members.map(member) });
+      for (const m of d.members) {
+        if (members.has(m)) fail(`enum member ${m} declared twice`);
+        members.set(m, t.name);
+      }
+    } else if (d.kind === "struct") {
+      structs.set(t.name, { name: ident(t.name), fields: d.fields.map((f) => ({ name: member(f.name), type: f.type })) });
+    } else fail(`type ${t.name}: definition kind ${d.kind}`);
   }
+  // A named type is a domain (an int range), an enum, or a struct.
+  const namedKind = (ty) => {
+    if (ty.kind !== "named") return null;
+    if (types.has(ty.name)) return "domain";
+    if (enums.has(ty.name)) return "enum";
+    if (structs.has(ty.name)) return "struct";
+    return fail(`unknown type ${ty.name}`);
+  };
   for (const w of widenedTypes(kernel, widen)) {
     const t = types.get(w);
     if (!t) fail(`--widen ${w}: no such domain type`);
@@ -97,8 +125,8 @@ export function translate(kernel, widen = []) {
   const dty = (ty) => {
     switch (ty.kind) {
       case "named":
-        domainOf(ty);
-        return "int";
+        if (namedKind(ty) === "domain") return "int";
+        return (enums.get(ty.name) ?? structs.get(ty.name)).name;
       case "int":
         return "int";
       case "bool":
@@ -117,8 +145,13 @@ export function translate(kernel, widen = []) {
   let wfVar = 0;
   const bound = (ty, e) => {
     switch (ty.kind) {
-      case "named":
-        return range(domainOf(ty), e);
+      case "named": {
+        const kind = namedKind(ty);
+        if (kind === "domain") return range(domainOf(ty), e);
+        if (kind === "enum") return "true";
+        const parts = structs.get(ty.name).fields.map((f) => bound(f.type, `${e}.${f.name}`)).filter((x) => x !== "true");
+        return parts.length ? parts.map((x) => `(${x})`).join(" && ") : "true";
+      }
       case "int":
       case "bool":
         return "true";
@@ -155,6 +188,7 @@ export function translate(kernel, widen = []) {
         if (env.has(e.name)) return env.get(e.name).dafny;
         if (consts.has(e.name)) return consts.get(e.name);
         if (stateVars.has(e.name)) return `${ctx.st}.${stateVars.get(e.name).name}`;
+        if (members.has(e.name)) return `${enums.get(members.get(e.name)).name}.${e.name}`;
         return fail(`unbound name ${e.name}`);
       }
       case "index": {
@@ -194,7 +228,26 @@ export function translate(kernel, widen = []) {
           : `(exists ${x}: int :: ${range(t, x)} && (${body}))`;
       }
       case "count":
-        return count(e, env, ctx);
+      case "sum":
+        return aggregate(e, env, ctx);
+      case "not":
+        return `!(${expr(e.operand, env, ctx)})`;
+      case "field": {
+        if (namedKind(e.value.type) !== "struct") fail(`field of ${JSON.stringify(e.value.type)}`);
+        return `${expr(e.value, env, ctx)}.${member(e.field)}`;
+      }
+      case "struct_lit": {
+        const st = structs.get(e.name) ?? fail(`struct literal of ${e.name}`);
+        const given = Object.keys(e.fields);
+        if (given.length !== st.fields.length || st.fields.some((f) => !(f.name in e.fields))) fail(`struct literal ${e.name}: fields`);
+        return `${st.name}(${st.fields.map((f) => expr(e.fields[f.name], env, ctx)).join(", ")})`;
+      }
+      case "min":
+      case "max": {
+        if (!e.arguments?.length) fail(`${e.kind} without arguments`);
+        const op = e.kind === "min" ? "<=" : ">=";
+        return e.arguments.map((a) => expr(a, env, ctx)).reduce((a, b) => `(if ${a} ${op} ${b} then ${a} else ${b})`);
+      }
       default:
         return fail(`expression kind ${e.kind}`);
     }
@@ -222,8 +275,8 @@ export function translate(kernel, widen = []) {
   // count(x: T where P) becomes a recursive helper over the range of T, closed
   // over the free variables of P. Recursion (not set cardinality) so it compiles
   // to a loop and its proofs go by induction.
-  function count(e, env, ctx) {
-    if (ctx.old) fail("count inside ensures (not in this spike)");
+  function aggregate(e, env, ctx) {
+    if (ctx.old) fail(`${e.kind} inside ensures (not in this spike)`);
     const t = domainOf({ kind: "named", name: e.domain });
     // Close over only the free variables the condition uses, renamed p0..pn,
     // so structurally equal counts share one helper.
@@ -235,31 +288,37 @@ export function translate(kernel, widen = []) {
         Object.values(x).forEach(walk);
       }
     };
-    walk(e.condition ?? fail("count without condition"));
+    if (e.kind === "count") walk(e.condition ?? fail("count without condition"));
+    else {
+      walk(e.value ?? fail("sum without a value"));
+      if (e.condition) walk(e.condition);
+    }
     const free = [...env.entries()].filter(([k]) => used.has(k));
     const env2 = new Map(free.map(([k, v], n) => [k, { dafny: `p${n}`, type: v.type }]));
     env2.set(e.binding, { dafny: "i", type: { kind: "named", name: e.domain } });
     const saved = fresh;
     fresh = 0;
-    const body = expr(e.condition, env2, { st: "st" });
+    const cond = e.condition ? expr(e.condition, env2, { st: "st" }) : null;
+    const value = e.kind === "sum" ? expr(e.value, env2, { st: "st" }) : null;
+    const body = e.kind === "count" ? cond : cond ? `(if ${cond} then ${value} else 0)` : value;
     fresh = saved;
     const hi = t.widened ? `c.N_${t.name}` : String(t.hi + 1);
     const params = free.map(([, v], n) => `, p${n}: ${dty(v.type)}`).join("");
-    const key = `${t.name}|${params}|${body}`;
+    const key = `${e.kind}|${t.name}|${params}|${body}`;
     let h = helpers.find((x) => x.key === key);
     if (!h) {
-      const name = `Count${helpers.length}`;
+      const name = `${e.kind === "count" ? "Count" : "Sum"}${helpers.length}`;
       const rec = free.map((_, n) => `, p${n}`).join("");
       h = {
         key,
         name,
         text:
-          `  function ${name}(c: Config, st: State${params}, i: int): nat\n` +
+          `  function ${name}(c: Config, st: State${params}, i: int): ${e.kind === "count" ? "nat" : "int"}\n` +
           `    requires Wf(c, st) && ${lower(t)} <= i\n` +
           `    decreases ${hi} - i\n` +
           `  {\n` +
           `    if i >= ${hi} then 0\n` +
-          `    else (if ${body} then 1 else 0) + ${name}(c, st${rec}, i + 1)\n` +
+          `    else ${e.kind === "count" ? `(if ${body} then 1 else 0)` : body} + ${name}(c, st${rec}, i + 1)\n` +
           `  }`,
       };
       helpers.push(h);
@@ -274,19 +333,20 @@ export function translate(kernel, widen = []) {
     if (s.kind === "assign" && s.target.kind === "var") {
       if (initFields.has(s.target.name)) fail(`init assigns ${s.target.name} twice`);
       initFields.set(s.target.name, expr(s.value, new Map(), { st: "INIT_HAS_NO_STATE" }));
-    } else if (s.kind === "forall" && s.statements.length === 1) {
-      const a = s.statements[0];
-      if (a.kind !== "assign" || a.target.kind !== "index")
-        fail("init forall body must be one indexed assignment");
-      if (a.target.index.kind !== "var" || a.target.index.name !== s.binder.name)
-        fail("init forall must assign at the bound index");
-      const name = a.target.name;
-      if (initFields.has(name)) fail(`init assigns ${name} twice`);
-      const t = domainOf(s.binder.type);
-      const k = `k_${fresh++}`;
-      const key = lower(t) === "0" ? k : `${k} + ${lower(t)}`;
-      const env = new Map([[s.binder.name, { dafny: `(${key})`, type: s.binder.type }]]);
-      initFields.set(name, `seq(${size(t)}, ${k} => ${expr(a.value, env, { st: "INIT_HAS_NO_STATE" })})`);
+    } else if (s.kind === "forall") {
+      // Each statement of the body assigns one map at the bound index.
+      for (const a of s.statements) {
+        if (a.kind !== "assign" || a.target.kind !== "index") fail("init forall body must be indexed assignments");
+        if (a.target.index.kind !== "var" || a.target.index.name !== s.binder.name)
+          fail("init forall must assign at the bound index");
+        const name = a.target.name;
+        if (initFields.has(name)) fail(`init assigns ${name} twice`);
+        const t = domainOf(s.binder.type);
+        const k = `k_${fresh++}`;
+        const key = lower(t) === "0" ? k : `${k} + ${lower(t)}`;
+        const env = new Map([[s.binder.name, { dafny: `(${key})`, type: s.binder.type }]]);
+        initFields.set(name, `seq(${size(t)}, ${k} => ${expr(a.value, env, { st: "INIT_HAS_NO_STATE" })})`);
+      }
     } else {
       fail(`init statement ${s.kind}`);
     }
@@ -312,12 +372,13 @@ export function translate(kernel, widen = []) {
     if (a.update_semantics !== "simultaneous") fail(`${a.name}: update semantics ${a.update_semantics}`);
     const name = ident(a.name);
     const params = a.parameters.map((p) => {
-      if (!p.type || p.type.kind !== "named") fail(`${a.name}.${p.name}: parameter type`);
-      return { fsl: p.name, dafny: ident(p.name), type: p.type, dom: domainOf(p.type) };
+      if (!p.type || p.type.kind !== "named" || namedKind(p.type) === "struct") fail(`${a.name}.${p.name}: parameter type`);
+      return { fsl: p.name, dafny: ident(p.name), type: p.type, dom: namedKind(p.type) === "domain" ? domainOf(p.type) : null };
     });
-    const sig = params.map((p) => `${p.dafny}: int`).join(", ");
+    const sig = params.map((p) => `${p.dafny}: ${dty(p.type)}`).join(", ");
     const args = params.map((p) => p.dafny).join(", ");
-    const inRange = params.map((p) => range(p.dom, p.dafny));
+    // An enum parameter is in range by its type.
+    const inRange = params.filter((p) => p.dom).map((p) => range(p.dom, p.dafny));
     let env = new Map(params.map((p) => [p.fsl, { dafny: p.dafny, type: p.type }]));
 
     // Guards in order; an `is some(x)` guard binds x for the guards after it and for the updates.
@@ -343,20 +404,48 @@ export function translate(kernel, widen = []) {
       enabled = g.bind ? `${g.cond} && (var ${g.bind[0]} := ${g.bind[1]}; ${enabled})` : `${g.cond} && ${enabled}`;
     }
 
-    const byVar = new Map();
-    for (const u of a.updates) {
-      if (u.kind !== "assign") fail(`${a.name}: update ${u.kind}`);
-      if (!["var", "index"].includes(u.target.kind)) fail(`${a.name}: update target ${u.target.kind}`);
-      const tv = u.target.name;
-      if (!stateVars.has(tv)) fail(`${a.name}: update target ${tv}`);
-      if (byVar.has(tv)) fail(`${a.name}: two updates to ${tv} (not in this spike)`);
-      const value = expr(u.value, env, { st: "st" });
-      if (u.target.kind === "var") byVar.set(tv, value);
-      else {
-        const key = offset(domainOf(stateVars.get(tv).type.key), expr(u.target.index, env, { st: "st" }));
-        byVar.set(tv, `st.${stateVars.get(tv).name}[${key} := ${value}]`);
+    // Updates are simultaneous: every right-hand side and index reads the
+    // pre-state st. Each state variable's new value is built by applying its
+    // writes in turn; fslc rejects a spec whose writes may hit one location
+    // twice on a path, so the order of distinct writes does not matter. An
+    // `if` builds both branches from the same base and joins them per variable.
+    const pre = (v) => `st.${stateVars.get(v).name}`;
+    const writes = (list, base) => {
+      const cur = new Map(base);
+      const at = (v) => cur.get(v) ?? pre(v);
+      for (const u of list) {
+        if (u.kind === "if") {
+          const c = expr(u.condition, env, { st: "st" });
+          const th = writes(u.then ?? [], cur);
+          const el = writes(u.else ?? [], cur);
+          for (const v of new Set([...th.keys(), ...el.keys()])) {
+            const t = th.get(v) ?? at(v);
+            const e = el.get(v) ?? at(v);
+            if (t !== e) cur.set(v, `(if ${c} then ${t} else ${e})`);
+          }
+          continue;
+        }
+        if (u.kind !== "assign") fail(`${a.name}: update ${u.kind}`);
+        const value = expr(u.value, env, { st: "st" });
+        let tg = u.target;
+        let field = null;
+        if (tg.kind === "field_lv") {
+          field = member(tg.field);
+          tg = tg.target;
+        }
+        if (!["var", "index"].includes(tg.kind)) fail(`${a.name}: update target ${tg.kind}`);
+        const tv = tg.name;
+        if (!stateVars.has(tv)) fail(`${a.name}: update target ${tv}`);
+        const old = at(tv);
+        if (tg.kind === "var") cur.set(tv, field ? `${old}.(${field} := ${value})` : value);
+        else {
+          const key = offset(domainOf(stateVars.get(tv).type.key), expr(tg.index, env, { st: "st" }));
+          cur.set(tv, `${old}[${key} := ${field ? `${old}[${key}].(${field} := ${value})` : value}]`);
+        }
       }
-    }
+      return cur;
+    };
+    const byVar = writes(a.updates, new Map());
     const upd = [...byVar.entries()].map(([v, x]) => `${stateVars.get(v).name} := ${x}`).join(", ");
     const lets = bindings.map(([v, x]) => `var ${v} := ${x}; `).join("");
     const apply = `${lets}st.(${upd})`;
@@ -375,6 +464,8 @@ export function translate(kernel, widen = []) {
   out.push(`// widened: ${widened.map((t) => t.name).join(", ") || "(none)"}`);
   out.push(`abstract module ${mod}Spec {`);
   out.push(`  datatype Option<T> = None | Some(value: T)`);
+  for (const e of enums.values()) out.push(`  datatype ${e.name} = ${e.members.join(" | ")}`);
+  for (const t of structs.values()) out.push(`  datatype ${t.name} = ${t.name}(${t.fields.map((f) => `${f.name}: ${dty(f.type)}`).join(", ")})`);
   out.push(`  datatype Config = Config(${widened.map((t) => `N_${t.name}: nat`).join(", ")})`);
   for (const [, d] of consts) {
     const k = kernel.constants.find((x) => x.name === d);
@@ -433,6 +524,21 @@ export function translate(kernel, widen = []) {
   const vars = [...stateVars.values()];
   out.push(`  function Mk(${vars.map((v) => `${v.name}: ${dty(v.type)}`).join(", ")}): State { State(${vars.map((v) => v.name).join(", ")}) }`);
   for (const v of vars) out.push(`  function Get_${v.name}(st: State): ${dty(v.type)} { st.${v.name} }`);
+  // The same for Config, structs and enums: Dafny's JS backend erases any
+  // datatype with exactly one field, so the wrapper never uses constructors
+  // or destructors of generated datatypes directly.
+  if (widened.length || structs.size || enums.size) {
+    out.push(`  function MkConfig(${widened.map((t) => `N_${t.name}: nat`).join(", ")}): Config { Config(${widened.map((t) => `N_${t.name}`).join(", ")}) }`);
+    for (const t of structs.values()) {
+      out.push(`  function Mk_${t.name}(${t.fields.map((f) => `${f.name}: ${dty(f.type)}`).join(", ")}): ${t.name} { ${t.name}(${t.fields.map((f) => f.name).join(", ")}) }`);
+      for (const f of t.fields) out.push(`  function Get_${t.name}_${f.name}(x: ${t.name}): ${dty(f.type)} { x.${f.name} }`);
+    }
+    for (const e of enums.values())
+      for (const m of e.members) {
+        out.push(`  function Mk_${e.name}_${m}(): ${e.name} { ${e.name}.${m} }`);
+        out.push(`  function Is_${e.name}_${m}(x: ${e.name}): bool { x.${m}? }`);
+      }
+  }
   out.push("");
   out.push(`  // Proof obligations. Bodies come from the refining proof module.`);
   out.push(`  lemma InitEstablishes(c: Config) ensures Inv(c, Init(c))`);

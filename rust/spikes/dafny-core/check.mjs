@@ -1,25 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Spike (#1908): differential check of the generated TypeScript core against
-// the fslc Monitor. It drives out/<Name>.ts — the same entry point an app
-// imports, over the compiled Dafny — so the JSON conversion is checked too.
-// Each step is judged by `fslc replay --trace` with the path that reached it:
-//   core allows it  -> the observed post-state must be `conformant`
-//   core refuses it -> the spec must answer `requires_failed` for the same step
+// fslc's concrete semantics. It drives out/<Name>.ts — the same entry point an
+// app imports, over the compiled Dafny — so the JSON conversion is checked too.
 //
 // Two modes, both at the sizes of the spec in KERNEL (default out/<Name>.kernel.json):
-//   exhaustive (default)  every reachable state x every action instance; agreement
-//                         on all of them means equal transition relations there
-//   --random <runs>       seeded random action sequences (--length, --seed), for
+//   exhaustive (default)  one `fslc conformance` call lists every state reachable
+//                         within --depth (default 64) and the outcome of every action
+//                         instance in each. The core must accept each of those states
+//                         (its Wf and Inv), allow exactly the `ok` ones with the same
+//                         post-state, and refuse the `requires_failed` ones; any other
+//                         outcome (e.g. `type_bound`) is a divergence. Agreement on all
+//                         of them from the same initial state means equal transition
+//                         relations within the depth; `closed` says the depth was not cut.
+//   --random <runs>       seeded random action sequences (--length, --seed), each step
+//                         judged by `fslc replay --trace` with the path that reached it
+//                         (allowed -> `conformant`, refused -> `requires_failed`), for
 //                         specs enlarged beyond what exhaustive search can cover
 //
 // usage: node check.mjs <Name> [--mutate drop-guard:<action>|skip-effect:<action>]
-//                              [--random <runs> --length <n> --seed <n>]
+//                              [--depth <n>] [--random <runs> --length <n> --seed <n>]
 
 import { execFile } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -32,6 +37,10 @@ const mutate = opt("--mutate");
 const randomRuns = opt("--random") === null ? null : Number(opt("--random"));
 const length = Number(opt("--length") ?? 30);
 const seed = Number(opt("--seed") ?? Date.now() % 2 ** 31);
+// --depth bounds the exhaustive search for specs whose reachable states do not
+// close (an unbounded Int counter); the report says whether it closed.
+const depth = Number(opt("--depth") ?? 64);
+let closed = true;
 const here = new URL(".", import.meta.url).pathname;
 const fslc = process.env.FSLC ?? join(here, "../../target/release/fslc");
 // KERNEL lets the same core be checked against the spec at other sizes.
@@ -67,6 +76,8 @@ if (mutate) {
 const types = new Map(kernel.types.map((t) => [t.name, t.definition]));
 const values = (tyName) => {
   const d = types.get(tyName);
+  if (d.kind === "enum") return d.members;
+  if (d.kind !== "domain") throw new Error(`parameter of type ${tyName} (${d.kind})`);
   return Array.from({ length: d.hi - d.lo + 1 }, (_, k) => d.lo + k);
 };
 const widened = (() => {
@@ -113,7 +124,7 @@ async function replay(events) {
 }
 
 const divergences = [];
-const show = (path) => path.map((e) => `${e.action}(${JSON.stringify(e.params)})`);
+const show = (path) => path.map((e) => (typeof e === "string" ? e : `${e.action}(${JSON.stringify(e.params)})`));
 // One core step. Throws nothing: an exception from the core is a divergence.
 function coreStep(state, inst, path) {
   try {
@@ -136,35 +147,93 @@ const jobs = []; // { path, event, enabled } judged by replay
 let checked = 0;
 let explored = 0;
 
-const first = await replay([]);
-if (first.result !== "conformant") divergences.push({ step: "initial", verdict: first.result, violation: first.violation });
+// The wrapper's JSON and fslc conformance's JSON differ only in options: the
+// wrapper writes a non-nested Option as null | value, conformance always as
+// { kind, value }. canon() compares with sorted keys.
+const canon = (v) =>
+  v === null || typeof v !== "object" ? JSON.stringify(v) : `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(",")}}`;
+function toConf(ty, v) {
+  switch (ty.kind) {
+    case "option": {
+      const nested = ty.item.kind === "option";
+      if (nested ? v.kind === "none" : v === null) return { kind: "none" };
+      return { kind: "some", value: toConf(ty.item, nested ? v.value : v) };
+    }
+    case "map":
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, toConf(ty.value, x)]));
+    case "named": {
+      const d = types.get(ty.name);
+      if (d.kind === "struct") return Object.fromEntries(d.fields.map((f) => [f.name, toConf(f.type, v[f.name])]));
+      return v;
+    }
+    default:
+      return v;
+  }
+}
+function fromConf(ty, v) {
+  switch (ty.kind) {
+    case "option": {
+      const nested = ty.item.kind === "option";
+      if (v.kind === "none") return nested ? { kind: "none" } : null;
+      return nested ? { kind: "some", value: fromConf(ty.item, v.value) } : fromConf(ty.item, v.value);
+    }
+    case "map":
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fromConf(ty.value, x)]));
+    case "named": {
+      const d = types.get(ty.name);
+      if (d.kind === "struct") return Object.fromEntries(d.fields.map((f) => [f.name, fromConf(f.type, v[f.name])]));
+      return v;
+    }
+    default:
+      return v;
+  }
+}
+const stateConf = (st) => Object.fromEntries(kernel.state.map((s) => [s.name, toConf(s.type, st[s.name])]));
+const stateCore = (st) => Object.fromEntries(kernel.state.map((s) => [s.name, fromConf(s.type, st[s.name])]));
 
 if (randomRuns === null) {
-  // ---- exhaustive ---------------------------------------------------------
-  const seen = new Set([JSON.stringify(initial)]);
-  const queue = [{ state: initial, path: [] }];
-  const STATE_LIMIT = 100000;
-  while (queue.length) {
-    if (seen.size > STATE_LIMIT) throw new Error(`more than ${STATE_LIMIT} reachable states at these sizes; use --random`);
-    const { state, path } = queue.shift();
-    for (const inst of instances) {
-      const r = coreStep(state, inst, path);
-      if (!r) continue;
-      const event = { action: inst.action, params: inst.params, state: r.next ?? state };
-      jobs.push({ path, event, enabled: r.next !== null });
-      // A post-state outside the bounds is already a divergence (the Monitor
-      // rejects it); do not explore from it, or a broken core can grow forever.
-      if (r.next && inBounds(r.next)) {
-        const key = JSON.stringify(r.next);
-        if (!seen.has(key)) {
-          seen.add(key);
-          queue.push({ state: r.next, path: [...path, event] });
-        }
-      }
+  // ---- exhaustive, against one `fslc conformance` call ---------------------
+  const { stdout } = await run(fslc, ["conformance", spec, "--depth", String(depth)], { maxBuffer: 1 << 30 });
+  const conf = JSON.parse(stdout);
+  const known = new Set(conf.states.map((s) => canon(s.state)));
+  const s0 = conf.states.find((s) => s.depth === 0);
+  if (canon(stateConf(initial)) !== canon(s0.state)) divergences.push({ step: "initial", core: initial, spec: s0.state });
+  const coreState = new Map();
+  for (const s of conf.states) {
+    const st = stateCore(s.state);
+    try {
+      // Every state fslc reaches satisfies the invariants it proved; the
+      // generated Wf and Inv must accept it too.
+      api.validate(sizes, st);
+      coreState.set(s.id, st);
+    } catch (err) {
+      divergences.push({ state: s.id, verdict: "core_refuses_reachable_state", spec: s.state, message: String(err.message) });
     }
   }
-  explored = seen.size;
+  for (const v of conf.vectors) {
+    const st = coreState.get(v.state);
+    if (!st) continue;
+    const inst = { action: v.action.name, params: v.action.params };
+    const r = coreStep(st, inst, [`state ${v.state}`]);
+    checked++;
+    if (!r) continue;
+    const o = v.outcome;
+    const where = { state: v.state, step: inst, spec_outcome: o.kind, core_allows: r.next !== null };
+    if (o.kind === "ok") {
+      if (r.next === null) divergences.push({ ...where, verdict: "core_refuses_allowed_step" });
+      else if (canon(stateConf(r.next)) !== canon(o.state)) divergences.push({ ...where, verdict: "post_state_differs", core: stateConf(r.next), spec: o.state });
+      else if (!known.has(canon(o.state))) closed = false;
+    } else if (o.kind === "requires_failed") {
+      if (r.next !== null) divergences.push({ ...where, verdict: "core_allows_refused_step", core: stateConf(r.next) });
+    } else {
+      // type_bound and other failures: the spec has no such transition.
+      divergences.push({ ...where, verdict: `spec_${o.kind}` });
+    }
+  }
+  explored = conf.states.length;
 } else {
+  const first = await replay([]);
+  if (first.result !== "conformant") divergences.push({ step: "initial", verdict: first.result, violation: first.violation });
   // ---- random sequences ---------------------------------------------------
   let s = seed >>> 0; // mulberry32
   const rand = () => {
@@ -175,37 +244,43 @@ if (randomRuns === null) {
     return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
   };
   const pick = (xs) => xs[Math.floor(rand() * xs.length)];
+  // One replay judges a run's whole path of allowed steps (it reports the first
+  // event that differs); refused steps need one replay each, so at most
+  // --refused-per-run of them per run are judged (default 3).
+  const refusedPerRun = Number(opt("--refused-per-run") ?? 3);
   const states = new Set([JSON.stringify(initial)]);
   for (let n = 0; n < randomRuns; n++) {
     let state = initial;
     const path = [];
+    const refused = [];
     for (let k = 0; k < length; k++) {
       const a = pick(kernel.actions);
       const inst = { action: a.name, params: Object.fromEntries(a.parameters.map((p) => [p.name, pick(values(p.type.name))])) };
       const r = coreStep(state, inst, path);
       if (!r) break;
       if (r.next === null) {
-        jobs.push({ path: [...path], event: { action: inst.action, params: inst.params, state }, enabled: false });
+        refused.push({ path: [...path], event: { action: inst.action, params: inst.params, state }, enabled: false });
         continue;
       }
-      const event = { action: inst.action, params: inst.params, state: r.next };
-      jobs.push({ path: [...path], event, enabled: true });
-      path.push(event);
+      path.push({ action: inst.action, params: inst.params, state: r.next });
       states.add(JSON.stringify(r.next));
       if (!inBounds(r.next)) break;
       state = r.next;
     }
+    if (path.length) jobs.push({ path: path.slice(0, -1), event: path[path.length - 1], enabled: true, steps: path.length });
+    for (let k = refused.length - 1, taken = 0; k >= 0 && taken < refusedPerRun; k -= Math.max(1, Math.floor(refused.length / refusedPerRun)), taken++)
+      jobs.push(refused[k]);
   }
   explored = states.size;
 }
 
 async function judge({ path, event, enabled }) {
   const r = await replay([...path, event]);
-  checked++;
+  checked += enabled ? path.length + 1 : 1;
   const ok = enabled ? r.result === "conformant" : r.result === "nonconformant" && r.violation?.kind === "requires_failed" && r.failed_at_event === path.length;
   if (!ok) divergences.push({ path: show(path), step: event, core_allows: enabled, verdict: r.result, violation: r.violation });
 }
-const pool = Array.from({ length: 8 }, async () => {
+const pool = Array.from({ length: availableParallelism() }, async () => {
   while (jobs.length) await judge(jobs.shift());
 });
 await Promise.all(pool);
@@ -217,6 +292,7 @@ const report = {
   mode: randomRuns === null ? "exhaustive" : { random: randomRuns, length, seed },
   mutation: mutate,
   [randomRuns === null ? "reachable_states" : "distinct_states"]: explored,
+  ...(randomRuns === null ? { closed, depth } : {}),
   action_instances: instances.length,
   steps_checked: checked,
   divergences: divergences.length,

@@ -51,6 +51,13 @@ for (const v of [1.5, Number.NaN, "1", 2 ** 53 + 1, null]) {
   refuses(`size ${typeof v === "string" ? JSON.stringify(v) : String(v)}`, () => init({ SeatId: v, UserId: 2 }));
 }
 refuses("a negative size", () => init({ SeatId: -1, UserId: 2 }));
+// step skips the Inv check for states it returned itself: those must be frozen,
+// and trusted only for the sizes they were made with.
+if (!Object.isFrozen(two) || !Object.isFrozen(two.seats)) {
+  console.log("FAIL  a state returned by step is not frozen");
+  bad++;
+} else console.log("ok    frozen: a state returned by step");
+refuses("a state made for other sizes", () => step({ SeatId: 5, UserId: 2 }, two, { action: "cancel", params: { s: 0 } }));
 refuses("an unknown size", () => init({ SeatId: 1, UserId: 1, Other: 1 }));
 refuses("an unknown action", () => step(sizes, s0, { action: "steal", params: {} }));
 refuses("an unknown parameter", () => step(sizes, s0, { action: "cancel", params: { s: 0, x: 1 } }));

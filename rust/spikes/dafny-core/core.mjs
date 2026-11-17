@@ -15,7 +15,8 @@
 // an app; --watch re-runs on every change to the spec or the proof file.
 //
 // usage: node core.mjs <spec.fsl> [--widen T1,T2] [--proof file] [--ai [--attempts n]]
-//                      [--random runs] [--length n] [--seed n] [--scale k] [--out dir] [--watch]
+//                      [--depth n] [--random runs] [--length n] [--seed n] [--scale k] [--out dir] [--watch]
+// --depth bounds the exhaustive search (for specs whose state space does not close).
 
 import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
@@ -70,7 +71,7 @@ function once() {
   if (!tsc.ok) return fail("tsc out/" + name + ".ts", tsc);
 
   // 4a: exhaustive differential at the spec's own sizes.
-  const ex = sh("exhaustive", "node", ["check.mjs", name]);
+  const ex = sh("exhaustive", "node", ["check.mjs", name, ...(opt("--depth", null) ? ["--depth", opt("--depth")] : [])]);
   if (!ex.ok) return fail("differential (exhaustive, spec sizes)", ex);
   const exr = JSON.parse(ex.out);
 
@@ -109,7 +110,7 @@ function once() {
       proved_for_every_size_of: widened,
       proof,
       core: outDir ? join(outDir, `${name}.ts`) : `out/${name}.ts`,
-      exhaustive: { sizes: exr.sizes, reachable_states: exr.reachable_states, steps_checked: exr.steps_checked, divergences: exr.divergences },
+      exhaustive: { sizes: exr.sizes, reachable_states: exr.reachable_states, closed: exr.closed, depth: exr.depth, steps_checked: exr.steps_checked, divergences: exr.divergences },
       random: { sizes: rnr.sizes, seed: Number(seed), runs: Number(random), length: Number(length), steps_checked: rnr.steps_checked, divergences: rnr.divergences },
     }),
   );

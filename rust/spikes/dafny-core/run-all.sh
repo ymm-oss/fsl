@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 status=0
 expect() { # expect <0|nonzero> <label> <command...>
   local want=$1 label=$2; shift 2
-  "$@" > "out/last.log" 2>&1
+  "$@" < /dev/null > "out/last.log" 2>&1
   local got=$?
   if { [ "$want" = 0 ] && [ $got -eq 0 ]; } || { [ "$want" != 0 ] && [ $got -ne 0 ]; }; then
     echo "ok    $label (exit $got)"
@@ -24,6 +24,22 @@ mkdir -p out/neg
 expect 0 "core.mjs seat_booking" node core.mjs ../../../specs/seat_booking.fsl --widen SeatId,UserId --seed 1
 expect 0 "core.mjs cart_v1" node core.mjs ../../../specs/cart_v1.fsl --widen UserId,ItemId --seed 1
 expect 0 "core.mjs fixtures/task_board (symmetric)" node core.mjs fixtures/task_board.fsl --seed 1
+# Enums, structs, field updates, if, sum, min; proofs written by the model through
+# prove.mjs. Specs whose counters are unbounded are searched to depth 8.
+while read -r f args; do
+  # shellcheck disable=SC2086
+  expect 0 "core.mjs $f $args" node core.mjs "../../../specs/$f.fsl" --seed 1 $args
+done <<'SPECS'
+repair_loop
+rate_limiter --depth 8
+bank --depth 8
+bank_impl --depth 8
+auth_lockout --widen UserId
+cart_impl --widen UserId,ItemId
+seat_booking_impl --widen SeatId,UserId
+inventory_reservation --widen ResId,ItemId
+payment --widen PayId
+SPECS
 expect 0 "tsc: generated cores and the example type-check" node_modules/.bin/tsc -p .
 expect 0 "example/seat-booking.ts runs on the generated core" node example/seat-booking.ts
 
@@ -37,7 +53,13 @@ expect 1 "wrapper control rejects a wrapper without the Inv check" env WRAPPER="
 sed 's/if (typeof v !== "number" || !Number.isSafeInteger(v)) throw/if (false) throw/' out/SeatBooking.ts > out/SeatBooking.no-int.ts
 if cmp -s out/SeatBooking.ts out/SeatBooking.no-int.ts; then echo "FAIL  no-int mutant did not apply"; status=1; fi
 expect 1 "wrapper control rejects a wrapper without the integer check" env WRAPPER="$PWD/out/SeatBooking.no-int.ts" node controls/wrapper-inputs.ts
-rm -f out/SeatBooking.no-inv.ts out/SeatBooking.no-int.ts
+sed 's/if (t \&\& t.key === sizesKey(sizes)) return t.st;/if (t) return t.st;/' out/SeatBooking.ts > out/SeatBooking.no-key.ts
+if cmp -s out/SeatBooking.ts out/SeatBooking.no-key.ts; then echo "FAIL  no-key mutant did not apply"; status=1; fi
+expect 1 "wrapper control rejects a wrapper that trusts a state for other sizes" env WRAPPER="$PWD/out/SeatBooking.no-key.ts" node controls/wrapper-inputs.ts
+sed 's/    Object.freeze(v);//' out/SeatBooking.ts > out/SeatBooking.no-freeze.ts
+if cmp -s out/SeatBooking.ts out/SeatBooking.no-freeze.ts; then echo "FAIL  no-freeze mutant did not apply"; status=1; fi
+expect 1 "wrapper control rejects a wrapper that does not freeze trusted states" env WRAPPER="$PWD/out/SeatBooking.no-freeze.ts" node controls/wrapper-inputs.ts
+rm -f out/SeatBooking.no-inv.ts out/SeatBooking.no-int.ts out/SeatBooking.no-key.ts out/SeatBooking.no-freeze.ts
 
 # Invariant bodies are outside the step differential; controls/invariant-states.ts
 # checks their translation on hand-classified TaskBoard states, and must reject a
@@ -62,6 +84,31 @@ inv_mutant "DoneIsFree is true" '/predicate Inv_DoneIsFree/{n;s/.*/    true/;}'
 inv_mutant "DoneIsFree uses and for =>" '/predicate Inv_DoneIsFree/{n;s/(st.done\[t_2\] ==> /(st.done[t_2] \&\& /;}'
 inv_mutant "DoneIsFree reverses =>" '/predicate Inv_DoneIsFree/{n;s/(st.done\[t_2\] ==> (st.owner\[t_2\] == None))/((st.owner[t_2] == None) ==> st.done[t_2])/;}'
 inv_mutant "WipLimit is true" '/predicate Inv_WipLimit/{n;s/.*/    true/;}'
+
+# Translator-shaped mutants of the newer constructs (if, enum, min, sum): the
+# generated Dafny is altered, compiled without verification, and the exhaustive
+# differential must reject the core.
+gen_mutant() { # gen_mutant <Name> <label> <sed expression> [check.mjs args...]
+  local n=$1 label=$2 expr=$3; shift 3
+  local d="out/neg/gen-$n-${label// /-}"
+  rm -rf "$d" && mkdir -p "$d/out" "$d/proofs"
+  sed "$expr" "out/$n.gen.dfy" > "$d/out/$n.gen.dfy"
+  if [ ! -s "$d/out/$n.gen.dfy" ] || cmp -s "out/$n.gen.dfy" "$d/out/$n.gen.dfy"; then
+    echo "FAIL  generator mutant $n $label did not apply"; status=1; return
+  fi
+  if ! { cp "proofs/$n.proof.dfy" "$d/proofs/" &&
+         dafny translate js --no-verify --include-runtime "$d/proofs/$n.proof.dfy" -o "$d/core" > "$d/translate.log" 2>&1 &&
+         { cat "$d/core.js"; echo "module.exports = { M: ${n}Proof, _dafny, BigNumber };"; } > "$d/$n.cjs"; }; then
+    echo "FAIL  generator mutant $n $label did not build"; status=1; return
+  fi
+  expect 1 "differential rejects $n with $label" env CORE_CJS="$PWD/$d/$n.cjs" node check.mjs "$n" "$@"
+  # Rejected by a reported divergence, not by a crash.
+  if ! grep -qE '"divergences": [1-9]' out/last.log; then echo "FAIL  $n $label: no divergence reported"; status=1; fi
+}
+gen_mutant AuthLockout "the if condition changed" '/function login_fail_Apply/,/^  }/s/attempts == 2/attempts == 1/g'
+gen_mutant Payment "capture setting the wrong enum member" '/function capture_Apply/,/^  }/s/PSt\.Captured/PSt.Voided/'
+gen_mutant RateLimiter "min turned into max" 's/(if (st.tokens + REFILL) <= BURST then/(if (st.tokens + REFILL) >= BURST then/' --depth 8
+gen_mutant Payment "the ledger sum adding refunds" '/function Sum0/,/^  }/s/amount - st.payments\[i\].refunded/amount + st.payments[i].refunded/'
 
 # The random mode catches a wrong core too, at the enlarged sizes.
 expect 1 "random differential rejects SeatBooking --mutate drop-guard:book" env KERNEL="$PWD/out/big/SeatBooking.kernel.json" node check.mjs SeatBooking --random 20 --seed 1 --mutate drop-guard:book
@@ -184,6 +231,9 @@ if [ "${RUN_AI:-0}" = 1 ]; then
 else
   echo "skip  AI proof loop with a real model (RUN_AI=1 runs it with the claude CLI)"
 fi
+
+# A spec with a real bug: cart_v1's proof does not carry over to cart_v1_buggy.
+expect 1 "core.mjs refuses cart_v1_buggy (checkout can drive stock below 0)" node core.mjs ../../../specs/cart_v1_buggy.fsl --widen UserId,ItemId --seed 1
 
 # Rebuild the real cores: the cheats above went through build.sh.
 expect 0 "rebuild SeatBooking" ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId
