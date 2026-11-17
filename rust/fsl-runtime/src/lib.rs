@@ -594,14 +594,31 @@ fn eval_place(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Option<Value>, RuntimeError> {
+    if let Some(Operand::Value(value)) = borrowed_operand(expr, state, bindings, model) {
+        return Ok(Some(value.clone()));
+    }
+    eval_place_steps(expr, state, bindings, model, old_state, observed)
+}
+
+/// [`eval_place`] after [`borrowed_operand`] did not read `expr` in place.
+///
+/// An index expression that is itself a chain is read here the same way,
+/// without reading it in place first: that read already walked it as part of
+/// `expr`, and trying again at every level of a chain nested in its keys
+/// would walk the rest of the chain once per level.
+fn eval_place_steps(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
     mut observed: Option<&mut Bindings>,
 ) -> Result<Option<Value>, RuntimeError> {
     enum PlaceStep<'expr> {
         Index(&'expr Expr),
         Field(&'expr str),
-    }
-    if let Some(Operand::Value(value)) = borrowed_operand(expr, state, bindings, model) {
-        return Ok(Some(value.clone()));
     }
     let mut steps = Vec::new();
     let mut root = expr;
@@ -637,7 +654,7 @@ fn eval_place(
     for step in steps.into_iter().rev() {
         current = match step {
             PlaceStep::Index(index) => {
-                let index = eval_observing(
+                let index = eval_place_key(
                     index,
                     state,
                     bindings,
@@ -651,6 +668,34 @@ fn eval_place(
         };
     }
     Ok(Some(current.clone()))
+}
+
+/// An index expression of [`eval_place_steps`], evaluated as [`eval`] would:
+/// a chain rooted at a `Var` continues there, under the stack guard [`eval`]
+/// would have taken for it, and anything else is evaluated the general way.
+fn eval_place_key(
+    index: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    if matches!(index, Expr::Index(..) | Expr::Field(..))
+        && let Some(value) = recursion::guard(|| {
+            eval_place_steps(
+                index,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )
+        })?
+    {
+        return Ok(value);
+    }
+    eval_observing(index, state, bindings, model, old_state, observed)
 }
 
 /// An operand read in place: a value the state, the bindings or the model

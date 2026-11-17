@@ -737,6 +737,26 @@ fn eval_reads_a_deeply_nested_map_key_instead_of_overflowing_the_stack() {
     drop_nested_key(*left);
 }
 
+/// The in-place read failing deep inside the key leaves `eval` to read the
+/// chain step by step, and each step evaluates its key the same way. Here the
+/// innermost key is outside the map's domain, so every level is read that way.
+#[test]
+fn eval_reports_a_deeply_nested_missing_map_key_instead_of_overflowing_the_stack() {
+    let (model, state) = constant_map_model();
+    let mut chain = nested_key(EVALUATED_DEPTH);
+    let mut innermost = &mut chain;
+    while let fsl_core::KernelExpr::Index(_, key) = innermost {
+        innermost = key;
+    }
+    *innermost = fsl_core::KernelExpr::Num(5);
+    let error = eval_on_small_stack(&model, &state, &chain).expect_err("m[5] is outside");
+    assert!(
+        error.map_key_outside_domain,
+        "the innermost lookup fails: {error:?}"
+    );
+    drop_nested_key(chain);
+}
+
 /// `m[0] == 0`, which holds in [`constant_map_model`].
 fn true_term() -> fsl_core::KernelExpr {
     fsl_core::KernelExpr::Binary {
