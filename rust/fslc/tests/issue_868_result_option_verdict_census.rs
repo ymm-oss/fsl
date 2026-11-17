@@ -851,6 +851,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-verifier/tests/issue_1873_ranked_sequence.rs",
+        140,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fsl-verifier/tests/support/composite_vacuity_fault.rs",
         92,
         "model_eval",
@@ -972,6 +979,16 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     unresolved_ordinary!("rust/fsl-solver-z3/src/lib.rs", 239, "int_value"),
     unresolved_ordinary!("rust/fsl-solver-z3js/src/lib.rs", 186, "bool_value"),
     unresolved_ordinary!("rust/fsl-solver-z3js/src/lib.rs", 190, "int_value"),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1873_ranked_sequence.rs",
+        54,
+        "bool_value"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1873_ranked_sequence.rs",
+        57,
+        "int_value"
+    ),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 259, "add"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 247, "and"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 285, "assert"),
