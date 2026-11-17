@@ -19,6 +19,8 @@ node core.mjs <spec.fsl> [--widen T1,T2] [--name N] [--ai] [--depth n] [--livene
  check.mjs, through out/<Name>.ts:
    exhaustive at the spec's sizes                  one `fslc conformance` call: every reachable
                                                    state × every action instance (to --depth)
+ testgen.mjs                                       `fslc testgen --target vitest`, unchanged but
+                                                   for its adapter, run against out/<Name>.ts
    random at --scale × the sizes (default 4)       seeded sequences judged by `fslc replay`;
                                                    the generated Dafny must not change
  invcheck.mjs                                      the generated invariants against fslc's on
@@ -132,6 +134,16 @@ if (next) state = next;                                   // null: the spec does
     one replay per run for its allowed steps, plus up to three refused steps per run.
   - Neither mode shows that a generated `Inv` is not too weak: every reachable
     state satisfies both.
+- **testgen.mjs** runs the suite `fslc testgen --target vitest` emits for the spec
+  (its cover/reach scenarios and its random walk, with the Monitor's states baked
+  in) against `out/<Name>.ts`. Only two things are wired: `makeAdapter()` drives
+  the core, and the `vitest` import is a small runner (`testgen-runner.mjs`).
+  The suite compares only the fields its expected states name, so the check also
+  requires every step it does not mark forbidden to be taken by the core. Within
+  the spec's sizes this is a subset of the exhaustive mode; it is there because
+  #1908 names testgen traces, and it checks the suite an app would get from fslc.
+  `forbidden` scenarios exist only in the requirements and business dialects (a
+  kernel `spec` refuses them), so for the specs here that branch is unused.
 - **invcheck.mjs** does. It samples states inside the type bounds (reachable states
   with one value changed, and random ones), asks the core whether `validate`
   accepts each, and asks fslc on a copy of the spec whose `init` is that state:
@@ -140,31 +152,32 @@ if (next) state = next;                                   // null: the spec does
 
 ## Results (fslc 5.1.0 built from d1df480b, Dafny 4.11.0, Node 22.23)
 
-`./run-all.sh`: 76/76 expectations, on two runs with identical reports. All
+`./run-all.sh`: 78/78 expectations, on two runs with identical reports. All
 proofs except SeatBooking's and ShoppingCart's were written by the model through
 `prove.mjs` (`claude` 2.1.326): TaskBoard's on the third attempt (the first two
-failed on a `gen.mjs` defect), every other one on the first. Every row has 0 divergences and 0 invariant disagreements.
+failed on a `gen.mjs` defect), every other one on the first. Every row has 0 divergences and 0 invariant disagreements,
+and every row's `fslc testgen` suite passes (column "testgen").
 
-| spec | widened | constructs | Dafny | exhaustive: states, steps | random at 4× (seed 1): sizes, steps | invcheck: states (hold / break) |
-|---|---|---|---|---|---|---|
-| `seat_booking.fsl` | `SeatId`, `UserId` | count | 27 verified | 25, 225 | 12 × 8, 876 | 27 (25 / 2) |
-| `cart_v1.fsl` | `UserId`, `ItemId` | `is some` guard | 27 verified | 36, 288 | 8 × 8, 756 | 144 (144 / 0) |
-| `cart_fixed.fsl` (`--name CartFixed`) | `UserId`, `ItemId` | constant bounds | 29 verified | 36, 288 | 8 × 8, 756 | 200 (145 / 55) |
-| `fixtures/task_board.fsl` | `TaskId`, `WorkerId` (`symmetric`) | count, `=>` | 38 verified | 44, 660 | 12 × 8, 546 | 200 (44 / 156) |
-| `fixtures/batching.fsl` | – | `/`, `%` | 25 verified | 1395, 20925 (depth 8) | 1055 | 200 (63 / 137) |
-| `repair_loop.fsl` | – | enum | 58 verified | 47, 376 | 396 | 64 (56 / 8) |
-| `rate_limiter.fsl` | – | `min`, Int | 23 verified | 46, 138 (depth 8) | 1124 | 200 (128 / 72) |
-| `bank.fsl` | – | Int | 16 verified | 25, 200 (depth 8) | 1122 | 9 (7 / 2) |
-| `bank_impl.fsl` | – | Int | 23 verified | 235, 2115 (depth 8) | 926 | 200 (146 / 54) |
-| `auth_lockout.fsl` | `UserId` | struct, `if`, field updates | 39 verified | 81, 648 | 8, 790 | 200 (84 / 116) |
-| `cart_impl.fsl` | `UserId`, `ItemId` | – | 35 verified | 441, 4410 | 8 × 8, 927 | 200 (200 / 0) |
-| `seat_booking_impl.fsl` | `SeatId`, `UserId` | enum, struct | 45 verified | 123, 2214 | 12 × 8, 523 | 200 (61 / 139) |
-| `inventory_reservation.fsl` | `ResId`, `ItemId` | enum, struct, `sum` | 46 verified | 241, 8676 | 8 × 12, 404 | 200 (26 / 174) |
-| `payment.fsl` | `PayId` | enum, struct, `sum`, Int | 46 verified | 1600, 51200 | 8, 494 | 200 (25 / 175) |
-| `audit_log.fsl` | – | `Seq`, int-range `forall`, `sum` over `at` | 15 verified | 121, 484 | 350 | 200 (10 / 190) |
-| `job_pipeline.fsl` | `JobId` | `Seq`, `let` between guards, `=>` binding | 53 verified | 544, 3808 | 12, 621 | 200 (66 / 134) |
-| `order_workflow.fsl` | `OrderId` | `Set`, `if` | 45 verified | 9261, 250047 | 12, 540 | 200 (36 / 164) |
-| `mutex_queue.fsl` (`--liveness-by-fslc`) | `ProcId` | `Seq`, `leadsTo` left to fslc | 34 verified | 16, 128 | 12, 735 | 160 (16 / 144) |
+| spec | widened | constructs | Dafny | exhaustive: states, steps | random at 4× (seed 1): sizes, steps | testgen: scenarios, steps | invcheck: states (hold / break) |
+|---|---|---|---|---|---|---|---|
+| `seat_booking.fsl` | `SeatId`, `UserId` | count | 27 verified | 25, 225 | 12 × 8, 876 | 4, 105 | 27 (25 / 2) |
+| `cart_v1.fsl` | `UserId`, `ItemId` | `is some` guard | 27 verified | 36, 288 | 8 × 8, 756 | 5, 109 | 144 (144 / 0) |
+| `cart_fixed.fsl` (`--name CartFixed`) | `UserId`, `ItemId` | constant bounds | 29 verified | 36, 288 | 8 × 8, 756 | 4, 105 | 200 (145 / 55) |
+| `fixtures/task_board.fsl` | `TaskId`, `WorkerId` (`symmetric`) | count, `=>` | 38 verified | 44, 660 | 12 × 8, 546 | 6, 33 | 200 (44 / 156) |
+| `fixtures/batching.fsl` | – | `/`, `%` | 25 verified | 1395, 20925 (depth 8) | 1055 | 4, 104 | 200 (63 / 137) |
+| `repair_loop.fsl` | – | enum | 58 verified | 47, 376 | 396 | 12, 35 | 64 (56 / 8) |
+| `rate_limiter.fsl` | – | `min`, Int | 23 verified | 46, 138 (depth 8) | 1124 | 5, 110 | 200 (128 / 72) |
+| `bank.fsl` | – | Int | 16 verified | 25, 200 (depth 8) | 1122 | 4, 104 | 9 (7 / 2) |
+| `bank_impl.fsl` | – | Int | 23 verified | 235, 2115 (depth 8) | 926 | 5, 108 | 200 (146 / 54) |
+| `auth_lockout.fsl` | `UserId` | struct, `if`, field updates | 39 verified | 81, 648 | 8, 790 | 7, 116 | 200 (84 / 116) |
+| `cart_impl.fsl` | `UserId`, `ItemId` | – | 35 verified | 441, 4410 | 8 × 8, 927 | 5, 106 | 200 (200 / 0) |
+| `seat_booking_impl.fsl` | `SeatId`, `UserId` | enum, struct | 45 verified | 123, 2214 | 12 × 8, 523 | 6, 110 | 200 (61 / 139) |
+| `inventory_reservation.fsl` | `ResId`, `ItemId` | enum, struct, `sum` | 46 verified | 241, 8676 | 8 × 12, 404 | 6, 22 | 200 (26 / 174) |
+| `payment.fsl` | `PayId` | enum, struct, `sum`, Int | 46 verified | 1600, 51200 | 8, 494 | 7, 20 | 200 (25 / 175) |
+| `audit_log.fsl` | – | `Seq`, int-range `forall`, `sum` over `at` | 15 verified | 121, 484 | 350 | 4, 13 | 200 (10 / 190) |
+| `job_pipeline.fsl` | `JobId` | `Seq`, `let` between guards, `=>` binding | 53 verified | 544, 3808 | 12, 621 | 8, 37 | 200 (66 / 134) |
+| `order_workflow.fsl` | `OrderId` | `Set`, `if` | 45 verified | 9261, 250047 | 12, 540 | 7, 24 | 200 (36 / 164) |
+| `mutex_queue.fsl` (`--liveness-by-fslc`) | `ProcId` | `Seq`, `leadsTo` left to fslc | 34 verified | 16, 128 | 12, 735 | 10, 121 | 160 (16 / 144) |
 
 - `mutex_queue`'s `leadsTo WaiterGetsLock` is `verified`, `bounded` (depth 8) by
   `fslc verify`; it is not proved for every size.
@@ -188,6 +201,8 @@ The proof loop with the real model:
   goes only through generated `MkConfig`/`Mk_*`/`Get_*`/`Is_*` functions.
 
 Negative controls in `run-all.sh`, each of which must be caught:
+- testgen suite: a skipped `checkout` effect (ShoppingCart) must fail a scenario,
+  and a refused `cancel` (SeatBooking) must be reported as a step the spec allows.
 - Differential: six in-memory mutants (a guard dropped, an effect skipped), a
   dropped guard under the random mode, and generated-Dafny mutants, each of which
   must report divergences (not just exit nonzero): the stock guard of `checkout`

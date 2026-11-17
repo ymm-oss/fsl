@@ -7,7 +7,8 @@
 //      with --ai, a failing proof is rewritten by the model (prove.mjs) and re-gated
 //   3. dafny translate js -> out/<Name>.cjs; gen-ts.mjs -> out/<Name>.ts; tsc type-checks it
 //   4. differential against the fslc Monitor, through out/<Name>.ts:
-//      exhaustive at the spec's sizes, then seeded random sequences on a copy of
+//      exhaustive at the spec's sizes, fslc's testgen suite (testgen.mjs), then
+//      seeded random sequences on a copy of
 //      the spec whose widened types are --scale times larger (the generated
 //      Dafny must not change with the sizes, so the same core is what is checked),
 //      and invcheck.mjs: the generated invariants against fslc's on sampled
@@ -103,6 +104,11 @@ function once() {
   if (!ex.ok) return fail("differential (exhaustive, spec sizes)", ex);
   const exr = JSON.parse(ex.out);
 
+  // 4a': fslc's own testgen suite (scenarios and its baked random walk) against the core.
+  const tg = sh("testgen", "node", ["testgen.mjs", name, ...(opt("--depth", null) ? ["--depth", opt("--depth")] : [])]);
+  if (!tg.ok) return fail("fslc testgen suite", tg);
+  const tgr = JSON.parse(tg.out);
+
   // 4b: the spec with every widened type `scale` times larger.
   let src = readFileSync(join(here, spec), "utf8");
   const sizes = {};
@@ -161,6 +167,7 @@ function once() {
       proof,
       core: outDir ? join(outDir, `${name}.ts`) : `out/${name}.ts`,
       exhaustive: { sizes: exr.sizes, reachable_states: exr.reachable_states, closed: exr.closed, depth: exr.depth, steps_checked: exr.steps_checked, divergences: exr.divergences },
+      testgen: { scenarios: tgr.scenarios, passed: tgr.passed, steps_taken: tgr.steps_taken, failed: tgr.failed },
       random: { sizes: rnr.sizes, seed: Number(seed), runs: Number(random), length: Number(length), steps_checked: rnr.steps_checked, divergences: rnr.divergences },
       invariants: { states: ivr.states, both_hold: ivr.both_hold, both_break: ivr.both_break, disagreements: ivr.disagreements },
       ...(liveness ? { liveness_not_proved_by_dafny: liveness } : {}),

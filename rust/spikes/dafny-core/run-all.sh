@@ -154,6 +154,13 @@ for m in drop-guard:checkout skip-effect:checkout skip-effect:add_to_cart; do
   expect 1 "differential rejects ShoppingCart --mutate $m" node check.mjs ShoppingCart --mutate "$m"
 done
 
+# fslc's testgen suite, run against the core, must fail a wrong core too: a lost
+# effect (a baked expected state differs) and a refused allowed step.
+expect 1 "testgen suite rejects ShoppingCart --mutate skip-effect:checkout" node testgen.mjs ShoppingCart --mutate skip-effect:checkout
+if ! grep -qE '"failed": [1-9]' out/last.log; then echo "FAIL  testgen skip-effect: no failed scenario reported"; status=1; fi
+expect 1 "testgen suite rejects SeatBooking --mutate refuse:cancel" node testgen.mjs SeatBooking --mutate refuse:cancel
+if ! grep -q "which the spec allows" out/last.log; then echo "FAIL  testgen refuse: the refused step was not reported"; status=1; fi
+
 # A translator-shaped bug: the stock guard of checkout is lost in the generated Dafny.
 neg=out/neg/cart
 rm -rf "$neg" && mkdir -p "$neg/out" "$neg/proofs"
