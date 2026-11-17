@@ -1,1 +1,0 @@
-Unified (#PRNUM, refs #1782): represent preserve-progress responses with named `ProgressResponse` fields aligned with `ProgressMap`, preserving serialized JSON, progress checks, and diagnostic locations.
