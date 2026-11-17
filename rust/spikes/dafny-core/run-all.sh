@@ -18,10 +18,29 @@ expect() { # expect <0|nonzero> <label> <command...>
 }
 
 mkdir -p out/neg
-expect 0 "build+prove SeatBooking" ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId
-expect 0 "build+prove ShoppingCart" ./build.sh ShoppingCart ../../../specs/cart_v1.fsl UserId,ItemId
-expect 0 "differential SeatBooking" node check.mjs SeatBooking
-expect 0 "differential ShoppingCart" node check.mjs ShoppingCart
+# The one command: proof gates, JS, generated TS + tsc, exhaustive differential at the
+# spec's sizes, unchanged Dafny and seeded random differential at 4x the sizes.
+# TaskBoard declares its identity types `symmetric`, so it needs no --widen.
+expect 0 "core.mjs seat_booking" node core.mjs ../../../specs/seat_booking.fsl --widen SeatId,UserId --seed 1
+expect 0 "core.mjs cart_v1" node core.mjs ../../../specs/cart_v1.fsl --widen UserId,ItemId --seed 1
+expect 0 "core.mjs fixtures/task_board (symmetric)" node core.mjs fixtures/task_board.fsl --seed 1
+expect 0 "tsc: generated cores and the example type-check" node_modules/.bin/tsc -p .
+expect 0 "example/seat-booking.ts runs on the generated core" node example/seat-booking.ts
+
+# The generated wrapper refuses what the proof does not cover (non-integers,
+# unknown keys, states breaking Wf or Inv) ...
+expect 0 "generated wrapper refuses uncovered inputs" node controls/wrapper-inputs.ts
+# ... and the control notices when one of those checks is missing.
+sed 's|if (!fn("Inv")(c, st)) throw|if (false) throw|' out/SeatBooking.ts > out/SeatBooking.no-inv.ts
+if cmp -s out/SeatBooking.ts out/SeatBooking.no-inv.ts; then echo "FAIL  no-inv mutant did not apply"; status=1; fi
+expect 1 "wrapper control rejects a wrapper without the Inv check" env WRAPPER="$PWD/out/SeatBooking.no-inv.ts" node controls/wrapper-inputs.ts
+sed 's/if (typeof v !== "number" || !Number.isSafeInteger(v)) throw/if (false) throw/' out/SeatBooking.ts > out/SeatBooking.no-int.ts
+if cmp -s out/SeatBooking.ts out/SeatBooking.no-int.ts; then echo "FAIL  no-int mutant did not apply"; status=1; fi
+expect 1 "wrapper control rejects a wrapper without the integer check" env WRAPPER="$PWD/out/SeatBooking.no-int.ts" node controls/wrapper-inputs.ts
+rm -f out/SeatBooking.no-inv.ts out/SeatBooking.no-int.ts
+
+# The random mode catches a wrong core too, at the enlarged sizes.
+expect 1 "random differential rejects SeatBooking --mutate drop-guard:book" env KERNEL="$PWD/out/big/SeatBooking.kernel.json" node check.mjs SeatBooking --random 20 --seed 1 --mutate drop-guard:book
 
 # Negative controls: the differential check must reject a wrong core.
 for m in drop-guard:book drop-guard:cancel skip-effect:cancel; do
@@ -94,7 +113,9 @@ sed 's/  predicate Match(o: Option<int>, u: int)/  predicate Inv(c: Config, st: 
   proofs/SeatBooking.proof.dfy > "$neg/proofs/redefine.dfy"
 sed 's/  lemma cancel_Preserves(c: Config, st: State, s: int) {/  lemma cancel_Preserves(c: Config, st: State, s: int) requires false {/' \
   proofs/SeatBooking.proof.dfy > "$neg/proofs/requires.dfy"
-for cheat in standalone extra; do
+# (e) a second include that does not start its line
+{ echo 'include "../out/SeatBooking.gen.dfy"'; echo '/* */ include "../out/SeatBooking.gen.dfy"'; grep -v '^include ' proofs/SeatBooking.proof.dfy; } > "$neg/proofs/include.dfy"
+for cheat in standalone extra include; do
   expect 1 "build rejects a proof file that is $cheat" env PROOF="$neg/proofs/$cheat.dfy" ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId
 done
 for cheat in redefine requires; do
@@ -103,7 +124,7 @@ for cheat in redefine requires; do
 done
 # The core compiled from the spec at its own sizes, checked against the spec at
 # larger sizes: the generated Dafny must not change, and the Monitor must agree.
-big=out/big && mkdir -p "$big"
+big=out/plus1 && mkdir -p "$big"  # exhaustive one size up (core.mjs uses out/big for 4x random)
 sed -e 's/type SeatId = 0..2/type SeatId = 0..3/' ../../../specs/seat_booking.fsl > "$big/seat_booking.fsl"
 sed -e 's/type UserId = 0..1/type UserId = 0..2/' ../../../specs/cart_v1.fsl > "$big/cart_v1.fsl"
 for pair in SeatBooking:seat_booking:SeatId,UserId ShoppingCart:cart_v1:UserId,ItemId; do
@@ -116,7 +137,32 @@ for pair in SeatBooking:seat_booking:SeatId,UserId ShoppingCart:cart_v1:UserId,I
   grep -E '"(reachable_states|steps_checked|divergences)"' out/last.log | tr -d ' \n'; echo
 done
 
-# Rebuild the real core: the cheats above went through build.sh.
+# The proof loop, with a stand-in model (deterministic, no tokens): a reply that
+# cheats is rejected by the unchanged gates; a correct one is accepted.
+neg=out/neg/loop && rm -rf "$neg" && mkdir -p "$neg"
+rm -rf .loop && mkdir .loop
+sed 's/var st2 := book_Apply(c, st, s, u);/assume false; var st2 := book_Apply(c, st, s, u);/' proofs/SeatBooking.proof.dfy > "$neg/cheat.dfy"
+if cmp -s proofs/SeatBooking.proof.dfy "$neg/cheat.dfy"; then echo "FAIL  loop cheat did not apply"; status=1; fi
+expect 1 "proof loop rejects a model reply that assumes" env CLAUDE="node controls/fake-model.mjs" FAKE_REPLY="$neg/cheat.dfy" \
+  node prove.mjs SeatBooking ../../../specs/seat_booking.fsl --widen SeatId,UserId --proof .loop/SeatBooking.proof.dfy --attempts 2
+rm -f .loop/SeatBooking.proof.dfy
+expect 0 "proof loop accepts a correct model reply" env CLAUDE="node controls/fake-model.mjs" FAKE_REPLY="$PWD/proofs/SeatBooking.proof.dfy" \
+  node prove.mjs SeatBooking ../../../specs/seat_booking.fsl --widen SeatId,UserId --proof .loop/SeatBooking.proof.dfy --attempts 1
+rm -rf .loop
+
+# With a real model (opt-in: tokens and minutes): from no proof at all it must
+# reach one the gates accept, and on a spec with a real bug it must fail.
+if [ "${RUN_AI:-0}" = 1 ]; then
+  rm -rf .ai && mkdir .ai
+  expect 0 "AI proves SeatBooking from an empty proof" node prove.mjs SeatBooking ../../../specs/seat_booking.fsl --widen SeatId,UserId --proof .ai/SeatBooking.proof.dfy
+  expect 1 "AI cannot prove cart_v1_buggy" node prove.mjs ShoppingCart ../../../specs/cart_v1_buggy.fsl --widen UserId,ItemId --proof .ai/ShoppingCart.proof.dfy
+  rm -rf .ai
+else
+  echo "skip  AI proof loop with a real model (RUN_AI=1 runs it with the claude CLI)"
+fi
+
+# Rebuild the real cores: the cheats above went through build.sh.
 expect 0 "rebuild SeatBooking" ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId
+expect 0 "rebuild ShoppingCart" ./build.sh ShoppingCart ../../../specs/cart_v1.fsl UserId,ItemId
 
 exit $status

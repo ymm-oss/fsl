@@ -9,6 +9,8 @@
 //
 // Fails closed: any Kernel construct this spike does not translate is an error.
 //
+// Types declared `symmetric` are widened to a size parameter; --widen adds more.
+//
 // usage: node gen.mjs <kernel.json> [--widen T1,T2] > Spec.gen.dfy
 
 import { readFileSync } from "node:fs";
@@ -35,6 +37,14 @@ function ident(name) {
   return name;
 }
 
+// The types proved for every size: each `symmetric type` of the spec, plus the
+// ones named with --widen (for specs that do not mark their identity types).
+export function widenedTypes(kernel, widen = []) {
+  const names = kernel.types.filter((t) => t.symmetric).map((t) => t.name);
+  for (const w of widen) if (!names.includes(w)) names.push(w);
+  return kernel.types.map((t) => t.name).filter((n) => names.includes(n)).concat(names.filter((n) => !kernel.types.some((t) => t.name === n)));
+}
+
 export function translate(kernel, widen = []) {
   if (kernel.schema_version !== "1.0.0") fail(`kernel schema ${kernel.schema_version}`);
   const sem = kernel.semantics;
@@ -57,10 +67,10 @@ export function translate(kernel, widen = []) {
     if (d.kind !== "domain") fail(`type ${t.name}: definition kind ${d.kind}`);
     types.set(t.name, { name: ident(t.name), lo: d.lo, hi: d.hi, widened: false });
   }
-  for (const w of widen) {
+  for (const w of widenedTypes(kernel, widen)) {
     const t = types.get(w);
     if (!t) fail(`--widen ${w}: no such domain type`);
-    if (t.lo !== 0) fail(`--widen ${w}: lower bound ${t.lo} (only 0..hi widens)`);
+    if (t.lo !== 0) fail(`widen ${w}: lower bound ${t.lo} (only 0..hi widens)`);
     t.widened = true;
   }
   const widened = [...types.values()].filter((t) => t.widened);
@@ -116,7 +126,11 @@ export function translate(kernel, widen = []) {
         return `(${e}.Some? ==> (${bound(ty.item, `${e}.value`)}))`;
       case "map": {
         const k = `k${wfVar++}`;
-        return `(|${e}| == ${size(domainOf(ty.key))} && forall ${k} :: 0 <= ${k} < |${e}| ==> (${bound(ty.value, `${e}[${k}]`)}))`;
+        const inner = bound(ty.value, `${e}[${k}]`);
+        // A value type without bounds (Bool, Int) needs no quantifier, and an
+        // `==> true` one has no trigger, which Dafny warns about.
+        if (inner === "true") return `(|${e}| == ${size(domainOf(ty.key))})`;
+        return `(|${e}| == ${size(domainOf(ty.key))} && forall ${k} :: 0 <= ${k} < |${e}| ==> (${inner}))`;
       }
       default:
         return fail(`type kind ${ty.kind}`);
@@ -189,7 +203,7 @@ export function translate(kernel, widen = []) {
   const OPS = {
     "==": "==", "!=": "!=", "<": "<", "<=": "<=", ">": ">", ">=": ">=",
     "+": "+", "-": "-", "*": "*", "/": "/", "%": "%",
-    and: "&&", or: "||", implies: "==>",
+    and: "&&", or: "||", "=>": "==>",
   };
   function binary(e, env, ctx) {
     const op = OPS[e.operator];

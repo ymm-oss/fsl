@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Spike (#1908): differential check of the compiled Dafny core against the
-// fslc Monitor. At the spec's own domain sizes it walks every state reachable
-// in the JS core and tries every action instance there. Each step is judged by
-// `fslc replay --trace` with the path that reached the state:
-//   JS enabled  -> the observed post-state must be `conformant`
-//   JS disabled -> the spec must answer `requires_failed` for the same step
-// Agreement on every step from the shared initial state means the two
-// transition relations are equal at these sizes.
+// Spike (#1908): differential check of the generated TypeScript core against
+// the fslc Monitor. It drives out/<Name>.ts — the same entry point an app
+// imports, over the compiled Dafny — so the JSON conversion is checked too.
+// Each step is judged by `fslc replay --trace` with the path that reached it:
+//   core allows it  -> the observed post-state must be `conformant`
+//   core refuses it -> the spec must answer `requires_failed` for the same step
+//
+// Two modes, both at the sizes of the spec in KERNEL (default out/<Name>.kernel.json):
+//   exhaustive (default)  every reachable state x every action instance; agreement
+//                         on all of them means equal transition relations there
+//   --random <runs>       seeded random action sequences (--length, --seed), for
+//                         specs enlarged beyond what exhaustive search can cover
 //
 // usage: node check.mjs <Name> [--mutate drop-guard:<action>|skip-effect:<action>]
+//                              [--random <runs> --length <n> --seed <n>]
 
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -20,75 +25,65 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const require = createRequire(import.meta.url);
-const BigNumber = require("bignumber.js");
 
 const [name, ...rest] = process.argv.slice(2);
-const mutate = rest[rest.indexOf("--mutate") + 1] && rest.includes("--mutate") ? rest[rest.indexOf("--mutate") + 1] : null;
+const opt = (flag) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : null);
+const mutate = opt("--mutate");
+const randomRuns = opt("--random") === null ? null : Number(opt("--random"));
+const length = Number(opt("--length") ?? 30);
+const seed = Number(opt("--seed") ?? Date.now() % 2 ** 31);
 const here = new URL(".", import.meta.url).pathname;
 const fslc = process.env.FSLC ?? join(here, "../../target/release/fslc");
-// KERNEL lets the same compiled core be checked against the spec at other sizes.
+// KERNEL lets the same core be checked against the spec at other sizes.
 const kernel = JSON.parse(readFileSync(process.env.KERNEL ?? join(here, `out/${name}.kernel.json`), "utf8"));
-// build.sh runs `fslc kernel` from this directory, so the source path is relative to it.
+// Kernels are produced from this directory (build.sh, core.mjs), so the source path is relative to it.
 const spec = resolve(here, kernel.spec.source.file);
-// CORE_CJS lets a negative control load a deliberately wrong core.
-const { M } = require(process.env.CORE_CJS ?? join(here, `out/${name}.cjs`));
-const D = M.__default;
-// Dafny's JS backend doubles every underscore in an identifier.
-const fn = (dafnyName) => {
-  const f = D[dafnyName.replace(/_/g, "__")];
-  if (typeof f !== "function") throw new Error(`compiled core has no ${dafnyName}`);
-  return f;
-};
-const setFn = (dafnyName, f) => {
-  fn(dafnyName);
-  D[dafnyName.replace(/_/g, "__")] = f;
-};
+
+// CORE_CJS lets a negative control load a deliberately wrong compiled core
+// under the generated wrapper; the copy sits under out/ so bignumber.js resolves.
+let coreDir = join(here, "out");
+if (process.env.CORE_CJS) {
+  coreDir = join(here, "out", `.check-${process.pid}`);
+  mkdirSync(coreDir, { recursive: true });
+  copyFileSync(process.env.CORE_CJS, join(coreDir, `${name}.cjs`));
+  copyFileSync(join(here, "out", `${name}.ts`), join(coreDir, `${name}.ts`));
+  process.on("exit", () => rmSync(coreDir, { recursive: true, force: true }));
+}
+const api = await import(join(coreDir, `${name}.ts`));
+const core = require(join(coreDir, `${name}.cjs`)); // the instance the wrapper imported
 
 // ---- negative controls: alter the compiled core in memory -----------------
 if (mutate) {
   const [kind, action] = mutate.split(":");
-  if (kind === "drop-guard") setFn(`${action}_Enabled`, () => true);
-  else if (kind === "skip-effect") setFn(`${action}_Apply`, (c, st) => st);
+  const key = (n) => n.replace(/_/g, "__");
+  const D = core.M.__default;
+  if (typeof D[key(`${action}_Step`)] !== "function") throw new Error(`compiled core has no ${action}_Step`);
+  if (kind === "drop-guard") D[key(`${action}_Enabled`)] = () => true;
+  else if (kind === "skip-effect") D[key(`${action}_Apply`)] = (c, st) => st;
   else throw new Error(`unknown mutation ${kind}`);
 }
 
-// ---- Kernel types <-> Dafny values ----------------------------------------
+// ---- sizes and action instances of the spec in KERNEL ---------------------
 const types = new Map(kernel.types.map((t) => [t.name, t.definition]));
 const values = (tyName) => {
   const d = types.get(tyName);
   return Array.from({ length: d.hi - d.lo + 1 }, (_, k) => d.lo + k);
 };
-const config = (() => {
-  const widened = /\/\/ widened: (.*)/.exec(readFileSync(join(here, `out/${name}.gen.dfy`), "utf8"))[1];
-  const names = widened === "(none)" ? [] : widened.split(", ");
-  // Check at the spec's own sizes: the Monitor only knows those.
-  return M.Config.create_Config(...names.map((t) => new BigNumber(values(t).length)));
+const widened = (() => {
+  const w = /\/\/ widened: (.*)/.exec(readFileSync(join(here, `out/${name}.gen.dfy`), "utf8"))[1];
+  return w === "(none)" ? [] : w.split(", ");
 })();
-
-function toObs(ty, v) {
-  switch (ty.kind) {
-    case "named":
-    case "int":
-      return v.toNumber();
-    case "bool":
-      return v;
-    case "option":
-      if (v.is_None) return ty.item.kind === "option" ? { kind: "none" } : null;
-      return ty.item.kind === "option" ? { kind: "some", value: toObs(ty.item, v.dtor_value) } : toObs(ty.item, v.dtor_value);
-    case "map": {
-      const lo = types.get(ty.key.name).lo;
-      return Object.fromEntries(Array.from(v, (x, k) => [String(k + lo), toObs(ty.value, x)]));
-    }
-    default:
-      throw new Error(`type ${ty.kind}`);
-  }
-}
-const observe = (st) =>
-  Object.fromEntries(kernel.state.map((s) => [s.name, toObs(s.type, fn(`Get_${s.name}`)(st))]));
+const sizes = Object.fromEntries(widened.map((t) => [t, values(t).length]));
+const instances = kernel.actions.flatMap((a) => {
+  let tuples = [[]];
+  for (const p of a.parameters) tuples = tuples.flatMap((t) => values(p.type.name).map((v) => [...t, [p.name, v]]));
+  return tuples.map((t) => ({ action: a.name, params: Object.fromEntries(t) }));
+});
 
 // ---- replay oracle --------------------------------------------------------
 const dir = mkdtempSync(join(tmpdir(), "dafny-core-"));
 let traceNo = 0;
+const initial = api.init(sizes);
 async function replay(events) {
   const file = join(dir, `t${traceNo++}.json`);
   writeFileSync(
@@ -98,12 +93,12 @@ async function replay(events) {
       schema_version: "1.2.0",
       kernel_schema_version: "1.0.0",
       spec: kernel.spec.name,
-      initial: observe(D.Init(config)),
+      initial,
       events: events.map((e, k) => ({ tick: k + 1, ...e })),
     }),
   );
   try {
-    const { stdout } = await run(fslc, ["replay", spec, "--trace", file]);
+    const { stdout } = await run(fslc, ["replay", spec, "--trace", file], { maxBuffer: 64 << 20 });
     return JSON.parse(stdout);
   } catch (err) {
     if (err.code === 1 && err.stdout) return JSON.parse(err.stdout);
@@ -117,71 +112,111 @@ async function replay(events) {
   }
 }
 
-// ---- enumerate ------------------------------------------------------------
-const instances = kernel.actions.flatMap((a) => {
-  let tuples = [[]];
-  for (const p of a.parameters) tuples = tuples.flatMap((t) => values(p.type.name).map((v) => [...t, [p.name, v]]));
-  return tuples.map((t) => ({ action: a.name, params: Object.fromEntries(t) }));
-});
-
-const init = D.Init(config);
-const seen = new Map([[JSON.stringify(observe(init)), { st: init, path: [] }]]);
-const queue = [...seen.values()];
-const jobs = [];
 const divergences = [];
+const show = (path) => path.map((e) => `${e.action}(${JSON.stringify(e.params)})`);
+// One core step. Throws nothing: an exception from the core is a divergence.
+function coreStep(state, inst, path) {
+  try {
+    return { next: api.step(sizes, state, { action: inst.action, params: inst.params }) };
+  } catch (err) {
+    divergences.push({ path: show(path), step: inst, verdict: "core_exception", violation: { kind: err.name, message: String(err.message) } });
+    return null;
+  }
+}
+const inBounds = (state) => {
+  try {
+    api.validate(sizes, state);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const jobs = []; // { path, event, enabled } judged by replay
 let checked = 0;
+let explored = 0;
 
 const first = await replay([]);
-if (first.result !== "conformant") divergences.push({ step: "initial", verdict: first });
+if (first.result !== "conformant") divergences.push({ step: "initial", verdict: first.result, violation: first.violation });
 
-const STATE_LIMIT = 100000;
-while (queue.length) {
-  if (seen.size > STATE_LIMIT) throw new Error(`more than ${STATE_LIMIT} reachable states at the spec's sizes`);
-  const { st, path } = queue.shift();
-  for (const inst of instances) {
-    const args = Object.values(inst.params).map((v) => new BigNumber(v));
-    // Through the total Step entry point, the one a TypeScript caller uses.
-    let enabled = false;
-    let next = st;
-    try {
-      const r = fn(`${inst.action}_Step`)(config, st, ...args);
-      enabled = r.is_Some;
-      if (enabled) next = r.dtor_value;
-    } catch (err) {
-      // The core ran outside its proved precondition: a divergence, not a harness failure.
-      divergences.push({ path: path.map((e) => `${e.action}(${JSON.stringify(e.params)})`), step: inst, js_enabled: enabled, verdict: "js_exception", violation: { kind: "js_exception", message: String(err.message) } });
-      continue;
-    }
-    const event = { action: inst.action, params: inst.params, state: observe(next) };
-    jobs.push({ path, event, enabled });
-    // A post-state outside the type bounds is already a divergence (the Monitor
-    // rejects it); do not explore from it, or a broken core can grow forever.
-    if (enabled && fn("Wf")(config, next)) {
-      const key = JSON.stringify(event.state);
-      if (!seen.has(key)) {
-        const node = { st: next, path: [...path, event] };
-        seen.set(key, node);
-        queue.push(node);
+if (randomRuns === null) {
+  // ---- exhaustive ---------------------------------------------------------
+  const seen = new Set([JSON.stringify(initial)]);
+  const queue = [{ state: initial, path: [] }];
+  const STATE_LIMIT = 100000;
+  while (queue.length) {
+    if (seen.size > STATE_LIMIT) throw new Error(`more than ${STATE_LIMIT} reachable states at these sizes; use --random`);
+    const { state, path } = queue.shift();
+    for (const inst of instances) {
+      const r = coreStep(state, inst, path);
+      if (!r) continue;
+      const event = { action: inst.action, params: inst.params, state: r.next ?? state };
+      jobs.push({ path, event, enabled: r.next !== null });
+      // A post-state outside the bounds is already a divergence (the Monitor
+      // rejects it); do not explore from it, or a broken core can grow forever.
+      if (r.next && inBounds(r.next)) {
+        const key = JSON.stringify(r.next);
+        if (!seen.has(key)) {
+          seen.add(key);
+          queue.push({ state: r.next, path: [...path, event] });
+        }
       }
     }
   }
+  explored = seen.size;
+} else {
+  // ---- random sequences ---------------------------------------------------
+  let s = seed >>> 0; // mulberry32
+  const rand = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+  };
+  const pick = (xs) => xs[Math.floor(rand() * xs.length)];
+  const states = new Set([JSON.stringify(initial)]);
+  for (let n = 0; n < randomRuns; n++) {
+    let state = initial;
+    const path = [];
+    for (let k = 0; k < length; k++) {
+      const a = pick(kernel.actions);
+      const inst = { action: a.name, params: Object.fromEntries(a.parameters.map((p) => [p.name, pick(values(p.type.name))])) };
+      const r = coreStep(state, inst, path);
+      if (!r) break;
+      if (r.next === null) {
+        jobs.push({ path: [...path], event: { action: inst.action, params: inst.params, state }, enabled: false });
+        continue;
+      }
+      const event = { action: inst.action, params: inst.params, state: r.next };
+      jobs.push({ path: [...path], event, enabled: true });
+      path.push(event);
+      states.add(JSON.stringify(r.next));
+      if (!inBounds(r.next)) break;
+      state = r.next;
+    }
+  }
+  explored = states.size;
 }
 
 async function judge({ path, event, enabled }) {
   const r = await replay([...path, event]);
   checked++;
   const ok = enabled ? r.result === "conformant" : r.result === "nonconformant" && r.violation?.kind === "requires_failed" && r.failed_at_event === path.length;
-  if (!ok) divergences.push({ path: path.map((e) => `${e.action}(${JSON.stringify(e.params)})`), step: event, js_enabled: enabled, verdict: r.result, violation: r.violation });
+  if (!ok) divergences.push({ path: show(path), step: event, core_allows: enabled, verdict: r.result, violation: r.violation });
 }
 const pool = Array.from({ length: 8 }, async () => {
   while (jobs.length) await judge(jobs.shift());
 });
 await Promise.all(pool);
+rmSync(dir, { recursive: true, force: true });
 
 const report = {
   spec: kernel.spec.name,
+  sizes,
+  mode: randomRuns === null ? "exhaustive" : { random: randomRuns, length, seed },
   mutation: mutate,
-  reachable_states: seen.size,
+  [randomRuns === null ? "reachable_states" : "distinct_states"]: explored,
   action_instances: instances.length,
   steps_checked: checked,
   divergences: divergences.length,

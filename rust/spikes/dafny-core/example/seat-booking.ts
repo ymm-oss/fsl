@@ -1,70 +1,47 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Spike (#1908): how a TypeScript app uses the proved core.
-// The core is out/SeatBooking.cjs, compiled from Dafny by ../build.sh. It is
-// proved for any number of seats and users, so this example uses sizes far
+// Spike (#1908): a TypeScript app using the proved core.
+// Everything imported here is generated: out/SeatBooking.ts (by gen-ts.mjs) over
+// out/SeatBooking.cjs (compiled from the proved Dafny). This file only calls it.
+// The core is proved for any number of seats and users, so it runs at sizes far
 // beyond the spec's own (3 seats, 2 users).
 //
-// usage (after ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId):
+// usage (after ./core.mjs ../../../specs/seat_booking.fsl --widen SeatId,UserId):
 //   node example/seat-booking.ts
 
-import { createRequire } from "node:module";
+import { init, step, validate, CoreInputError, type Action, type Sizes, type State } from "../out/SeatBooking.ts";
 
-const require = createRequire(import.meta.url);
-const BigNumber = require("bignumber.js");
-const { M } = require("../out/SeatBooking.cjs");
-const D = M.__default;
+const sizes: Sizes = { SeatId: 500, UserId: 100 };
+let state: State = init(sizes);
 
-// A thin typed wrapper. The state is an opaque, immutable Dafny value; every
-// transition goes through the total <action>_Step, which returns None when the
-// action is not allowed, so the app cannot leave the proved state space.
-type DafnyState = { readonly __brand: "SeatBooking.State" };
-type SeatId = number;
-type UserId = number;
-
-class SeatBooking {
-  private readonly config: unknown;
-  private state: DafnyState;
-
-  constructor(seatCount: number, userCount: number) {
-    this.config = M.Config.create_Config(new BigNumber(seatCount), new BigNumber(userCount));
-    this.state = D.Init(this.config);
-  }
-
-  /** Returns false when the seat is taken, the user is at the cap, or an id is out of range. */
-  book(seat: SeatId, user: UserId): boolean {
-    return this.apply(D.book__Step(this.config, this.state, new BigNumber(seat), new BigNumber(user)));
-  }
-
-  /** Returns false when the seat is already free or out of range. */
-  cancel(seat: SeatId): boolean {
-    return this.apply(D.cancel__Step(this.config, this.state, new BigNumber(seat)));
-  }
-
-  /** owner of each seat, or null when free */
-  seats(): (UserId | null)[] {
-    return Array.from(D.Get__seats(this.state) as Iterable<any>, (o) => (o.is_None ? null : o.dtor_value.toNumber()));
-  }
-
-  private apply(result: any): boolean {
-    if (result.is_None) return false;
-    this.state = result.dtor_value;
-    return true;
-  }
+// A reducer: the app keeps the state (in memory, a DB row, a React store) and
+// asks the core for the next one. null means the spec does not allow the action.
+function dispatch(label: string, action: Action): void {
+  const next = step(sizes, state, action);
+  console.log(`${next ? "ok    " : "denied"}  ${label}`);
+  if (next) state = next;
 }
 
-// ---- a short session --------------------------------------------------------
-const show = (label: string, ok: boolean) => console.log(`${ok ? "ok    " : "denied"}  ${label}`);
-const app = new SeatBooking(500, 100);
+dispatch("user 7 books seat 10", { action: "book", params: { s: 10, u: 7 } });
+dispatch("user 7 books seat 11", { action: "book", params: { s: 11, u: 7 } });
+dispatch("user 7 books seat 12 (third seat, over MAX_PER_USER = 2)", { action: "book", params: { s: 12, u: 7 } });
+dispatch("user 8 books seat 10 (already taken)", { action: "book", params: { s: 10, u: 8 } });
+dispatch("user 8 books seat 500 (no such seat)", { action: "book", params: { s: 500, u: 8 } });
+dispatch("cancel seat 11", { action: "cancel", params: { s: 11 } });
+dispatch("user 7 books seat 12 (back under the cap)", { action: "book", params: { s: 12, u: 7 } });
+dispatch("cancel seat 11 again (already free)", { action: "cancel", params: { s: 11 } });
 
-show("user 7 books seat 10", app.book(10, 7));
-show("user 7 books seat 11", app.book(11, 7));
-show("user 7 books seat 12 (third seat, over MAX_PER_USER = 2)", app.book(12, 7));
-show("user 8 books seat 10 (already taken)", app.book(10, 8));
-show("user 8 books seat 500 (no such seat)", app.book(500, 8));
-show("cancel seat 11", app.cancel(11));
-show("user 7 books seat 12 (back under the cap)", app.book(12, 7));
-show("cancel seat 11 again (already free)", app.cancel(11));
-
-const owned = app.seats().flatMap((u, s) => (u === null ? [] : [`seat ${s} -> user ${u}`]));
+const owned = Object.entries(state.seats).flatMap(([s, u]) => (u === null ? [] : [`seat ${s} -> user ${u}`]));
 console.log(owned.join("\n"));
+
+// The state is plain JSON, so it can be stored and read back. A stored state is
+// checked again: one that breaks the invariant is not a state the proof covers.
+const stored = JSON.parse(JSON.stringify(state)) as State;
+validate(sizes, stored);
+const tampered: State = { seats: { ...stored.seats, 13: 7 } }; // user 7 would hold 3 seats
+try {
+  step(sizes, tampered, { action: "cancel", params: { s: 13 } });
+} catch (err) {
+  if (!(err instanceof CoreInputError)) throw err;
+  console.log(`rejected stored state: ${err.message}`);
+}

@@ -2,23 +2,27 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Spike (#1908): spec -> Kernel -> Dafny -> proof -> JS, for one spec.
-# usage: ./build.sh <Name> <spec.fsl> <widen-list>   e.g. ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId
+# usage: ./build.sh <Name> <spec.fsl> [<widen-list>]   e.g. ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId
+# `symmetric` types of the spec are always widened; the list adds more.
+# Exit 1: the proof file is malformed, weakens the proof, or does not verify.
+# Exit 2: the spec cannot be translated (see below).
 set -euo pipefail
 cd "$(dirname "$0")"
 name=$1 spec=$2 widen=${3:-}
 fslc=${FSLC:-../../target/release/fslc}
 mkdir -p out
 
-"$fslc" kernel "$spec" > "out/$name.kernel.json"
-node gen.mjs "out/$name.kernel.json" ${widen:+--widen "$widen"} > "out/$name.gen.dfy"
+# Exit 2: the spec does not lower to the Kernel or uses a form gen.mjs does not translate.
+"$fslc" kernel "$spec" > "out/$name.kernel.json" || exit 2
+node gen.mjs "out/$name.kernel.json" ${widen:+--widen "$widen"} > "out/$name.gen.dfy" || exit 2
 
 proof="${PROOF:-proofs/$name.proof.dfy}"
 # The proof file must be one module that refines the generated one, including
 # nothing else; otherwise it could export its own, weaker <Name>Proof.
 code=$(grep -vE '^\s*(//.*)?$' "$proof")
-if [ "$(grep -cE '^\s*include ' <<<"$code")" != 1 ] ||
+if [ "$(grep -oE '\binclude\b' <<<"$code" | wc -l | tr -d ' ')" != 1 ] ||
    ! grep -qxE "include \"\.\./out/$name\.gen\.dfy\"" <<<"$code" ||
-   [ "$(grep -cE '\bmodule\b' <<<"$code")" != 1 ] ||
+   [ "$(grep -oE '\bmodule\b' <<<"$code" | wc -l | tr -d ' ')" != 1 ] ||
    ! grep -qxE "module ${name}Proof refines ${name}Spec \{" <<<"$code"; then
   echo "structure: $proof must include only ../out/$name.gen.dfy and declare only 'module ${name}Proof refines ${name}Spec'" >&2
   exit 1
@@ -38,6 +42,9 @@ dafny translate js --include-runtime "$proof" -o "out/$name" > /dev/null
 # Expose the compiled module to Node.
 {
   cat "out/$name.js"
-  echo "module.exports = { M: ${name}Proof, _dafny };"
+  echo "module.exports = { M: ${name}Proof, _dafny, BigNumber };"
 } > "out/$name.cjs"
-echo "built out/$name.cjs"
+# The TypeScript entry point over the compiled module.
+node gen-ts.mjs "out/$name.kernel.json" ${widen:+--widen "$widen"} > "out/$name.ts"
+node -e 'import("./gen-ts.mjs").then((m) => process.stdout.write(m.CJS_DTS))' > "out/$name.d.cts"
+echo "built out/$name.cjs out/$name.ts"

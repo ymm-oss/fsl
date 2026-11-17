@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: Apache-2.0
+// Spike (#1908) fixture: identity types declared `symmetric`, so gen.mjs widens
+// them without --widen. A worker holds at most WIP_LIMIT tasks; a finished task
+// has no owner.
+spec TaskBoard {
+  symmetric type TaskId = 0..2
+  symmetric type WorkerId = 0..1
+  const WIP_LIMIT = 1
+
+  state {
+    owner: Map<TaskId, Option<WorkerId>>,
+    done:  Map<TaskId, Bool>
+  }
+
+  init {
+    forall t: TaskId { owner[t] = none }
+    forall t: TaskId { done[t] = false }
+  }
+
+  action claim(t: TaskId, w: WorkerId) {
+    requires owner[t] == none
+    requires done[t] == false
+    requires count(t2: TaskId where owner[t2] is some(v) and v == w) < WIP_LIMIT
+    owner[t] = some(w)
+  }
+
+  action release(t: TaskId) {
+    requires owner[t] != none
+    owner[t] = none
+  }
+
+  action finish(t: TaskId, w: WorkerId) {
+    requires owner[t] is some(v)
+    requires v == w
+    owner[t] = none
+    done[t] = true
+  }
+
+  invariant WipLimit {
+    forall w: WorkerId {
+      count(t: TaskId where owner[t] is some(v) and v == w) <= WIP_LIMIT
+    }
+  }
+
+  invariant DoneIsFree {
+    forall t: TaskId { done[t] => owner[t] == none }
+  }
+
+  reachable AllDone {
+    forall t: TaskId { done[t] }
+  }
+}
