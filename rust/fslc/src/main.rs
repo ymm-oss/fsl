@@ -4471,7 +4471,13 @@ fn run_chain_step(
                 } else {
                     let root = project_root(roots, layer, false);
                     let (detail, status) = run_prepared_project_roots(&[root], |sources| {
-                        run_check_from_source(&file_path, &file_path, sources[0], &root.edition)
+                        run_check_from_source(
+                            &file_path,
+                            &file_path,
+                            sources[0],
+                            &root.edition,
+                            &mut None,
+                        )
                     });
                     (detail, status, "check", None)
                 };
@@ -6357,6 +6363,7 @@ fn run_check_from_source(
     display_path: &Path,
     source: &str,
     admission: &SourceEdition,
+    checked_model: &mut Option<KernelModel>,
 ) -> (Value, i32) {
     let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     // The validity stages are shared with the Worker (issue #1163); only the
@@ -6397,6 +6404,7 @@ fn run_check_from_source(
                 return error_exit(error_output("internal", "check envelope"));
             };
             let mut output = Value::Object(output);
+            *checked_model = Some(model);
             match fold_governance_from_source(path, source, &mut output) {
                 Ok(folded) => {
                     let status = folded.unwrap_or(status);
@@ -6647,9 +6655,14 @@ fn run_check_with_tags_from_source(
     // or the edition metadata.
     let mut unscoped = None;
     let result = run_prepared_roots(std::slice::from_ref(&admission), false, || {
-        let (mut output, status) = run_check_from_source(path, display_path, source, &admission);
+        let mut checked_model = None;
+        let (mut output, status) =
+            run_check_from_source(path, display_path, source, &admission, &mut checked_model);
         if status == 0 && strict_tags {
-            let model = match load_model_from_source(path, source) {
+            // Agent/legacy AI checks can succeed without producing a Kernel.
+            // Keep their old second-load refusal, but reuse every checked model.
+            let model = match checked_model.map_or_else(|| load_model_from_source(path, source), Ok)
+            {
                 Ok(model) => model,
                 Err(error) => return (spec_load_error_output(&error), 2),
             };

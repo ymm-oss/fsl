@@ -277,20 +277,19 @@ pub(crate) fn load_model_from_source(
     load_kernel_model_from_source(path, source).map(|(_, model)| model)
 }
 
-/// `load_model_from_source` for `replay`; see `check_stages::load_replay_model`.
+/// `load_model_from_source` for `replay`, retaining the Monitor's init preflight.
 pub(crate) fn load_replay_model_from_source(
     path: &Path,
     source: &str,
 ) -> Result<KernelModel, SpecLoadError> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let model = fslc_rust::check_stages::load_replay_model(
+    load_source_stages(
+        path,
         source,
-        &path.to_string_lossy(),
-        &dependency_resolver(base),
-        crate::process::parse_options(),
-    )?;
-    reject_refuted_requirements(source, &model)?;
-    Ok(model)
+        KernelLowering::Resolved(&dependency_resolver(base)),
+        ModelBuild::Replay,
+    )
+    .map(|(_, model)| model)
 }
 
 pub(crate) fn load_kernel_model(
@@ -324,12 +323,71 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    let (kernel, model) = fslc_rust::check_stages::load_kernel_model(
+    load_source_stages(
+        path,
         source,
-        &path.to_string_lossy(),
-        resolver,
-        crate::process::parse_options(),
-    )?;
+        KernelLowering::Resolved(resolver),
+        ModelBuild::Checked,
+    )
+}
+
+/// Scoped lowering deliberately has neither a resolver nor a root file label.
+#[derive(Clone, Copy)]
+enum KernelLowering<'a> {
+    Resolved(&'a dyn fsl_core::FileResolver),
+    Scoped(&'a ScopeBounds),
+}
+
+#[derive(Clone, Copy)]
+enum ModelBuild {
+    Checked,
+    Replay,
+}
+
+/// One native loader order: parse/resolve/lower (including any bounds), build,
+/// then ask requirements of the model the command actually consumes.
+fn load_source_stages(
+    path: &Path,
+    source: &str,
+    lowering: KernelLowering<'_>,
+    build: ModelBuild,
+) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
+    let options = crate::process::parse_options();
+    let scoped = matches!(lowering, KernelLowering::Scoped(_));
+    let parsed = match lowering {
+        KernelLowering::Resolved(resolver) => fsl_core::parse_kernel_source_with_file_with_options(
+            source,
+            resolver,
+            path.to_string_lossy(),
+            options,
+        ),
+        KernelLowering::Scoped(scope) => fsl_core::parse_kernel_source_with_bounds_with_options(
+            source,
+            &scope.instances,
+            &scope.values,
+            options,
+        ),
+    };
+    let kernel = parsed.map_err(|error| {
+        // A rejected CLI bound owns no source location.
+        if scoped && error.kind == fsl_core::CoreErrorKind::ScopeOverrideWithoutBounds {
+            SpecLoadError::Semantic(Box::new(SemanticDiagnostic {
+                class: DiagnosticClass::Core(error.kind),
+                diagnostic_code: error.diagnostic_code,
+                ..SemanticDiagnostic::unlocated(error.message)
+            }))
+        } else {
+            kernel_load_error(source, &error, options)
+        }
+    })?;
+    let model = match build {
+        ModelBuild::Checked => fslc_rust::checked_build::build_checked_model(kernel.clone())
+            .map_err(fslc_rust::checked_build::CheckedBuildError::into_spec_load_error)?,
+        // Replay keeps raw build: Monitor owns init errors and trace precedence.
+        ModelBuild::Replay => fsl_core::build_model(kernel.clone()).map_err(|error| {
+            SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
+        })?,
+    };
     reject_refuted_requirements(source, &model)?;
     Ok((kernel, model))
 }
@@ -663,40 +721,17 @@ pub(crate) fn load_model_scoped(
 }
 
 pub(crate) fn load_model_scoped_from_source(
-    _path: &Path,
+    path: &Path,
     source: &str,
     scope: &ScopeBounds,
 ) -> Result<KernelModel, SpecLoadError> {
-    let kernel = match fsl_core::parse_kernel_source_with_bounds_with_options(
+    load_source_stages(
+        path,
         source,
-        &scope.instances,
-        &scope.values,
-        crate::process::parse_options(),
-    ) {
-        Ok(kernel) => kernel,
-        // A rejected `--instances`/`--values` bound is a CLI argument
-        // defect, not a construct in the spec, so it owns no location.
-        Err(error) if error.kind == fsl_core::CoreErrorKind::ScopeOverrideWithoutBounds => {
-            return Err(SpecLoadError::Semantic(Box::new(SemanticDiagnostic {
-                class: DiagnosticClass::Core(error.kind),
-                diagnostic_code: error.diagnostic_code,
-                ..SemanticDiagnostic::unlocated(error.message)
-            })));
-        }
-        Err(error) => {
-            return Err(kernel_load_error(
-                source,
-                &error,
-                crate::process::parse_options(),
-            ));
-        }
-    };
-    let model = fslc_rust::checked_build::build_checked_model(kernel)
-        .map_err(fslc_rust::checked_build::CheckedBuildError::into_spec_load_error)?;
-    // Asked of the scoped model: the overrides narrow the domains the
-    // lowering enumerated, and so the ones the solver is asked over.
-    reject_refuted_requirements(source, &model)?;
-    Ok(model)
+        KernelLowering::Scoped(scope),
+        ModelBuild::Checked,
+    )
+    .map(|(_, model)| model)
 }
 
 // Binary-private root-owner census, not a census of library parsing/classification.
