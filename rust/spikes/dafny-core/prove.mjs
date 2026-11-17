@@ -13,7 +13,8 @@
 // override the command). It runs only when the current proof fails.
 //
 // usage: node prove.mjs <Name> <spec.fsl> [--widen T1,T2] [--proof file] [--attempts 3] [--timeout-s 900]
-// exit:  0 proved (by the existing or a new proof), 1 not proved, 2 spec not translatable
+// exit:  0 proved (by the existing or a new proof), 1 not proved, 2 spec not translatable,
+//        3 the generated module itself fails (a gen.mjs defect, not a proof problem)
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -50,6 +51,13 @@ for (let n = 1; r.code !== 0; n++) {
   if (r.code === 2) {
     process.stderr.write(r.log);
     process.exit(2);
+  }
+  // An error or warning located in the generated module is a gen.mjs defect;
+  // no proof file can fix it, so do not spend a model attempt on it.
+  const genFault = new RegExp(`^out/${name}\\.gen\\.dfy\\(\\d+,\\d+\\): (Error|Warning)`, "m");
+  if (genFault.test(r.log)) {
+    process.stderr.write(`${r.log}\nthe generated module out/${name}.gen.dfy itself fails (a gen.mjs defect); not asking the model\n`);
+    process.exit(3);
   }
   if (n > attempts) {
     process.stderr.write(`${r.log}\nnot proved after ${attempts} attempt(s); ${proof} holds the last one\n`);

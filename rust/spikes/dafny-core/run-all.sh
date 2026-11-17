@@ -39,6 +39,30 @@ if cmp -s out/SeatBooking.ts out/SeatBooking.no-int.ts; then echo "FAIL  no-int 
 expect 1 "wrapper control rejects a wrapper without the integer check" env WRAPPER="$PWD/out/SeatBooking.no-int.ts" node controls/wrapper-inputs.ts
 rm -f out/SeatBooking.no-inv.ts out/SeatBooking.no-int.ts
 
+# Invariant bodies are outside the step differential; controls/invariant-states.ts
+# checks their translation on hand-classified TaskBoard states, and must reject a
+# core compiled from generated Dafny whose invariants were altered.
+expect 0 "generated invariants classify hand-checked TaskBoard states" node controls/invariant-states.ts
+inv_mutant() { # inv_mutant <label> <sed expression>
+  local d=out/neg/inv-$1
+  rm -rf "$d" && mkdir -p "$d/out" "$d/proofs"
+  sed "$2" out/TaskBoard.gen.dfy > "$d/out/TaskBoard.gen.dfy"
+  if [ ! -s "$d/out/TaskBoard.gen.dfy" ] || cmp -s out/TaskBoard.gen.dfy "$d/out/TaskBoard.gen.dfy"; then
+    echo "FAIL  invariant mutant $1 did not apply"; status=1; return
+  fi
+  if ! { cp proofs/TaskBoard.proof.dfy "$d/proofs/" &&
+         dafny translate js --no-verify --include-runtime "$d/proofs/TaskBoard.proof.dfy" -o "$d/core" > "$d/translate.log" 2>&1 &&
+         { cat "$d/core.js"; echo "module.exports = { M: TaskBoardProof, _dafny, BigNumber };"; } > "$d/TaskBoard.cjs" &&
+         cp out/TaskBoard.ts "$d/TaskBoard.ts"; }; then
+    echo "FAIL  invariant mutant $1 did not build"; status=1; return
+  fi
+  expect 1 "invariant control rejects a core whose $1" env WRAPPER="$PWD/$d/TaskBoard.ts" node controls/invariant-states.ts
+}
+inv_mutant "DoneIsFree is true" '/predicate Inv_DoneIsFree/{n;s/.*/    true/;}'
+inv_mutant "DoneIsFree uses and for =>" '/predicate Inv_DoneIsFree/{n;s/(st.done\[t_2\] ==> /(st.done[t_2] \&\& /;}'
+inv_mutant "DoneIsFree reverses =>" '/predicate Inv_DoneIsFree/{n;s/(st.done\[t_2\] ==> (st.owner\[t_2\] == None))/((st.owner[t_2] == None) ==> st.done[t_2])/;}'
+inv_mutant "WipLimit is true" '/predicate Inv_WipLimit/{n;s/.*/    true/;}'
+
 # The random mode catches a wrong core too, at the enlarged sizes.
 expect 1 "random differential rejects SeatBooking --mutate drop-guard:book" env KERNEL="$PWD/out/big/SeatBooking.kernel.json" node check.mjs SeatBooking --random 20 --seed 1 --mutate drop-guard:book
 

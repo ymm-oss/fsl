@@ -81,7 +81,8 @@ if (next) state = next;                                   // null: the spec does
 - **prove.mjs** (the AI half) runs `build.sh`; if the proof is missing or fails, it
   sends the generated module, the current proof and the errors to the model
   (`claude -p` with no tools), writes the reply to the proof file and runs the same
-  `build.sh` again, up to `--attempts` (3) times. The model writes only the proof
+  `build.sh` again, up to `--attempts` (3) times. A failure located in the generated
+  module is a `gen.mjs` defect that no proof can fix; it exits 3 without asking. The model writes only the proof
   file, and only `build.sh` decides, so a wrong or cheating reply is rejected like
   a hand-written one, and a spec with a real bug cannot pass.
 - **check.mjs** drives `out/<Name>.ts`, the same entry point an app imports, so the
@@ -89,7 +90,10 @@ if (next) state = next;                                   // null: the spec does
   the path that reached it: a step the core allows must be `conformant`, one it
   refuses must be `requires_failed`. Exhaustively, agreement on every step from the
   same initial state means equal transition relations at those sizes. This guards
-  the translator, the Dafny compiler and the wrapper.
+  the translation of guards and updates, the Dafny compiler and the wrapper. It
+  does not compare invariant predicates: a step is judged by its post-state, not
+  by `Inv`. Invariant translation is checked only by
+  `controls/invariant-states.ts`, on hand-classified TaskBoard states.
 
 ## Results (fslc 5.1.0 built from d1df480b, Dafny 4.11.0, Node 22.23)
 
@@ -103,13 +107,18 @@ if (next) state = next;                                   // null: the spec does
 (`SeatId = 0..3`, `UserId = 0..2`): 63 states / 756 steps and 108 states / 1296
 steps, 0 divergences, with byte-identical generated Dafny.
 
+Size: the same generated core runs at 1,000,000 seats (see the cost under Not
+covered). A first version of the wrapper overflowed the stack above about 100,000
+map entries (`Seq.of(...spread)`); it now builds sequences with `Seq.from`.
+
 The proof loop with the real model (`claude` 2.1.326):
 - From an empty proof file, `SeatBooking` was proved on the first attempt.
 - `TaskBoard` has no hand-written proof: `proofs/TaskBoard.proof.dfy` is the model's
   third attempt. All three attempts failed on a `gen.mjs` defect, not on the
   proof: the generator emitted a trigger-less `forall k :: ... ==> true` for
   `Map<_, Bool>`, and Dafny warned. After that was fixed in `gen.mjs`, the same
-  file passed every gate unchanged.
+  file passed every gate unchanged. (`prove.mjs` now stops with exit 3 on such a
+  failure instead of asking the model.)
 - `cart_v1_buggy.fsl` (`checkout` without the stock guard, so `Qty` can go to -1)
   ended in failure after 3 attempts, with no `assume`/axiom in the last reply.
 
@@ -123,6 +132,10 @@ Negative controls in `run-all.sh`, each of which must be caught:
 - Structure: a standalone module, an extra module, a second `include` not at the
   start of its line; Dafny itself rejects a redefined predicate and an added
   precondition.
+- Invariants: `controls/invariant-states.ts` classifies five TaskBoard states
+  (separating `=>` from `and` and from the reversed implication), and fails for
+  cores whose generated `DoneIsFree` is `true`, uses `and`, or is reversed, or
+  whose `WipLimit` is `true`.
 - Wrapper: `controls/wrapper-inputs.ts` checks 21 inputs (non-integers, `NaN`,
   strings, `2**53+1`, negative or unknown sizes, unknown actions/parameters/fields,
   missing keys, a state outside the bounds, a state breaking `PerUserCap`), and it
@@ -141,8 +154,13 @@ Negative controls in `run-all.sh`, each of which must be caught:
   partial operations (division), enums, structs, sets, two updates to one variable,
   `transitions`/`leadsTo` properties. `reachable` properties are not translated
   (they are not safety obligations).
-- The wrapper checks `Inv` on every call (linear in the state), and `CountK`
-  recursion depth grows with the size of the counted type.
+- Invariant predicates are not compared with fslc at any size; only the five
+  hand-classified TaskBoard states above check their translation.
+- Cost: the wrapper checks `Inv` on every `step`, so a step costs about
+  |quantified type| × |counted type|. SeatBooking measured on Node 22.23 (one `book`
+  from the initial state): 10,000 seats × 1,000 users 1.5 s, 100,000 × 1,000 16 s,
+  1,000,000 × 10 3 s. `CountK` compiles to a loop (no stack growth). A trusted
+  state handle, or checking only what an action changes, would remove the re-check.
 - `fslc replay` judges the observed state only; it has no notion of action results
   or outputs, so neither does the core.
 - Contract functions and the IO shell (DB transaction per action, outbox, replay

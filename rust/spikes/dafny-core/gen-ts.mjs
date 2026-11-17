@@ -126,7 +126,8 @@ function decode(sizes: Sizes, ty: any, v: any, path: string): any {
       const have = Object.keys(v);
       if (have.length !== ks.length || ks.some((k) => !Object.hasOwn(v, k)))
         throw new CoreInputError(\`\${path}: keys must be exactly \${ks[0] ?? "(none)"}..\${ks[ks.length - 1] ?? ""}\`);
-      return core._dafny.Seq.of(...ks.map((k) => decode(sizes, ty.value, v[k], \`\${path}[\${k}]\`)));
+      // Seq.from, not Seq.of(...): spreading a large map overflows the call stack.
+      return core._dafny.Seq.from(ks, (k: string) => decode(sizes, ty.value, v[k], \`\${path}[\${k}]\`));
     }
   }
   throw new Error(\`type kind \${ty.kind}\`);
