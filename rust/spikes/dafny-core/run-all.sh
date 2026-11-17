@@ -18,17 +18,34 @@ expect() { # expect <0|nonzero> <label> <command...>
 }
 
 mkdir -p out/neg
+: > out/core-results.jsonl
+# core <label> <core.mjs args...>: expect success and keep the JSON report.
+core() {
+  local label=$1; shift
+  expect 0 "core.mjs $label" node core.mjs "$@"
+  grep -E '^\{' out/last.log >> out/core-results.jsonl || true
+}
 # The one command: proof gates, JS, generated TS + tsc, exhaustive differential at the
 # spec's sizes, unchanged Dafny and seeded random differential at 4x the sizes.
 # TaskBoard declares its identity types `symmetric`, so it needs no --widen.
-expect 0 "core.mjs seat_booking" node core.mjs ../../../specs/seat_booking.fsl --widen SeatId,UserId --seed 1
-expect 0 "core.mjs cart_v1" node core.mjs ../../../specs/cart_v1.fsl --widen UserId,ItemId --seed 1
-expect 0 "core.mjs fixtures/task_board (symmetric)" node core.mjs fixtures/task_board.fsl --seed 1
+core seat_booking ../../../specs/seat_booking.fsl --widen SeatId,UserId --seed 1
+core cart_v1 ../../../specs/cart_v1.fsl --widen UserId,ItemId --seed 1
+core "fixtures/task_board (symmetric)" fixtures/task_board.fsl --seed 1
+core "fixtures/batching (/ and %)" fixtures/batching.fsl --seed 1 --depth 8
+# leadsTo is not translated: without --liveness-by-fslc the spec is refused.
+mkdir -p out/neg/liveness
+../../target/release/fslc kernel ../../../specs/mutex_queue.fsl > out/neg/liveness/MutexQueue.kernel.json
+expect 2 "gen.mjs refuses mutex_queue's leadsTo without --liveness-by-fslc" node gen.mjs out/neg/liveness/MutexQueue.kernel.json --widen ProcId
+# A reachable partial read (head/pop on an empty Seq) does not verify in Dafny.
+mkdir -p out/neg/partial
+../../target/release/fslc kernel fixtures/negative/unguarded_head.fsl > out/neg/partial/UnguardedHead.kernel.json
+node gen.mjs out/neg/partial/UnguardedHead.kernel.json > out/neg/partial/UnguardedHead.gen.dfy
+expect 1 "Dafny rejects a generated module with an unguarded head()/pop()" dafny verify --allow-warnings out/neg/partial/UnguardedHead.gen.dfy
 # Enums, structs, field updates, if, sum, min; proofs written by the model through
 # prove.mjs. Specs whose counters are unbounded are searched to depth 8.
 while read -r f args; do
   # shellcheck disable=SC2086
-  expect 0 "core.mjs $f $args" node core.mjs "../../../specs/$f.fsl" --seed 1 $args
+  core "$f $args" "../../../specs/$f.fsl" --seed 1 $args
 done <<'SPECS'
 repair_loop
 rate_limiter --depth 8
@@ -39,6 +56,11 @@ cart_impl --widen UserId,ItemId
 seat_booking_impl --widen SeatId,UserId
 inventory_reservation --widen ResId,ItemId
 payment --widen PayId
+audit_log --depth 8
+job_pipeline --widen JobId
+order_workflow --widen OrderId
+mutex_queue --widen ProcId --liveness-by-fslc
+cart_fixed --name CartFixed --widen UserId,ItemId
 SPECS
 expect 0 "tsc: generated cores and the example type-check" node_modules/.bin/tsc -p .
 expect 0 "example/seat-booking.ts runs on the generated core" node example/seat-booking.ts
@@ -79,6 +101,8 @@ inv_mutant() { # inv_mutant <label> <sed expression>
     echo "FAIL  invariant mutant $1 did not build"; status=1; return
   fi
   expect 1 "invariant control rejects a core whose $1" env WRAPPER="$PWD/$d/TaskBoard.ts" node controls/invariant-states.ts
+  expect 1 "invcheck rejects a core whose $1" env WRAPPER="$PWD/$d/TaskBoard.ts" node invcheck.mjs TaskBoard --samples 100
+  if ! grep -qE '"disagreements": [1-9]' out/last.log; then echo "FAIL  invcheck $1: no disagreement reported"; status=1; fi
 }
 inv_mutant "DoneIsFree is true" '/predicate Inv_DoneIsFree/{n;s/.*/    true/;}'
 inv_mutant "DoneIsFree uses and for =>" '/predicate Inv_DoneIsFree/{n;s/(st.done\[t_2\] ==> /(st.done[t_2] \&\& /;}'
@@ -109,6 +133,10 @@ gen_mutant AuthLockout "the if condition changed" '/function login_fail_Apply/,/
 gen_mutant Payment "capture setting the wrong enum member" '/function capture_Apply/,/^  }/s/PSt\.Captured/PSt.Voided/'
 gen_mutant RateLimiter "min turned into max" 's/(if (st.tokens + REFILL) <= BURST then/(if (st.tokens + REFILL) >= BURST then/' --depth 8
 gen_mutant Payment "the ledger sum adding refunds" '/function Sum0/,/^  }/s/amount - st.payments\[i\].refunded/amount + st.payments[i].refunded/'
+gen_mutant Batching "truncating division" 's|debt := ((0 - st.pending) / BATCH)|debt := (-(st.pending / BATCH))|' --depth 8
+gen_mutant MutexQueue "pop taking the last waiter" 's|waiters := st.waiters\[1..\])|waiters := st.waiters[..\|st.waiters\| - 1])|'
+gen_mutant JobPipeline "let reading the last queued job" 's|var j := st.queue\[0\];|var j := st.queue[\|st.queue\| - 1];|'
+gen_mutant OrderWorkflow "ship not adding to the set" 's|shipped := (st.shipped + {o}))|shipped := st.shipped)|'
 
 # The random mode catches a wrong core too, at the enlarged sizes.
 expect 1 "random differential rejects SeatBooking --mutate drop-guard:book" env KERNEL="$PWD/out/big/SeatBooking.kernel.json" node check.mjs SeatBooking --random 20 --seed 1 --mutate drop-guard:book
@@ -234,9 +262,13 @@ fi
 
 # A spec with a real bug: cart_v1's proof does not carry over to cart_v1_buggy.
 expect 1 "core.mjs refuses cart_v1_buggy (checkout can drive stock below 0)" node core.mjs ../../../specs/cart_v1_buggy.fsl --widen UserId,ItemId --seed 1
+# cart_buggy is cart_fixed without the stock guard: under cart_fixed's name, its proof must not verify.
+expect 1 "core.mjs refuses cart_buggy with cart_fixed's proof" node core.mjs ../../../specs/cart_buggy.fsl --name CartFixed --widen UserId,ItemId --seed 1
+grep -qE 'error|Error' out/last.log || { echo "FAIL  cart_buggy was not refused by Dafny"; status=1; }
 
 # Rebuild the real cores: the cheats above went through build.sh.
 expect 0 "rebuild SeatBooking" ./build.sh SeatBooking ../../../specs/seat_booking.fsl SeatId,UserId
 expect 0 "rebuild ShoppingCart" ./build.sh ShoppingCart ../../../specs/cart_v1.fsl UserId,ItemId
+expect 0 "rebuild CartFixed" ./build.sh CartFixed ../../../specs/cart_fixed.fsl UserId,ItemId
 
 exit $status

@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: Apache-2.0
+// Spike (#1908) fixture: `/` and `%`. FSL and Dafny both divide Euclidean-style,
+// so `(0 - pending) / BATCH` rounds toward minus infinity (-5 / 4 == -2), and a
+// divisor read from a parameter must be guarded (`requires k > 0`).
+spec Batching {
+  type Items   = 0..9
+  type Divisor = 0..3
+  const BATCH = 4
+
+  state {
+    pending: Items,
+    batches: Int,
+    rest:    Items,
+    debt:    Int,
+    share:   Items
+  }
+
+  init {
+    pending = 0
+    batches = 0
+    rest = 0
+    debt = 0
+    share = 0
+  }
+
+  action add(n: Items) {
+    requires n > 0
+    requires pending + n <= 9
+    pending = pending + n
+  }
+
+  action flush() {
+    requires pending > 0
+    batches = batches + pending / BATCH
+    rest = pending % BATCH
+    debt = (0 - pending) / BATCH
+    pending = 0
+  }
+
+  action split(k: Divisor) {
+    requires k > 0
+    share = pending % k
+  }
+
+  invariant RestBelowBatch { rest < BATCH }
+  invariant DebtNotPositive { debt <= 0 }
+  invariant ShareBelowDivisor { share < 3 }
+  invariant BatchesNonNegative { batches >= 0 }
+}

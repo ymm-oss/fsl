@@ -5,7 +5,7 @@ person owns the spec, and every step after it is generated or checked by a
 machine.
 
 ```
-node core.mjs <spec.fsl> [--widen T1,T2] [--ai] [--depth n] [--out <app dir>] [--watch]
+node core.mjs <spec.fsl> [--widen T1,T2] [--name N] [--ai] [--depth n] [--liveness-by-fslc] [--out <app dir>] [--watch]
 
  fslc kernel ─> gen.mjs ─> out/<Name>.gen.dfy     abstract module: state, init, guards, updates,
                                                    proof obligations without bodies; `symmetric`
@@ -21,6 +21,8 @@ node core.mjs <spec.fsl> [--widen T1,T2] [--ai] [--depth n] [--out <app dir>] [-
                                                    state × every action instance (to --depth)
    random at --scale × the sizes (default 4)       seeded sequences judged by `fslc replay`;
                                                    the generated Dafny must not change
+ invcheck.mjs                                      the generated invariants against fslc's on
+                                                   sampled unreachable states (too weak/strong)
 ```
 
 Any failure exits nonzero. `--out` copies `<Name>.ts`, `<Name>.cjs` and
@@ -28,6 +30,12 @@ Any failure exits nonzero. `--out` copies `<Name>.ts`, `<Name>.cjs` and
 dependency); `--watch` re-runs whenever the spec or a file in `proofs/` changes.
 `--depth` (default 64) bounds the exhaustive search for specs whose state space
 does not close (an unbounded `Int` counter); the report says `closed: false`.
+`--name` sets the output name for specs that share a spec name (`cart_fixed` is
+also `ShoppingCart`). `--liveness-by-fslc` accepts a spec with `leadsTo`: Dafny
+proves only the safety obligations, `fslc verify` must pass the liveness ones at
+the spec's sizes, and the report carries that verdict under
+`liveness_not_proved_by_dafny`. The core's transitions equal the spec's, so the
+verdict carries over to the core at those sizes, not to every size.
 One run takes about 20–30 s (Payment, 1600 states: 27 s), most of it Dafny and
 the random-mode replays.
 
@@ -77,12 +85,19 @@ if (next) state = next;                                   // null: the spec does
   `N_T` (`0 <= x < N_T`); `--widen` adds more, for specs that do not mark their
   identity types (this spike does not change `specs/`). Other ranges and the
   implicit type bounds stay as proof obligations in `Wf`. Handled: domain types,
-  enums, structs, `Map`, `Option`, `Bool`, `Int`, field reads and field updates,
-  several updates to one variable, `if` in an action body, `count`, `sum`, `min`,
-  `max`, quantifiers, `is some(x)` guards, `=>`. fslc rejects a spec whose writes
-  may hit one location twice, so distinct writes to one variable are applied in
-  turn. Over `specs/*.fsl`: 14 translate, 4 stop with exit 2 (sequences, sets), 5
-  are refused by `fslc kernel` (refinement mappings), 0 crash.
+  enums, structs, `Map`, `Option`, `Bool`, `Int`, bounded `Seq<T, N>` (`size`,
+  `push`, `pop`, `head`, `at`, `contains`), `Set<T>` (`size`, `add`, `remove`,
+  `contains`), field reads and field updates, several updates to one variable,
+  `if` in an action body, `let` (also between guards), `count`, `sum`, `min`, `max`,
+  `/` and `%`, quantifiers over types and int ranges, `is some(x)` bindings under
+  `and` and `=>`. fslc rejects a spec whose writes may hit one location twice, so
+  distinct writes to one variable are applied in turn. Partial operations
+  (`head`/`pop`/`at` on a too-short `Seq`, a zero divisor) become Dafny
+  well-formedness obligations where they occur, so a generated module verifies only
+  if none is reachable; Dafny's int division is Euclidean like FSL's. Over
+  `specs/*.fsl`: all 18 that `fslc kernel` accepts translate (`mutex_queue` with
+  `--liveness-by-fslc`), and 5 are refused by `fslc kernel` (3 refinement mapping
+  files with no state, 2 `compose` specs that Kernel v1 cannot carry).
 - **The proof module** cannot change what is proved. `build.sh` requires the file
   to contain one `include` (of the generated module) and one `module`
   (`<Name>Proof refines <Name>Spec`); without this a standalone `<Name>Proof`
@@ -111,64 +126,85 @@ if (next) state = next;                                   // null: the spec does
     relations within the depth.
   - Random mode replays seeded sequences on the enlarged spec with `fslc replay`:
     one replay per run for its allowed steps, plus up to three refused steps per run.
-  - Neither mode shows that a generated `Inv` is not too weak; see
-    `controls/invariant-states.ts` below.
+  - Neither mode shows that a generated `Inv` is not too weak: every reachable
+    state satisfies both.
+- **invcheck.mjs** does. It samples states inside the type bounds (reachable states
+  with one value changed, and random ones), asks the core whether `validate`
+  accepts each, and asks fslc on a copy of the spec whose `init` is that state:
+  `fslc verify --depth 0` reports `violated` at step 0 exactly when it breaks an
+  invariant. Any disagreement fails the run.
 
 ## Results (fslc 5.1.0 built from d1df480b, Dafny 4.11.0, Node 22.23)
 
-All proofs except SeatBooking's and ShoppingCart's were written by the model
-through `prove.mjs` (`claude` 2.1.326), each on its first attempt. All rows have
-0 divergences in both modes.
+`./run-all.sh`: 75/75 expectations, on two runs with identical reports. All
+proofs except SeatBooking's and ShoppingCart's were written by the model through
+`prove.mjs` (`claude` 2.1.326), each on its first attempt (TaskBoard's after a
+`gen.mjs` fix). Every row has 0 divergences and 0 invariant disagreements.
 
-| spec | widened | constructs | Dafny | exhaustive: states, steps | random at 4× (seed 1): sizes, steps |
-|---|---|---|---|---|---|
-| `seat_booking.fsl` | `SeatId`, `UserId` | count | 27 verified | 25, 225 | 12 × 8, 876 |
-| `cart_v1.fsl` | `UserId`, `ItemId` | `is some` guard | 27 verified | 36, 288 | 8 × 8, 756 |
-| `fixtures/task_board.fsl` | `TaskId`, `WorkerId` (`symmetric`) | count, `=>` | 38 verified | 44, 660 | 12 × 8, 546 |
-| `repair_loop.fsl` | – | enum | 58 verified | 47, 376 | –, 396 |
-| `rate_limiter.fsl` | – | `min`, Int | 23 verified | 46, 138 (depth 8) | –, 1124 |
-| `bank.fsl` | – | Int | 16 verified | 25, 200 (depth 8) | –, 1122 |
-| `bank_impl.fsl` | – | Int | 23 verified | 235, 2115 (depth 8) | –, 926 |
-| `auth_lockout.fsl` | `UserId` | struct, `if`, field updates | 39 verified | 81, 648 | 8, 790 |
-| `cart_impl.fsl` | `UserId`, `ItemId` | – | 35 verified | 441, 4410 | 8 × 8, 927 |
-| `seat_booking_impl.fsl` | `SeatId`, `UserId` | enum, struct | 45 verified | 123, 2214 | 12 × 8, 523 |
-| `inventory_reservation.fsl` | `ResId`, `ItemId` | enum, struct, `sum` | 46 verified | 241, 8676 | 12 × 8, 404 |
-| `payment.fsl` | `PayId` | enum, struct, `sum`, Int | 46 verified | 1600, 51200 | 8, 494 |
+| spec | widened | constructs | Dafny | exhaustive: states, steps | random at 4× (seed 1): sizes, steps | invcheck: states (hold / break) |
+|---|---|---|---|---|---|---|
+| `seat_booking.fsl` | `SeatId`, `UserId` | count | 27 verified | 25, 225 | 12 × 8, 876 | 27 (25 / 2) |
+| `cart_v1.fsl` | `UserId`, `ItemId` | `is some` guard | 27 verified | 36, 288 | 8 × 8, 756 | 144 (144 / 0) |
+| `cart_fixed.fsl` (`--name CartFixed`) | `UserId`, `ItemId` | constant bounds | 29 verified | 36, 288 | 8 × 8, 756 | 200 (145 / 55) |
+| `fixtures/task_board.fsl` | `TaskId`, `WorkerId` (`symmetric`) | count, `=>` | 38 verified | 44, 660 | 12 × 8, 546 | 200 (44 / 156) |
+| `fixtures/batching.fsl` | – | `/`, `%` | 25 verified | 1395, 20925 (depth 8) | 1055 | 200 (63 / 137) |
+| `repair_loop.fsl` | – | enum | 58 verified | 47, 376 | 396 | 64 (56 / 8) |
+| `rate_limiter.fsl` | – | `min`, Int | 23 verified | 46, 138 (depth 8) | 1124 | 200 (128 / 72) |
+| `bank.fsl` | – | Int | 16 verified | 25, 200 (depth 8) | 1122 | 9 (7 / 2) |
+| `bank_impl.fsl` | – | Int | 23 verified | 235, 2115 (depth 8) | 926 | 200 (146 / 54) |
+| `auth_lockout.fsl` | `UserId` | struct, `if`, field updates | 39 verified | 81, 648 | 8, 790 | 200 (84 / 116) |
+| `cart_impl.fsl` | `UserId`, `ItemId` | – | 35 verified | 441, 4410 | 8 × 8, 927 | 200 (200 / 0) |
+| `seat_booking_impl.fsl` | `SeatId`, `UserId` | enum, struct | 45 verified | 123, 2214 | 12 × 8, 523 | 200 (61 / 139) |
+| `inventory_reservation.fsl` | `ResId`, `ItemId` | enum, struct, `sum` | 46 verified | 241, 8676 | 8 × 12, 404 | 200 (26 / 174) |
+| `payment.fsl` | `PayId` | enum, struct, `sum`, Int | 46 verified | 1600, 51200 | 8, 494 | 200 (25 / 175) |
+| `audit_log.fsl` | – | `Seq`, int-range `forall`, `sum` over `at` | 15 verified | 121, 484 | 350 | 200 (10 / 190) |
+| `job_pipeline.fsl` | `JobId` | `Seq`, `let` between guards, `=>` binding | 53 verified | 544, 3808 | 12, 621 | 200 (66 / 134) |
+| `order_workflow.fsl` | `OrderId` | `Set`, `if` | 45 verified | 9261, 250047 | 12, 540 | 200 (36 / 164) |
+| `mutex_queue.fsl` (`--liveness-by-fslc`) | `ProcId` | `Seq`, `leadsTo` left to fslc | 34 verified | 16, 128 | 12, 735 | 160 (16 / 144) |
 
-For the closed specs, the state counts equal `fslc verify --engine explicit`
-(25, 36, 44, 123, 241, 1600). `run-all.sh` also checks `seat_booking` and
-`cart_v1` exhaustively one size up: 63 states / 756 steps and 108 / 1296.
+- `mutex_queue`'s `leadsTo WaiterGetsLock` is `verified`, `bounded` (depth 8) by
+  `fslc verify`; it is not proved for every size.
+- `cart_v1` and `cart_impl` have no invariants beyond the type bounds, so invcheck
+  finds every in-bounds state holds.
+- For the closed specs the state counts equal `fslc verify --engine explicit`
+  (e.g. 25, 36, 44, 123, 241, 1600). `run-all.sh` also checks `seat_booking` and
+  `cart_v1` exhaustively one size up: 63 states / 756 steps and 108 / 1296.
 
 The proof loop with the real model:
 - From an empty proof file, `SeatBooking` was proved on the first attempt.
 - `proofs/TaskBoard.proof.dfy` is the model's third attempt. All three attempts
   failed on a `gen.mjs` defect (a trigger-less `forall ... ==> true` for
   `Map<_, Bool>`), not on the proof; after the fix the same file passed.
-- `cart_v1_buggy.fsl` (`checkout` without the stock guard, so `Qty` can go to -1)
-  ended in failure after 3 attempts.
+- `cart_v1_buggy.fsl` and `cart_buggy.fsl` (both lose the stock guard of
+  `checkout`) ended in failure after 3 attempts each.
 - The differential check caught one translation defect the proofs could not:
   for AuthLockout and Payment (one widened type), Dafny's JS backend erases the
-  one-field `Config` datatype, and the wrapper built empty states. The proofs were
-  fine; the wrapper now goes only through generated `MkConfig`/`Mk_*`/`Get_*`/`Is_*`
-  functions.
+  one-field `Config` datatype, and the wrapper built empty states. The wrapper now
+  goes only through generated `MkConfig`/`Mk_*`/`Get_*`/`Is_*` functions.
 
 Negative controls in `run-all.sh`, each of which must be caught:
 - Differential: six in-memory mutants (a guard dropped, an effect skipped), a
-  dropped guard under the random mode, and generated-Dafny mutants: the stock guard
-  of `checkout` lost, an `if` condition changed (AuthLockout), the wrong enum member
-  set (Payment), `min` turned into `max` (RateLimiter), and the ledger `sum` adding
-  refunds (Payment, caught because the core refuses states fslc reaches). Each must
-  report divergences, not just exit nonzero.
+  dropped guard under the random mode, and generated-Dafny mutants, each of which
+  must report divergences (not just exit nonzero): the stock guard of `checkout`
+  lost, an `if` condition changed (AuthLockout), the wrong enum member (Payment),
+  `min` turned into `max` (RateLimiter), the ledger `sum` adding refunds (Payment),
+  truncating instead of Euclidean division (Batching), `pop` taking the last item
+  (MutexQueue), a `let` reading the last queued job (JobPipeline), and `ship` not
+  adding to the `Set` (OrderWorkflow).
 - Proof: the lost stock guard, a weakened per-user cap, a generated module whose
-  `StepPreserves` lacks its proof, and `cart_v1_buggy` through `core.mjs`.
+  `StepPreserves` lacks its proof, `cart_v1_buggy` and `cart_buggy` through
+  `core.mjs`, and a module with an unguarded `head()`/`pop()`
+  (`fixtures/negative/unguarded_head.fsl`) that Dafny does not verify.
+- Translation: `mutex_queue`'s `leadsTo` is refused without `--liveness-by-fslc`.
 - Audit: `assume`, `{:axiom}`, `{:verify false}`, an omitted lemma.
 - Structure: a standalone module, an extra module, a second `include` not at the
   start of its line; Dafny itself rejects a redefined predicate and an added
   precondition.
-- Invariants: `controls/invariant-states.ts` classifies five TaskBoard states
-  (separating `=>` from `and` and from the reversed implication), and fails for
-  cores whose generated `DoneIsFree` is `true`, uses `and`, or is reversed, or
-  whose `WipLimit` is `true`.
+- Invariants: cores whose generated `DoneIsFree` is `true`, uses `and` for `=>`, or
+  is reversed, or whose `WipLimit` is `true`, are rejected both by
+  `controls/invariant-states.ts` (five hand-classified states) and by invcheck,
+  which must report disagreements (too weak for the first two and the last, too
+  strong for the reversed one).
 - Wrapper: `controls/wrapper-inputs.ts` checks 23 inputs (non-integers, `NaN`,
   strings, `2**53+1`, negative or unknown sizes, unknown actions/parameters/fields,
   missing keys, a state outside the bounds, a state breaking `PerUserCap`, a state
@@ -188,16 +224,15 @@ almost no CPU, so the random mode keeps them few.
 
 - What holds for every size is the Dafny proof. That the Dafny model means the
   same as the FSL spec is checked only at finite sizes (the spec's, one up, and
-  4× by random sequences), so the all-sizes claim also rests on `gen.mjs` being
-  faithful.
-- A generated `Inv` that is too weak is caught only by the five hand-classified
-  TaskBoard states; the differential shows only that it is not too strong.
-- Kernel coverage: sequences (`seq_lit`, `Seq` methods), sets, `let`, partial
-  operations (division), relations, `transitions`/`leadsTo` properties. `leadsTo`
-  (liveness) is a poor fit for this approach and stays with fslc. `reachable`
-  properties are not translated (they are not safety obligations).
-- Specs that share a spec name (`cart_buggy`, `cart_fixed` and `cart_v1` are all
-  `ShoppingCart`) share `out/` and `proofs/` paths; only `cart_v1` is run.
+  4× by random sequences, plus sampled states for the invariants), so the
+  all-sizes claim also rests on `gen.mjs` being faithful.
+- `leadsTo` (liveness) is not proved by Dafny; with `--liveness-by-fslc` it is
+  left to `fslc verify` at the spec's sizes (bounded for `mutex_queue`).
+- invcheck samples states; it is not exhaustive except where the space is small
+  (SeatBooking: all 27 in-bounds states).
+- Kernel coverage left: relations, `transitions` properties, and `compose` specs
+  (refused by `fslc kernel` v1). No spec under `specs/` uses the first two.
+  `reachable` properties are not translated (they are not safety obligations).
 - Cost left: `step` still checks `Wf` and encodes the whole state (linear), and an
   untrusted state is checked in full (|quantified| × |counted|).
 - `fslc replay` and `fslc conformance` judge states only; there is no notion of

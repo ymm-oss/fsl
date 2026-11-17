@@ -14,7 +14,9 @@ mkdir -p out
 
 # Exit 2: the spec does not lower to the Kernel or uses a form gen.mjs does not translate.
 "$fslc" kernel "$spec" > "out/$name.kernel.json" || exit 2
-node gen.mjs "out/$name.kernel.json" ${widen:+--widen "$widen"} > "out/$name.gen.dfy" || exit 2
+# GEN_FLAGS: extra gen.mjs flags (core.mjs passes --liveness-by-fslc).
+# shellcheck disable=SC2086
+node gen.mjs "out/$name.kernel.json" ${widen:+--widen "$widen"} --name "$name" ${GEN_FLAGS:-} > "out/$name.gen.dfy" || exit 2
 
 proof="${PROOF:-proofs/$name.proof.dfy}"
 # The proof file must be one module that refines the generated one, including
@@ -45,6 +47,6 @@ dafny translate js --include-runtime "$proof" -o "out/$name" > /dev/null
   echo "module.exports = { M: ${name}Proof, _dafny, BigNumber };"
 } > "out/$name.cjs"
 # The TypeScript entry point over the compiled module.
-node gen-ts.mjs "out/$name.kernel.json" ${widen:+--widen "$widen"} > "out/$name.ts"
+node gen-ts.mjs "out/$name.kernel.json" ${widen:+--widen "$widen"} --name "$name" > "out/$name.ts"
 node -e 'import("./gen-ts.mjs").then((m) => process.stdout.write(m.CJS_DTS))' > "out/$name.d.cts"
 echo "built out/$name.cjs out/$name.ts"

@@ -11,7 +11,7 @@
 //
 // Types declared `symmetric` are widened to a size parameter; --widen adds more.
 //
-// usage: node gen.mjs <kernel.json> [--widen T1,T2] > Spec.gen.dfy
+// usage: node gen.mjs <kernel.json> [--widen T1,T2] [--liveness-by-fslc] [--name N] > Spec.gen.dfy
 
 import { readFileSync } from "node:fs";
 
@@ -54,7 +54,10 @@ export function widenedTypes(kernel, widen = []) {
   return kernel.types.map((t) => t.name).filter((n) => names.includes(n)).concat(names.filter((n) => !kernel.types.some((t) => t.name === n)));
 }
 
-export function translate(kernel, widen = []) {
+// opts.livenessByFslc: accept `leadsTo` properties without translating them.
+// Dafny proves only the safety obligations; the caller (core.mjs) must have
+// fslc verify the liveness ones, and the generated header names them.
+export function translate(kernel, widen = [], opts = {}) {
   if (kernel.schema_version !== "1.0.0") fail(`kernel schema ${kernel.schema_version}`);
   const sem = kernel.semantics;
   const expectSem = {
@@ -136,6 +139,12 @@ export function translate(kernel, widen = []) {
       case "map":
         domainOf(ty.key);
         return `seq<${dty(ty.value)}>`;
+      case "seq":
+        return `seq<${dty(ty.item)}>`;
+      case "set":
+        return `set<${dty(ty.item)}>`;
+      case "domain": // an inline range type, e.g. a `forall i in 0..3` binder
+        return "int";
       default:
         return fail(`type kind ${ty.kind}`);
     }
@@ -164,6 +173,19 @@ export function translate(kernel, widen = []) {
         // `==> true` one has no trigger, which Dafny warns about.
         if (inner === "true") return `(|${e}| == ${size(domainOf(ty.key))})`;
         return `(|${e}| == ${size(domainOf(ty.key))} && forall ${k} :: 0 <= ${k} < |${e}| ==> (${inner}))`;
+      }
+      case "seq": {
+        // A bounded FIFO: at most `capacity` items, each within its type.
+        if (!Number.isInteger(ty.capacity)) fail("Seq without a static capacity");
+        const k = `k${wfVar++}`;
+        const inner = bound(ty.item, `${e}[${k}]`);
+        if (inner === "true") return `(|${e}| <= ${ty.capacity})`;
+        return `(|${e}| <= ${ty.capacity} && forall ${k} :: 0 <= ${k} < |${e}| ==> (${inner}))`;
+      }
+      case "set": {
+        const x = `x${wfVar++}`;
+        const inner = bound(ty.item, x);
+        return inner === "true" ? "true" : `(forall ${x} :: ${x} in ${e} ==> (${inner}))`;
       }
       default:
         return fail(`type kind ${ty.kind}`);
@@ -219,13 +241,15 @@ export function translate(kernel, widen = []) {
         return fail(`unary ${e.operator}`);
       case "forall":
       case "exists": {
-        const t = domainOf(e.binder.type);
         const x = `${ident(e.binder.name)}_${fresh++}`;
+        // `forall x: T` ranges over a domain type, `forall i in lo..hi` over an int range.
+        const r =
+          e.binder.kind === "range"
+            ? `${expr(e.binder.lo, env, ctx)} <= ${x} <= ${expr(e.binder.hi, env, ctx)}`
+            : range(domainOf(e.binder.type), x);
         const env2 = new Map(env).set(e.binder.name, { dafny: x, type: e.binder.type });
         const body = expr(e.body, env2, ctx);
-        return e.kind === "forall"
-          ? `(forall ${x}: int :: ${range(t, x)} ==> (${body}))`
-          : `(exists ${x}: int :: ${range(t, x)} && (${body}))`;
+        return e.kind === "forall" ? `(forall ${x}: int :: ${r} ==> (${body}))` : `(exists ${x}: int :: ${r} && (${body}))`;
       }
       case "count":
       case "sum":
@@ -242,6 +266,12 @@ export function translate(kernel, widen = []) {
         if (given.length !== st.fields.length || st.fields.some((f) => !(f.name in e.fields))) fail(`struct literal ${e.name}: fields`);
         return `${st.name}(${st.fields.map((f) => expr(e.fields[f.name], env, ctx)).join(", ")})`;
       }
+      case "seq_lit":
+        return `[${e.items.map((x) => expr(x, env, ctx)).join(", ")}]`;
+      case "set_lit":
+        return `{${e.items.map((x) => expr(x, env, ctx)).join(", ")}}`;
+      case "method":
+        return method(e, env, ctx);
       case "min":
       case "max": {
         if (!e.arguments?.length) fail(`${e.kind} without arguments`);
@@ -253,6 +283,36 @@ export function translate(kernel, widen = []) {
     }
   }
 
+  // Seq and Set methods. A partial one (head/pop/at on a too-short Seq) is a
+  // Dafny well-formedness obligation: the generated module verifies only if no
+  // guard, update or invariant can reach it, which is FSL's own requirement.
+  function method(e, env, ctx) {
+    const r = expr(e.receiver, env, ctx);
+    const args = e.arguments.map((a) => expr(a, env, ctx));
+    const kind = e.receiver.type?.kind;
+    const arity = (n) => {
+      if (args.length !== n) fail(`${e.method} with ${args.length} arguments`);
+    };
+    if (kind === "seq") {
+      switch (e.method) {
+        case "size": arity(0); return `|${r}|`;
+        case "push": arity(1); return `(${r} + [${args[0]}])`;
+        case "pop": arity(0); return `${r}[1..]`;
+        case "head": arity(0); return `${r}[0]`;
+        case "at": arity(1); return `${r}[${args[0]}]`;
+        case "contains": arity(1); return `(${args[0]} in ${r})`;
+      }
+    } else if (kind === "set") {
+      switch (e.method) {
+        case "size": arity(0); return `|${r}|`;
+        case "add": arity(1); return `(${r} + {${args[0]}})`;
+        case "remove": arity(1); return `(${r} - {${args[0]}})`;
+        case "contains": arity(1); return `(${args[0]} in ${r})`;
+      }
+    }
+    return fail(`method ${e.method} on ${kind}`);
+  }
+
   const OPS = {
     "==": "==", "!=": "!=", "<": "<", "<=": "<=", ">": ">", ">=": ">=",
     "+": "+", "-": "-", "*": "*", "/": "/", "%": "%",
@@ -261,13 +321,14 @@ export function translate(kernel, widen = []) {
   function binary(e, env, ctx) {
     const op = OPS[e.operator];
     if (!op) fail(`binary operator ${e.operator}`);
-    if (e.operator === "/" || e.operator === "%") fail("division needs a partial-operation obligation (not in this spike)");
-    // `X is some(v) and B`: v is bound in B.
-    if (e.operator === "and" && e.left.kind === "is" && e.left.pattern.binding) {
+    // `/` and `%`: Dafny's int division is Euclidean like FSL's, and a zero
+    // divisor is a well-formedness obligation, so an unguarded one does not verify.
+    // `X is some(v) and B` / `X is some(v) => B`: v is bound in B.
+    if ((e.operator === "and" || e.operator === "=>") && e.left.kind === "is" && e.left.pattern.binding) {
       const x = expr(e.left.operand, env, ctx);
       const v = `${ident(e.left.pattern.binding)}_${fresh++}`;
       const env2 = new Map(env).set(e.left.pattern.binding, { dafny: v, type: e.left.operand.type.item });
-      return `(${x}.Some? && (var ${v} := ${x}.value; ${expr(e.right, env2, ctx)}))`;
+      return `(${x}.Some? ${e.operator === "and" ? "&&" : "==>"} (var ${v} := ${x}.value; ${expr(e.right, env2, ctx)}))`;
     }
     return `(${expr(e.left, env, ctx)} ${op} ${expr(e.right, env, ctx)})`;
   }
@@ -356,9 +417,14 @@ export function translate(kernel, widen = []) {
 
   // ---- properties --------------------------------------------------------
   const props = kernel.properties;
+  const byFslc = [];
   for (const [k, v] of Object.entries(props)) {
     if (["invariants", "reachables"].includes(k)) continue;
-    if (Array.isArray(v) && v.length) fail(`properties.${k} (not in this spike)`);
+    if (k === "leads_to" && opts.livenessByFslc) {
+      byFslc.push(...v.map((p) => p.name));
+      continue;
+    }
+    if (Array.isArray(v) && v.length) fail(`properties.${k} (not in this spike${k === "leads_to" ? "; --liveness-by-fslc leaves them to fslc verify" : ""})`);
   }
   const invariants = props.invariants.map((p) => ({
     name: `Inv_${ident(p.name)}`,
@@ -367,8 +433,8 @@ export function translate(kernel, widen = []) {
 
   // ---- actions -----------------------------------------------------------
   const actions = kernel.actions.map((a) => {
-    if (a.lets.length) fail(`${a.name}: let (not in this spike)`);
-    if (a.partial_operations.length) fail(`${a.name}: partial operations (not in this spike)`);
+    // a.partial_operations needs no translation: each partial read becomes a
+    // Dafny well-formedness obligation where it occurs (see method()).
     if (a.update_semantics !== "simultaneous") fail(`${a.name}: update semantics ${a.update_semantics}`);
     const name = ident(a.name);
     const params = a.parameters.map((p) => {
@@ -384,7 +450,18 @@ export function translate(kernel, widen = []) {
     // Guards in order; an `is some(x)` guard binds x for the guards after it and for the updates.
     const bindings = []; // [dafny name, expression] in order
     const guardText = [];
+    const letBound = new Set();
     for (const g of a.guards) {
+      // A `let` among the guards binds for the guards after it (and the body).
+      if (g.kind === "let") {
+        const v = ident(g.name);
+        const x = expr(g.value, env, { st: "st" });
+        guardText.push({ cond: "true", bind: [v, x] });
+        bindings.push([v, x]);
+        env = new Map(env).set(g.name, { dafny: v, type: g.value.type });
+        letBound.add(g.name);
+        continue;
+      }
       if (g.kind !== "requires") fail(`${a.name}: guard kind ${g.kind}`);
       const ge = g.expression;
       if (ge.kind === "is" && ge.pattern.kind === "some" && ge.pattern.binding) {
@@ -396,6 +473,15 @@ export function translate(kernel, widen = []) {
       } else {
         guardText.push({ cond: expr(ge, env, { st: "st" }) });
       }
+    }
+    // `let` names bind after the guards, in order, over the pre-state; they are
+    // visible to the updates and ensures, like the `is some(x)` bindings.
+    for (const l of a.lets) {
+      if (typeof l.name !== "string" || !l.value) fail(`${a.name}: let shape`);
+      if (letBound.has(l.name)) continue; // already bound in guard order
+      const v = ident(l.name);
+      bindings.push([v, expr(l.value, env, { st: "st" })]);
+      env = new Map(env).set(l.name, { dafny: v, type: l.value.type });
     }
     // Fold right so each binding scopes over the remaining guards.
     let enabled = "true";
@@ -458,10 +544,12 @@ export function translate(kernel, widen = []) {
   });
 
   // ---- emit --------------------------------------------------------------
-  const mod = ident(kernel.spec.name);
+  // opts.name: the module and file name, for specs that share a spec name.
+  const mod = ident(opts.name ?? kernel.spec.name);
   const out = [];
   out.push(`// GENERATED by rust/spikes/dafny-core/gen.mjs from ${kernel.spec.source.file}. Do not edit.`);
   out.push(`// widened: ${widened.map((t) => t.name).join(", ") || "(none)"}`);
+  if (byFslc.length) out.push(`// not proved here (left to fslc verify): leadsTo ${byFslc.join(", ")}`);
   out.push(`abstract module ${mod}Spec {`);
   out.push(`  datatype Option<T> = None | Some(value: T)`);
   for (const e of enums.values()) out.push(`  datatype ${e.name} = ${e.members.join(" | ")}`);
@@ -560,7 +648,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const wi = args.indexOf("--widen");
   const widen = wi >= 0 ? args[wi + 1].split(",").filter(Boolean) : [];
   try {
-    process.stdout.write(translate(JSON.parse(readFileSync(file, "utf8")), widen));
+    const ni = args.indexOf("--name");
+    const opts = { livenessByFslc: args.includes("--liveness-by-fslc"), ...(ni >= 0 ? { name: args[ni + 1] } : {}) };
+    process.stdout.write(translate(JSON.parse(readFileSync(file, "utf8")), widen, opts));
   } catch (err) {
     if (err instanceof Unsupported) {
       process.stderr.write(`unsupported: ${err.message}\n`);

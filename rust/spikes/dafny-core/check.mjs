@@ -161,6 +161,9 @@ function toConf(ty, v) {
     }
     case "map":
       return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, toConf(ty.value, x)]));
+    case "seq":
+    case "set":
+      return v.map((x) => toConf(ty.item, x));
     case "named": {
       const d = types.get(ty.name);
       if (d.kind === "struct") return Object.fromEntries(d.fields.map((f) => [f.name, toConf(f.type, v[f.name])]));
@@ -179,6 +182,9 @@ function fromConf(ty, v) {
     }
     case "map":
       return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fromConf(ty.value, x)]));
+    case "seq":
+    case "set":
+      return v.map((x) => fromConf(ty.item, x));
     case "named": {
       const d = types.get(ty.name);
       if (d.kind === "struct") return Object.fromEntries(d.fields.map((f) => [f.name, fromConf(f.type, v[f.name])]));

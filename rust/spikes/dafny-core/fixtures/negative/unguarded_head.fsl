@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+// Spike (#1908) negative fixture: `take` reads head() and pop() without a
+// guard, so they can run on an empty queue (fslc reports partial_op). The
+// generated Dafny must not verify: the reads are well-formedness obligations.
+spec UnguardedHead {
+  type P = 0..1
+  state {
+    q: Seq<P, 2>,
+    h: Option<P>
+  }
+  init {
+    q = Seq {}
+    h = none
+  }
+  action put(p: P) {
+    requires q.size() < 2
+    q = q.push(p)
+  }
+  action take() {
+    h = some(q.head())
+    q = q.pop()
+  }
+}

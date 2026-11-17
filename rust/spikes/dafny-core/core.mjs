@@ -9,12 +9,14 @@
 //   4. differential against the fslc Monitor, through out/<Name>.ts:
 //      exhaustive at the spec's sizes, then seeded random sequences on a copy of
 //      the spec whose widened types are --scale times larger (the generated
-//      Dafny must not change with the sizes, so the same core is what is checked)
+//      Dafny must not change with the sizes, so the same core is what is checked),
+//      and invcheck.mjs: the generated invariants against fslc's on sampled
+//      unreachable states (--inv-samples, default 200)
 //
 // Any failure exits nonzero. --out copies the core (<Name>.ts, .cjs, .d.cts) to
 // an app; --watch re-runs on every change to the spec or the proof file.
 //
-// usage: node core.mjs <spec.fsl> [--widen T1,T2] [--proof file] [--ai [--attempts n]]
+// usage: node core.mjs <spec.fsl> [--widen T1,T2] [--name N] [--proof file] [--ai [--attempts n]] [--liveness-by-fslc]
 //                      [--depth n] [--random runs] [--length n] [--seed n] [--scale k] [--out dir] [--watch]
 // --depth bounds the exhaustive search (for specs whose state space does not close).
 
@@ -40,6 +42,12 @@ const random = opt("--random", "50");
 const length = opt("--length", "30");
 const scale = Number(opt("--scale", 4));
 const outDir = opt("--out", null);
+// --liveness-by-fslc: a spec with `leadsTo` is accepted; Dafny proves only its
+// safety obligations, and `fslc verify` must pass the liveness ones at the
+// spec's sizes. The core's transitions equal the spec's (step 4), so the
+// verdict carries over to the core at those sizes, not to every size.
+const livenessByFslc = flag("--liveness-by-fslc");
+if (livenessByFslc) process.env.GEN_FLAGS = "--liveness-by-fslc";
 
 function sh(label, cmd, cmdArgs, extra = {}) {
   const r = spawnSync(cmd, cmdArgs, { cwd: here, encoding: "utf8", maxBuffer: 64 << 20, ...extra });
@@ -55,7 +63,8 @@ function once() {
   const k = sh("kernel", fslc, ["kernel", spec]);
   if (!k.ok) return fail("fslc kernel", k);
   const kernel = JSON.parse(k.out);
-  const name = kernel.spec.name;
+  // --name: the output name, for specs that share a spec name (cart_v1, cart_fixed, cart_buggy).
+  const name = opt("--name", kernel.spec.name);
   const proof = opt("--proof", join("proofs", `${name}.proof.dfy`));
   const widened = widenedTypes(kernel, widen.split(",").filter(Boolean));
 
@@ -79,10 +88,14 @@ function once() {
   let src = readFileSync(join(here, spec), "utf8");
   const sizes = {};
   for (const t of widened) {
-    const re = new RegExp(`^(\\s*(?:symmetric\\s+)?type\\s+${t}\\s*=\\s*0\\s*\\.\\.\\s*)(\\d+)`, "gm");
+    // The upper bound may be a literal or a constant's name; the copy gets a
+    // literal. If the constant is read elsewhere too, the generated Dafny for
+    // the copy differs and the identical-Dafny check below fails.
+    const re = new RegExp(`^(\\s*(?:symmetric\\s+)?type\\s+${t}\\s*=\\s*0\\s*\\.\\.\\s*)(\\d+|[A-Za-z_][A-Za-z0-9_]*)`, "gm");
     const hits = [...src.matchAll(re)];
     if (hits.length !== 1) return fail(`enlarging ${t}`, { code: 1, out: "", err: `expected one 'type ${t} = 0..<hi>' in ${spec}, found ${hits.length}\n` });
-    sizes[t] = (Number(hits[0][2]) + 1) * scale;
+    const hi = kernel.types.find((x) => x.name === t).definition.hi; // the Kernel resolved a constant bound to its value
+    sizes[t] = (hi + 1) * scale;
     src = src.replace(re, (_, head) => `${head}${sizes[t] - 1}`);
   }
   const bigSpec = join("out", "big", basename(spec));
@@ -91,7 +104,7 @@ function once() {
   if (!bk.ok) return fail("fslc kernel (enlarged spec)", bk);
   const bigKernel = join("out", "big", `${name}.kernel.json`);
   writeFileSync(join(here, bigKernel), bk.out);
-  const bg = sh("gen (enlarged)", "node", ["gen.mjs", bigKernel, ...(widen ? ["--widen", widen] : [])]);
+  const bg = sh("gen (enlarged)", "node", ["gen.mjs", bigKernel, "--name", name, ...(widen ? ["--widen", widen] : []), ...(livenessByFslc ? ["--liveness-by-fslc"] : [])]);
   const body = (text) => text.split("\n").slice(1).join("\n"); // line 1 names the source file
   if (!bg.ok || body(bg.out) !== body(readFileSync(join(here, "out", `${name}.gen.dfy`), "utf8")))
     return fail("generated Dafny depends on the sizes", { code: 1, out: bg.out, err: bg.err || "the enlarged spec translates to different Dafny\n" });
@@ -99,6 +112,25 @@ function once() {
   const rn = sh("random", "node", ["check.mjs", name, "--random", random, "--length", length, "--seed", seed], { env: { ...process.env, KERNEL: join(here, bigKernel) } });
   if (!rn.ok) return fail(`differential (random, seed ${seed})`, rn);
   const rnr = JSON.parse(rn.out);
+
+  // 4c: the generated invariants against fslc's on unreachable states (too weak / too strong).
+  const iv = sh("invariants", "node", ["invcheck.mjs", name, "--samples", opt("--inv-samples", "200"), "--seed", seed]);
+  if (!iv.ok) return fail(`invariant comparison (seed ${seed})`, iv);
+  const ivr = JSON.parse(iv.out);
+
+  let liveness = null;
+  if (livenessByFslc && kernel.properties.leads_to?.length) {
+    const v = sh("verify", fslc, ["verify", spec]);
+    const vr = (() => {
+      try {
+        return JSON.parse(v.out);
+      } catch {
+        return null;
+      }
+    })();
+    if (!vr || !["proved", "verified"].includes(vr.result)) return fail("fslc verify (liveness left to fslc)", v);
+    liveness = { by: "fslc verify", result: vr.result, completeness: vr.completeness, leads_to: vr.leads_to };
+  }
 
   if (outDir) {
     mkdirSync(outDir, { recursive: true });
@@ -112,6 +144,8 @@ function once() {
       core: outDir ? join(outDir, `${name}.ts`) : `out/${name}.ts`,
       exhaustive: { sizes: exr.sizes, reachable_states: exr.reachable_states, closed: exr.closed, depth: exr.depth, steps_checked: exr.steps_checked, divergences: exr.divergences },
       random: { sizes: rnr.sizes, seed: Number(seed), runs: Number(random), length: Number(length), steps_checked: rnr.steps_checked, divergences: rnr.divergences },
+      invariants: { states: ivr.states, both_hold: ivr.both_hold, both_break: ivr.both_break, disagreements: ivr.disagreements },
+      ...(liveness ? { liveness_not_proved_by_dafny: liveness } : {}),
     }),
   );
   return 0;

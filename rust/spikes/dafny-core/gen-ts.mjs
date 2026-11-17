@@ -21,8 +21,7 @@
 import { readFileSync } from "node:fs";
 import { widenedTypes } from "./gen.mjs";
 
-export function generateTs(kernel, widen = []) {
-  const name = kernel.spec.name;
+export function generateTs(kernel, widen = [], name = kernel.spec.name) {
   const widened = widenedTypes(kernel, widen);
   const types = Object.fromEntries(
     kernel.types.map((t) => {
@@ -47,6 +46,9 @@ export function generateTs(kernel, widen = []) {
           : `${tsType(ty.item)} | null`;
       case "map":
         return `Readonly<Record<string, ${tsType(ty.value)}>>`;
+      case "seq":
+      case "set": // a Set is written as its elements, ascending (as fslc writes it)
+        return `readonly (${tsType(ty.item)})[]`;
       default:
         throw new Error(`type kind ${ty.kind}`);
     }
@@ -160,6 +162,19 @@ function decode(sizes: Sizes, ty: any, v: any, path: string): any {
       // Seq.from, not Seq.of(...): spreading a large map overflows the call stack.
       return core._dafny.Seq.from(ks, (k: string) => decode(sizes, ty.value, v[k], \`\${path}[\${k}]\`));
     }
+    case "seq":
+      if (!Array.isArray(v)) throw new CoreInputError(\`\${path}: expected an array\`);
+      return core._dafny.Seq.from(v, (x: any, k: number) => decode(sizes, ty.item, x, \`\${path}[\${k}]\`));
+    case "set": {
+      if (!Array.isArray(v)) throw new CoreInputError(\`\${path}: expected an array\`);
+      const out = new core._dafny.Set();
+      v.forEach((x: any, k: number) => {
+        const d = decode(sizes, ty.item, x, \`\${path}[\${k}]\`);
+        if (out.contains(d)) throw new CoreInputError(\`\${path}: duplicate element \${JSON.stringify(x)}\`);
+        out.add(d);
+      });
+      return out;
+    }
   }
   throw new Error(\`type kind \${ty.kind}\`);
 }
@@ -189,6 +204,14 @@ function encode(sizes: Sizes, ty: any, d: any, path: string): any {
     case "map": {
       const ks = keys(sizes, ty.key.name);
       return Object.fromEntries(Array.from(d as Iterable<any>, (x, k) => [ks[k], encode(sizes, ty.value, x, \`\${path}[\${ks[k]}]\`)]));
+    }
+    case "seq":
+      return Array.from(d as Iterable<any>, (x, k) => encode(sizes, ty.item, x, \`\${path}[\${k}]\`));
+    case "set": {
+      const xs = Array.from(d as Iterable<any>, (x) => encode(sizes, ty.item, x, path));
+      const t = ty.item.kind === "named" ? SCHEMA.types[ty.item.name] : null;
+      const rank = (x: any): any => (t?.kind === "enum" ? t.members.indexOf(x) : x);
+      return xs.sort((a: any, b: any) => (typeof rank(a) === "number" && typeof rank(b) === "number" ? rank(a) - rank(b) : JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
     }
   }
   throw new Error(\`type kind \${ty.kind}\`);
@@ -266,5 +289,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const file = args.find((a) => !a.startsWith("--"));
   const wi = args.indexOf("--widen");
   const widen = wi >= 0 ? args[wi + 1].split(",").filter(Boolean) : [];
-  process.stdout.write(generateTs(JSON.parse(readFileSync(file, "utf8")), widen));
+  const ni = args.indexOf("--name");
+  const kernel = JSON.parse(readFileSync(file, "utf8"));
+  process.stdout.write(generateTs(kernel, widen, ni >= 0 ? args[ni + 1] : kernel.spec.name));
 }
