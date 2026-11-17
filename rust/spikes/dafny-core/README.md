@@ -18,7 +18,12 @@ Run (needs `dafny` 4.11 and a release `fslc` at `../../target/release/fslc`, or 
 ```bash
 npm ci
 ./run-all.sh        # builds, proves, checks both specs, then runs every negative control
+node example/seat-booking.ts   # the proved SeatBooking core used from TypeScript, at 500 seats x 100 users
 ```
+
+`example/seat-booking.ts` wraps the compiled core in a small typed class: each
+method calls `<action>_Step` and returns `false` when the action is not allowed.
+Node 22.18+ runs it without a build step (type stripping).
 
 ## What each piece guarantees
 
