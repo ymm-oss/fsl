@@ -67,6 +67,25 @@ function once() {
   const name = opt("--name", kernel.spec.name);
   const proof = opt("--proof", join("proofs", `${name}.proof.dfy`));
   const widened = widenedTypes(kernel, widen.split(",").filter(Boolean));
+  // Widening scales a type and nothing else: constants and int ranges keep their
+  // values. A widened type whose bound is a constant that the spec also reads
+  // (`type T = 0..M` with `requires x < M`) would be proved for every size of T
+  // with M fixed, which is not the spec at a larger size: refuse it.
+  const srcText = readFileSync(join(here, spec), "utf8");
+  const reads = new Set();
+  const collect = (x) => {
+    if (Array.isArray(x)) x.forEach(collect);
+    else if (x && typeof x === "object") {
+      if (x.kind === "var" && typeof x.name === "string") reads.add(x.name);
+      Object.values(x).forEach(collect);
+    }
+  };
+  collect([kernel.init, kernel.actions, kernel.properties]);
+  for (const t of widened) {
+    const m = new RegExp(`^\\s*(?:symmetric\\s+)?type\\s+${t}\\s*=\\s*0\\s*\\.\\.\\s*([A-Za-z_][A-Za-z0-9_]*)`, "m").exec(srcText);
+    if (m && reads.has(m[1]))
+      return fail(`widening ${t}`, { code: 2, out: "", err: `widen ${t}: its bound ${m[1]} is also read by the spec; widening would keep ${m[1]} fixed while ${t} grows\n` });
+  }
 
   // 1-3: translate, prove (optionally with the model), compile, generate TS.
   const b = flag("--ai")
@@ -88,9 +107,8 @@ function once() {
   let src = readFileSync(join(here, spec), "utf8");
   const sizes = {};
   for (const t of widened) {
-    // The upper bound may be a literal or a constant's name; the copy gets a
-    // literal. If the constant is read elsewhere too, the generated Dafny for
-    // the copy differs and the identical-Dafny check below fails.
+    // The upper bound may be a literal or a constant's name (checked before the
+    // proof, see boundConstantsReadElsewhere); the copy gets a literal.
     const re = new RegExp(`^(\\s*(?:symmetric\\s+)?type\\s+${t}\\s*=\\s*0\\s*\\.\\.\\s*)(\\d+|[A-Za-z_][A-Za-z0-9_]*)`, "gm");
     const hits = [...src.matchAll(re)];
     if (hits.length !== 1) return fail(`enlarging ${t}`, { code: 1, out: "", err: `expected one 'type ${t} = 0..<hi>' in ${spec}, found ${hits.length}\n` });

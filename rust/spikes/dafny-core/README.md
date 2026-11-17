@@ -30,14 +30,17 @@ Any failure exits nonzero. `--out` copies `<Name>.ts`, `<Name>.cjs` and
 dependency); `--watch` re-runs whenever the spec or a file in `proofs/` changes.
 `--depth` (default 64) bounds the exhaustive search for specs whose state space
 does not close (an unbounded `Int` counter); the report says `closed: false`.
-`--name` sets the output name for specs that share a spec name (`cart_fixed` is
+Widening scales the type and nothing else: constants and int ranges keep their
+values (MutexQueue at 12 processes still queues at most `NPROC = 3`), and
+`core.mjs` refuses to widen a type whose bound is a constant the spec also reads
+(`fixtures/negative/const_bound.fsl`). `--name` sets the output name for specs that share a spec name (`cart_fixed` is
 also `ShoppingCart`). `--liveness-by-fslc` accepts a spec with `leadsTo`: Dafny
 proves only the safety obligations, `fslc verify` must pass the liveness ones at
 the spec's sizes, and the report carries that verdict under
 `liveness_not_proved_by_dafny`. The core's transitions equal the spec's, so the
 verdict carries over to the core at those sizes, not to every size.
-One run takes about 20–30 s (Payment, 1600 states: 27 s), most of it Dafny and
-the random-mode replays.
+One run takes about 25–55 s (SeatBooking 25 s, Payment and OrderWorkflow 55 s),
+most of it Dafny, the random-mode replays and invcheck.
 
 Requirements: `dafny` 4.11, a release `fslc` at `../../target/release/fslc`
 (or `FSLC=...`), Node 22.18+, `npm ci`. `--ai` also needs the `claude` CLI
@@ -111,7 +114,8 @@ if (next) state = next;                                   // null: the spec does
   sends the generated module, the current proof and the errors to the model
   (`claude -p` with no tools), writes the reply to the proof file and runs the same
   `build.sh` again, up to `--attempts` (3) times. A failure located in the generated
-  module is a `gen.mjs` defect that no proof can fix; it exits 3 without asking.
+  module (a `gen.mjs` defect, or a partial operation the spec can reach) is one no
+  proof can fix; it exits 3 without asking.
   The model writes only the proof file, and only `build.sh` decides, so a wrong or
   cheating reply is rejected like a hand-written one, and a spec with a real bug
   cannot pass.
@@ -136,10 +140,10 @@ if (next) state = next;                                   // null: the spec does
 
 ## Results (fslc 5.1.0 built from d1df480b, Dafny 4.11.0, Node 22.23)
 
-`./run-all.sh`: 75/75 expectations, on two runs with identical reports. All
+`./run-all.sh`: 76/76 expectations, on two runs with identical reports. All
 proofs except SeatBooking's and ShoppingCart's were written by the model through
-`prove.mjs` (`claude` 2.1.326), each on its first attempt (TaskBoard's after a
-`gen.mjs` fix). Every row has 0 divergences and 0 invariant disagreements.
+`prove.mjs` (`claude` 2.1.326): TaskBoard's on the third attempt (the first two
+failed on a `gen.mjs` defect), every other one on the first. Every row has 0 divergences and 0 invariant disagreements.
 
 | spec | widened | constructs | Dafny | exhaustive: states, steps | random at 4× (seed 1): sizes, steps | invcheck: states (hold / break) |
 |---|---|---|---|---|---|---|
@@ -166,8 +170,9 @@ proofs except SeatBooking's and ShoppingCart's were written by the model through
   `fslc verify`; it is not proved for every size.
 - `cart_v1` and `cart_impl` have no invariants beyond the type bounds, so invcheck
   finds every in-bounds state holds.
-- For the closed specs the state counts equal `fslc verify --engine explicit`
-  (e.g. 25, 36, 44, 123, 241, 1600). `run-all.sh` also checks `seat_booking` and
+- The exhaustive states come from `fslc conformance`; for the closed specs they
+  also match `fslc verify --engine explicit` (25, 36, 44, 123, 241, 1600), but that
+  is fslc agreeing with itself, not evidence about the core. `run-all.sh` also checks `seat_booking` and
   `cart_v1` exhaustively one size up: 63 states / 756 steps and 108 / 1296.
 
 The proof loop with the real model:
@@ -195,7 +200,9 @@ Negative controls in `run-all.sh`, each of which must be caught:
   `StepPreserves` lacks its proof, `cart_v1_buggy` and `cart_buggy` through
   `core.mjs`, and a module with an unguarded `head()`/`pop()`
   (`fixtures/negative/unguarded_head.fsl`) that Dafny does not verify.
-- Translation: `mutex_queue`'s `leadsTo` is refused without `--liveness-by-fslc`.
+- Translation: `mutex_queue`'s `leadsTo` is refused without `--liveness-by-fslc`,
+  and widening `T` in `fixtures/negative/const_bound.fsl` (`type T = 0..M` with
+  `requires t < M`) is refused. Both must give their expected message.
 - Audit: `assume`, `{:axiom}`, `{:verify false}`, an omitted lemma.
 - Structure: a standalone module, an extra module, a second `include` not at the
   start of its line; Dafny itself rejects a redefined predicate and an added

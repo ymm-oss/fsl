@@ -36,11 +36,16 @@ core "fixtures/batching (/ and %)" fixtures/batching.fsl --seed 1 --depth 8
 mkdir -p out/neg/liveness
 ../../target/release/fslc kernel ../../../specs/mutex_queue.fsl > out/neg/liveness/MutexQueue.kernel.json
 expect 2 "gen.mjs refuses mutex_queue's leadsTo without --liveness-by-fslc" node gen.mjs out/neg/liveness/MutexQueue.kernel.json --widen ProcId
+grep -q '^unsupported: properties.leads_to' out/last.log || { echo "FAIL  leadsTo refusal: unexpected message"; status=1; }
 # A reachable partial read (head/pop on an empty Seq) does not verify in Dafny.
 mkdir -p out/neg/partial
 ../../target/release/fslc kernel fixtures/negative/unguarded_head.fsl > out/neg/partial/UnguardedHead.kernel.json
 node gen.mjs out/neg/partial/UnguardedHead.kernel.json > out/neg/partial/UnguardedHead.gen.dfy
 expect 1 "Dafny rejects a generated module with an unguarded head()/pop()" dafny verify --allow-warnings out/neg/partial/UnguardedHead.gen.dfy
+grep -qE 'Error: (lower bound|index) out of range' out/last.log || { echo "FAIL  unguarded head(): not rejected for the range"; status=1; }
+# Widening scales a type only; a bound constant the spec also reads is refused.
+expect 2 "core.mjs refuses widening a type whose bound constant is also read" node core.mjs fixtures/negative/const_bound.fsl --widen T --seed 1
+grep -q 'is also read by the spec' out/last.log || { echo "FAIL  const-bound refusal: unexpected message"; status=1; }
 # Enums, structs, field updates, if, sum, min; proofs written by the model through
 # prove.mjs. Specs whose counters are unbounded are searched to depth 8.
 while read -r f args; do

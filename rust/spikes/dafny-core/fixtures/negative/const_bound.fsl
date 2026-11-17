@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Spike (#1908) negative fixture: T's bound M is also read by a guard, so
+// widening T alone would not be this spec at a larger size. core.mjs refuses.
+spec ConstBound {
+  const M = 2
+  type T = 0..M
+  state { x: Map<T, Bool> }
+  init { forall t: T { x[t] = false } }
+  action mark(t: T) {
+    requires t < M
+    x[t] = true
+  }
+}
