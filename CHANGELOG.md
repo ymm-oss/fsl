@@ -5,6 +5,227 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-11-18
+
+- Changed (#1885, refs #1851, #1247): `verify --engine explicit`, the explicit
+  half of `--engine auto`, the concrete boundary probe that runs before BMC, and
+  the vacuity reachability probe cost less per state; what they explore and
+  report is unchanged (stdout, stderr, and exit code byte-identical apart from
+  the wall-clock and memory `cost` fields on every `.fsl` under `specs/`,
+  `examples/`, and `rust/fslc/tests/fixtures/`). A stepped action's guard is no
+  longer evaluated a second time, a successor is no longer copied out of and
+  back into a scratch monitor for every candidate, and the visited states and
+  parent links are kept packed (one canonical byte string per state, the store
+  the refinement searches use since #1247) instead of as full state copies. On
+  `specs/order_system.fsl` `--engine auto` explores about 21,200 instead of
+  11,300 states per second, `examples/named_predicate.fsl` about 21,000 instead
+  of 15,500, and `specs/order_workflow.fsl` about 31,500 instead of 16,300; the
+  default `verify specs/order_system.fsl` reports `cost.elapsed_s` 1.44 s
+  instead of 2.02 s (medians of three release runs on a shared machine). No
+  migration is needed.
+- Changed (#1888, performance): native bounded verification asks one combined
+  unranked `leadsTo` lasso query per binding and skips enumeration only on
+  `unsat`; `sat` and `unknown` retain the existing ordered search. Solver-work
+  and timing statistics under `cost` change; verdicts and diagnostic evidence
+  retain their output-preservation contract. Deadlock-stagnation checks remain
+  per pending step.
+- Fixed (#1782, refs #1276): `preserve progress { respond <ID> by … }` can name a
+  business or `fsl 5` requirements policy's progress property by its policy ID as
+  declared (`respond POL-WAIT-001 by promote`), so a refinement carries an upper
+  `leadsTo` without the upper spec being rewritten. `respond` reads its name
+  with the same rule as the `policy` declaration and matches the abstract Kernel
+  `leads_to` name exactly; a flow that loses the progress is
+  `refinement_failed`/`progress_lost` (exit 1) and one that keeps it refines
+  (exit 0). A quoted name stays a parse error, accepted plain identifiers are
+  unchanged, and `fmt` prints the ID as written. An unknown `respond` name is
+  still `error/type` (exit 2) at `respond`; its message now lists the
+  abstraction's `leadsTo` names (`… declares leadsTo 'POL-WAIT-001'`, or
+  `declares no leadsTo`). A non-ASCII `respond` name in an `fsl 5` refinement is
+  still refused at the same location (exit 2, `kind: "parse"`), now as
+  `non_ascii_requirement_id`, as a non-ASCII policy ID is, instead of
+  `canonical_name_not_ascii`.
+- Fixed (#1880): the language server indexes a hyphenated requirement-style ID
+  (`policy POL-WAIT-001`, and likewise `goal`, `control`, `requirement`,
+  `acceptance`, `forbidden`, `rule`, `decide` and `scenario` IDs and their uses
+  in `satisfies`, `covers`, governance items and a refinement's `respond`) as
+  one name, exactly as the parser reads it, instead of as its first token.
+  Hover, definition, references and rename on any part of the ID act on the
+  whole ID, and IDs sharing a prefix (`POL-HOLD-002`, `POL-WAIT-001`) no longer
+  resolve to each other, also from `respond` in another file. Plain identifiers
+  are unchanged; an ID written across lines is still indexed token by token.
+- Unified (#461): the liveness symmetry performance regression test compares
+  symmetric and plain twins on the current Z3 backend, requiring more than 5%
+  fewer propagations, instead of a bundled-Z3-specific absolute threshold; the
+  bound is calibrated from measured bundled and native Z3 results, and the
+  counts are printed on failure. Dual-call-site ablation remains a rejecting
+  control on bundled Z3; its native Z3 ratio is unverified. Test-only; product
+  behaviour is unchanged.
+- Unified (#1169): the weakenings `explain`/`html` try in their counterfactual
+  phases have one enumerator, `fsl_tools::enumerate_builtin_mutants`. The
+  reachable phase stops enumerating its own list (`weakening_candidates` and
+  `statement_removals` are removed) and, like the invariant phase, takes the
+  owner's `assignment_remove` / `requires_remove` / `fair_remove` mutants in
+  the owner's order, printed through one mapping to the public `op` and
+  `target`, and both phases read their document through one function. The two
+  lists were equal in order, targets and weakened models on every `specs/` and
+  `examples/` spec; the one difference, which mutants count as init
+  weakenings, stays an argument: the reachable phase marks a mutant of the
+  `init` block (`BuiltinMutant::edits_init`), the invariant phase every mutant
+  of something named `init`, so an action named `init` keeps its labels.
+  Command output and exit codes are unchanged.
+- Unified (#1287): `verify`'s engine decisions read the typed result instead
+  of the rendered envelope. `--engine auto` falls back to BMC on
+  `fslc_rust::verification_output::explicit_budget_unknown`, the predicate
+  `render_explicit_output` itself uses for `unknown_budget`, and names the
+  state count from `ExplicitResult.states_explored`. The deferred concrete
+  probe and the induction base read the solved run's `first_bmc_failure`
+  before it is rendered. `--lemma` adopts a candidate on its `LemmaVerdict`,
+  whose word is the entry's `status`, and continues, stops and recommends
+  lemmas on the induction run's verdict (proved, counterexample to
+  induction, ranking failure) instead of comparing `result`, `status` and
+  `violation_kind` strings. A cached envelope is still read as JSON. Command
+  output, exit codes and cache-key derivation are unchanged.
+- Unified (#1870): a refinement walk's `fsl_runtime::RefinementVerdict` has one
+  projection onto its public result word, exit code and failure kind,
+  `fslc_rust::outcome::refine_outcome` (`RefineOutcome`). `fslc refine` (and
+  `chain`'s refine layer through it), inline `implements` in `check`/`verify`,
+  the Worker's governance preservations, `fslc diff` and the `mutate`
+  implements oracle read it instead of each matching the verdict and spelling
+  the word and exit by hand; a budget stop is `RefineOutcome::Inconclusive`,
+  which `mutate` keeps reporting as an inconclusive mutant. The failure arms
+  take their word and exit from the `Verdict` table, which gains no `refines`
+  entry. `fsl-runtime`'s `fsl-refine` driver keeps its own match, because
+  `fsl-runtime` cannot depend on `fslc-rust`. Command output and exit codes
+  are unchanged.
+- Unified (#1871): whether a bounded run's `BmcResult` fails, and on what,
+  has one owner, `fslc_rust::verification_output::first_bmc_failure`
+  (`BmcRunFailure`), in `verify`'s order: violation, unreached reachable,
+  deadlock, leadsTo. Its arguments state what each consumer counts: a
+  `DeadlockMode` (a deadlock fails only under `Error`) and
+  `UnreachedReachables`. `render_bmc_output` dispatches on it; `scenarios`
+  (its `--deadlock` parsed once), the `explain`/`html` counterfactual runs
+  and the `mutate` oracle call it instead of each testing the fields by hand,
+  `mutate` and the counterfactual runs still not counting a deadlock. `html`
+  and `ledger` build their depth, deadlock mode and engine once
+  (`DerivedRunOptions`) and pass it to every stage; the deadlock mode of the
+  witness stage is a field of it, which `html`'s explain stage keeps at
+  `warn`, as `explain` does, and `ledger` sets to the requested mode. Command
+  output and exit codes are unchanged.
+- Unified (#1872): the `rust/fslc` integration tests spawn the native `fslc`
+  binary through one helper, `rust/fslc/tests/support/fslc_cli.rs`, instead of
+  each file deciding its own verify-cache setup. Every child gets a per-test
+  `FSLC_CACHE_DIR` under `CARGO_TARGET_TMPDIR` with `FSLC_CACHE` and
+  `FSLC_CACHE_VERIFY` removed, so a test no longer reads or writes the
+  developer's or CI runner's cache; a test that shares a cache on purpose passes
+  its directory explicitly. `tests/cli_cache_isolation_guard.rs` fails when a
+  function spawns the binary with a bare `Command::new(env!(..))` and sets
+  neither `FSLC_CACHE=off` nor its own `FSLC_CACHE_DIR`, or when a test source
+  names the binary otherwise without the helper or its own cache setup; it has
+  no allowlist. A cache directory name is never reused after its test thread exits, and
+  bounded retries skip permission-denied names while Windows finishes deleting
+  directories. Test assertions and product behaviour are unchanged.
+- Unified (#1873): a scoped satisfiability query (push, assert, check, pop) has
+  one owner in `fsl-verifier`, `scoped_query` (and `scoped_check`, which
+  returns the solver's answer unchanged); it pops the scope on every path.
+  `probe`/`probe_not`, `entailed`, `terms_are_unsat`, `proven_unsat`,
+  `partial_witness`, `build_witness` and `rank_measure_path_is_reachable` call
+  it instead of spelling the sequence out, and each states what a solver
+  `unknown` means to it at the call site: an `OnUnknown` argument (`Fail` with
+  its own message, or `NotProved`), or, in `probe`, whose classification the P2
+  mutation scope examines in that body, its own `match`. Which error is reported when the closing `pop` fails
+  too, which the helpers did not agree on, stays each caller's, as a
+  `PopFailure` argument. `entailed` asks through `scoped_check_conjunction`,
+  which still builds the conjunction inside the scope, because Z3's search
+  statistics depend on it; if that conjunction cannot be built, the scope is
+  now closed instead of being left open. The solver sees the same queries in
+  the same order; command output and exit codes are unchanged. Four of the six
+  inline obligation blocks of `prove_ranked_leadstos_assuming` (helpful
+  fairness, sticky enabledness, plain and helpful progress) also use the owner,
+  keeping their `unknown` errors and pop-failure precedence; when an assertion,
+  check or model read fails inside one of them, the scope is now popped before
+  the error is returned, and a failing pop takes precedence. Non-negativity,
+  no-deadlock and `prove_induction_scoped` keep their own sequence, because they
+  interleave term construction with assertions after the push.
+- Unified (#1874): bounded model checking asks an action instance's guard and
+  body definedness (guard partial, guard non-partial, body partial, body
+  non-partial) in one function in `fsl-verifier`, `probe_instance_definedness`.
+  The search's typed check and the definedness pass both call it and pass their
+  own filter, which stay different: the search skips an instance with no typed
+  partial-operation candidate and otherwise asks all four probes; the pass asks
+  a partial probe only when the evaluation has a partial operation, and the
+  non-partial probes, with the range lemmas, only after its disjunctive probe
+  answered `sat`. The solver sees the same queries in the same order; command
+  output and exit codes are unchanged. A test-only recording solver pins the
+  query sequence of eight specs with partial operations in guards, bodies and
+  `ensures`. The search's SMT term owners retain their original lifetimes;
+  a full-evidence regression detects witness drift from early term destruction,
+  pinned to each measured platform's digest (other platforms check that two
+  runs agree and print the digest).
+- Unified (#1875): `check` and nine single-root commands admit their root
+  through `spec_loading`'s owner. `check` admits with `admit_root_source` and
+  runs in `run_prepared_roots` instead of entering the dependency scope and
+  calling `migration::admit_source` itself; a requirements read failure under
+  `--strict-tags` still reports without the dependency findings and edition
+  metadata. `replay`, `scenarios`, `kernel`, `conformance`, `testplan`,
+  `explain`, `typestate`, `testgen` and `approval diff` call
+  `run_admitted_root` instead of expanding `run_admitted_roots` with a
+  one-element vector by hand. The native scoped, replay and resolver-backed loaders share one
+  parse/lower, build and requirements-gate composition with explicit scope and
+  replay policies, and `check --strict-tags` reuses its checked model instead of
+  loading it a second time.
+  Command output and exit codes are unchanged.
+- Unified (#1876): one command invocation's state -- the dependency findings of
+  its open `DependencyScope`, the files it read as inputs (the output-overwrite
+  refusal) and the requirements solver's answers -- has one owner in
+  `rust/fslc/src/invocation.rs` instead of a thread-local and two process-wide
+  `Mutex` statics with different scopes. A thread works in an invocation only
+  when it is handed one (`Handoff::current`, nested; `.outside_scope()`, outer):
+  the chain steps, the chain workers and mutate's repeated baseline keep their
+  existing outer behavior, and `main` hands the command's invocation to the
+  `fslc` worker thread. A requirements question no longer holds a lock shared
+  with other questions while the solver runs; threads asking the same question
+  still wait for one answer. Rust API: `DependencyScope` moved out of
+  `fslc_rust::migration`, `DependencyRecords` is a `Send` handle read through
+  `lock()`, and `DependencyResolver::native` takes the scope's records. Command
+  output is unchanged.
+- Unified (#1877): the verify cache's format tags -- the key salt, the entry
+  directory, the cross-depth pointer directory, the entry schema and the
+  pointer schema -- are each one named constant in
+  `rust/fslc/src/verification.rs`, used by every reader and writer, and the
+  pointer directory is spelled as a subdirectory of the entry directory, so
+  the two cannot move apart. `chain --jobs` groups steps by asking
+  `chain_steps_may_share_verify_cache_entry`, beside the key derivation,
+  whether two steps can share an entry, instead of comparing root-file bytes
+  itself; the answer is unchanged (equal root bytes, `spec` steps only). The
+  key derivation no longer takes the unused source path. Cache keys, the cache
+  layout, entry and pointer contents and command output are unchanged.
+- Unified (#1899, refs #1870): the refinement sequence (load both sides, parse
+  the mapping, walk, then the progress stage on a walk that refines) is one
+  library function, `fslc_rust::refine_run::run_refinement`. `fslc refine` (and
+  through it native governance preservations) and the Worker's governance
+  preservations both call it with their own loaders, solver and depths, instead
+  of the Worker restating the sequence. Command output and exit codes are
+  unchanged.
+- Unified (#1919, refs #1782): represent preserve-progress responses with named `ProgressResponse` fields aligned with `ProgressMap`, preserving serialized JSON, progress checks, and diagnostic locations.
+- Documented (#1869): the `LANGUAGE.md` §7 synopsis, its Japanese copy and
+  `skills/fsl/references/commands.md` list every option each row's `--help`
+  lists, including `explain --lowering`/`--names`, the six `domain testgen`
+  targets, `check --strict-tags`/`--requirements`/`--edition` and `--deadlock`
+  on `html`, `scenarios` and the other commands that take it; the
+  `counterexample export` engines stay `bmc|explicit|auto`. The
+  `explain --readable` description says the text computes no counterfactual or
+  witness, that its `Counterfactual scope` line describes the JSON analysis and
+  that `--depth` bounds only its `Implements:` check. `DESIGN-explain.md`
+  describes the Rust implementation and narrows what the #1838 equality test
+  checks, §13.2 says `readings` follow `--names`, and the
+  `tools/aggregate_changelog.sh` usage says `check-pr` reads `BASE_SHA` and
+  `HEAD_SHA`. No behavior change.
+- Documented (#1871): `fslc html --help`, both language references, the HTML report
+  design and the command reference now explain that verification follows
+  `--deadlock`, while witnesses always use `warn`: a detected `deadlock_terminal`
+  witness remains visible with `ignore`, and `error` still builds witnesses.
+  A CLI regression test pins this existing behavior; runtime behavior is unchanged.
+
 ## [5.1.0] - 2026-11-12
 
 - Added (#1803): an `fsl 5` requirements event may write its move in parentheses after the phrase
@@ -10591,7 +10812,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v5.1.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v5.2.0...HEAD
+[5.2.0]: https://github.com/ymm-oss/fsl/compare/v5.1.0...v5.2.0
 [5.1.0]: https://github.com/ymm-oss/fsl/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/ymm-oss/fsl/compare/v4.12.0...v5.0.0
 [4.12.0]: https://github.com/ymm-oss/fsl/compare/v4.11.0...v4.12.0
