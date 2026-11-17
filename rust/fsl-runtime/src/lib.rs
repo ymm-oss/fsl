@@ -1606,18 +1606,28 @@ impl Monitor {
     /// time. `step` is the logical step of `state`; the monitor's own
     /// `step` is not used either. `checked_bounds` is
     /// [`Monitor::step_selected`]'s selection of implicit state bounds.
+    ///
+    /// `admitted` names the successors a search already holds as having
+    /// passed the state bounds and invariants, with `checked_bounds`, after
+    /// a step: see [`Monitor::execute_from`].
     fn step_enumerated(
         &self,
         state: &State,
         step: usize,
         candidate: &ActionCandidate,
         checked_bounds: Option<&BTreeSet<String>>,
+        admitted: &mut dyn FnMut(&State) -> bool,
     ) -> Result<StepResult, RuntimeError> {
         let mut step = step;
         match candidate {
-            ActionCandidate::Enabled(instance) => {
-                Self::execute_from(&self.model, state, &mut step, instance, checked_bounds)
-            }
+            ActionCandidate::Enabled(instance) => Self::execute_from(
+                &self.model,
+                state,
+                &mut step,
+                instance,
+                checked_bounds,
+                admitted,
+            ),
             ActionCandidate::GuardPartial(instance) => {
                 Ok(guard_partial_result(instance, state.clone(), step + 1))
             }
@@ -1743,6 +1753,7 @@ impl Monitor {
             &mut self.step,
             enabled,
             checked_bounds,
+            &mut |_| false,
         )?;
         if stepped.violation.is_none() {
             self.state = stepped.state.clone();
@@ -1756,6 +1767,12 @@ impl Monitor {
     /// pre-state instead of copying it out of the monitor first, and letting
     /// a search keep its own pre-state, saves the per-step `State` copies
     /// issue #1247 measured (`old_state`, and the `self.state` round trip).
+    ///
+    /// A successor `admitted` accepts is not checked against the state bounds
+    /// and invariants again, only against the `trans` properties and
+    /// `ensures` that depend on this step: the caller vouches that it passed
+    /// the state-only checks after an earlier step, and that the invariants
+    /// do not read `old()`, so they would pass again.
     #[allow(clippy::too_many_lines)]
     fn execute_from(
         model: &KernelModel,
@@ -1763,6 +1780,7 @@ impl Monitor {
         step: &mut usize,
         enabled: &EnabledAction,
         checked_bounds: Option<&BTreeSet<String>>,
+        admitted: &mut dyn FnMut(&State) -> bool,
     ) -> Result<StepResult, RuntimeError> {
         let action = model
             .actions
@@ -1804,27 +1822,33 @@ impl Monitor {
         let mut next = old_state.clone();
         next.extend(pending);
         *step += 1;
-        let violation =
-            match check_state_selected(&next, Some(old_state), model, *step, checked_bounds) {
-                Ok(violation) => violation,
-                Err(error) if is_partial_operation_error(&error) => {
-                    return Ok(StepResult {
-                        action: enabled.action.clone(),
-                        params: enabled.params.clone(),
-                        state: old_state.clone(),
-                        attempted_state: Some(next),
-                        violation: Some(Violation {
-                            kind: "partial_op".to_owned(),
-                            name: fsl_core::SyntheticName::PartialAction {
-                                action: &action.name,
-                            }
-                            .internal(),
-                            step: *step,
-                        }),
-                    });
-                }
-                Err(error) => return Err(error),
-            };
+        let violation = match check_successor(
+            &next,
+            old_state,
+            model,
+            *step,
+            checked_bounds,
+            admitted(&next),
+        ) {
+            Ok(violation) => violation,
+            Err(error) if is_partial_operation_error(&error) => {
+                return Ok(StepResult {
+                    action: enabled.action.clone(),
+                    params: enabled.params.clone(),
+                    state: old_state.clone(),
+                    attempted_state: Some(next),
+                    violation: Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: fsl_core::SyntheticName::PartialAction {
+                            action: &action.name,
+                        }
+                        .internal(),
+                        step: *step,
+                    }),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         if let Some(violation) = violation {
             return Ok(StepResult {
                 action: enabled.action.clone(),
@@ -2794,7 +2818,7 @@ pub fn check_refinement_with_budget(
         for (_, state_index, candidate) in candidates {
             let (state_id, state) = (layer[state_index].0, &layer[state_index].1);
             let alpha_before = &alphas[state_index];
-            let stepped = scratch.step_enumerated(state, step, &candidate, None)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate, None, &mut |_| false)?;
             let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
@@ -3372,6 +3396,9 @@ pub fn find_boundary_violation_reaching(
     }
 
     drop(initial_state);
+    // Every stored state but the root passed the state checks of the step
+    // that stored it; see `Monitor::execute_from`.
+    let admits_stored = !invariants_read_old(model);
     let mut reachability = ReachabilityProbe::new(expressions);
     let mut queue = VecDeque::from([(root, 0_usize)]);
     while let Some((id, step)) = queue.pop_front() {
@@ -3385,7 +3412,9 @@ pub fn find_boundary_violation_reaching(
         }
         for candidate in scratch.candidates_at(&state)? {
             let instance = candidate.instance();
-            let stepped = scratch.step_enumerated(&state, step, &candidate, None)?;
+            let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                admits_stored && visited.id_of(next).is_some_and(|id| id != root)
+            })?;
             if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
                     let mut found_trace = visited.trace(id);
@@ -3517,7 +3546,7 @@ fn first_self_violation(
         let state = &scratch.state;
         for candidate in scratch.candidates()? {
             let instance = candidate.instance();
-            let stepped = scratch.step_enumerated(state, step, &candidate, None)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate, None, &mut |_| false)?;
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = visited.trace(id);
                 found_trace.push(trace_step_from_result(step + 1, state, instance, &stepped));
@@ -3627,6 +3656,8 @@ pub fn expression_reachability(
     let initial_state = std::mem::take(&mut scratch.state);
     let (mut visited, root) = trace::StateStore::with_root(&initial_state);
     drop(initial_state);
+    // As in `find_boundary_violation_reaching`.
+    let admits_stored = !invariants_read_old(model);
     let mut queue = VecDeque::from([(root, 0_usize)]);
     let mut reachability = ReachabilityProbe::new(expressions);
 
@@ -3640,7 +3671,9 @@ pub fn expression_reachability(
             continue;
         }
         for candidate in scratch.candidates_at(&state)? {
-            let stepped = scratch.step_enumerated(&state, step, &candidate, None)?;
+            let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                admits_stored && visited.id_of(next).is_some_and(|id| id != root)
+            })?;
             if stepped.violation.is_some() {
                 continue;
             }
@@ -3657,6 +3690,15 @@ pub fn expression_reachability(
         }
     }
     Ok(reachability.finish())
+}
+
+/// Whether an invariant's value can depend on the pre-state of the step
+/// that reached the state it is checked in.
+fn invariants_read_old(model: &KernelModel) -> bool {
+    model
+        .invariants
+        .iter()
+        .any(|property| fsl_core::expression_reads_old(&property.expr))
 }
 
 /// The per-expression verdicts of a reachability walk
@@ -4576,7 +4618,30 @@ fn check_state_selected(
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<Option<Violation>, RuntimeError> {
     with_total_division(|| {
-        check_state_selected_inner(state, old_state, model, step, checked_bounds)
+        check_state_selected_inner(state, old_state, model, step, checked_bounds, false)
+    })
+}
+
+/// [`check_state_selected`] for a successor reached from `old_state`, which
+/// skips the state bounds and invariants when the successor is `admitted`
+/// (see [`Monitor::execute_from`]).
+fn check_successor(
+    state: &State,
+    old_state: &State,
+    model: &KernelModel,
+    step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    admitted: bool,
+) -> Result<Option<Violation>, RuntimeError> {
+    with_total_division(|| {
+        check_state_selected_inner(
+            state,
+            Some(old_state),
+            model,
+            step,
+            checked_bounds,
+            admitted,
+        )
     })
 }
 
@@ -4614,11 +4679,13 @@ fn check_state_selected_inner(
     model: &KernelModel,
     step: usize,
     checked_bounds: Option<&BTreeSet<String>>,
+    admitted: bool,
 ) -> Result<Option<Violation>, RuntimeError> {
-    if let Some(violation) = check_state_bounds(state, model, step, checked_bounds)? {
+    if !admitted && let Some(violation) = check_state_bounds(state, model, step, checked_bounds)? {
         return Ok(Some(violation));
     }
-    for property in &model.invariants {
+    let invariants: &[fsl_core::PropertyDef] = if admitted { &[] } else { &model.invariants };
+    for property in invariants {
         let mut bindings = Bindings::new();
         let value = match eval(&property.expr, state, &mut bindings, model, old_state) {
             Ok(value) => value,

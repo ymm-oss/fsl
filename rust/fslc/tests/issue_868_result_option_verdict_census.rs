@@ -183,6 +183,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-runtime/src/lib.rs",
+        4584,
+        "check_successor",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-runtime/src/lib.rs",
         4106,
         "check_state_bounds",
         ResultOption

@@ -276,6 +276,12 @@ impl StateStore {
         Admission::New(self.insert_encoded(Some((parent, action))))
     }
 
+    /// The id `state` is stored under, if it is stored.
+    pub(crate) fn id_of(&mut self, state: &State) -> Option<usize> {
+        encode_state(state, &mut self.scratch);
+        self.ids.get(self.scratch.as_slice()).copied()
+    }
+
     /// The stored state `id`.
     pub(crate) fn state(&self, id: usize) -> State {
         decode_state(&self.nodes[id].bytes)

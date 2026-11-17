@@ -2010,6 +2010,21 @@ pub(crate) fn visit_expr_children(
     Ok(())
 }
 
+/// Whether `expr` reads a pre-state: an `old(...)` anywhere in it, binder
+/// bounds and filters included.
+#[must_use]
+pub fn expression_reads_old(expr: &Expr) -> bool {
+    if matches!(expr, Expr::UnaryNamed { name, .. } if name == "old") {
+        return true;
+    }
+    let mut found = false;
+    let _ = visit_expr_children(expr, &mut |child| {
+        found = found || expression_reads_old(child);
+        Ok(())
+    });
+    found
+}
+
 /// Return the first source span of a named expression call, including nested calls.
 #[must_use]
 pub fn expression_call_span(expr: &Expr, call_name: &str) -> Option<fsl_syntax::Span> {

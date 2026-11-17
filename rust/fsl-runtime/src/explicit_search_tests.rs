@@ -71,3 +71,60 @@ fn boundary_probe_evaluates_each_instance_guard_once_per_state() {
     assert_eq!(probe.states_explored, STATES);
     assert_eq!(evaluations, STATES * INSTANCES);
 }
+
+/// `n = 1` is stored when `inc` first reaches it; `back` reaches it again
+/// from `n = 2`, where `property` indexes the empty `xs`.
+fn stored_edge(property: &str) -> String {
+    format!(
+        "spec StoredEdge {{
+  state {{
+    n: 0..2,
+    xs: Seq<0..1, 1>
+  }}
+  init {{
+    n = 0
+    xs = Seq {{}}
+  }}
+  action inc() {{
+    requires n < 2
+    n = n + 1
+  }}
+  action back() {{
+    requires n == 2
+    n = 1
+  }}
+  {property} FromTop {{ old(n) == 2 => old(xs)[0] == 0 }}
+}}"
+    )
+}
+
+fn stored_edge_finding(property: &str) -> (Violation, Option<String>) {
+    let probe = find_boundary_violation(&model(&stored_edge(property)), 5, CONCRETE_PROBE_BUDGET)
+        .expect("probe");
+    let (violation, trace) = probe.finding.expect("finding");
+    let action = trace
+        .last()
+        .and_then(|step| step.action.as_ref())
+        .map(|action| action.name.clone());
+    (violation, action)
+}
+
+/// A successor the probe already stored skips only its state checks: the
+/// `trans` property of the edge that reaches it again is still evaluated.
+#[test]
+fn boundary_probe_checks_trans_on_an_edge_into_a_stored_state() {
+    let (violation, action) = stored_edge_finding("trans");
+    assert_eq!(violation.kind, "partial_op");
+    assert_eq!(violation.step, 3);
+    assert_eq!(action.as_deref(), Some("back"));
+}
+
+/// An invariant that reads `old()` depends on the edge too, so a stored
+/// successor is checked against it again.
+#[test]
+fn boundary_probe_rechecks_an_old_reading_invariant_on_a_stored_state() {
+    let (violation, action) = stored_edge_finding("invariant");
+    assert_eq!(violation.kind, "partial_op");
+    assert_eq!(violation.step, 3);
+    assert_eq!(action.as_deref(), Some("back"));
+}

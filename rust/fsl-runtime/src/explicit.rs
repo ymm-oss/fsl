@@ -288,7 +288,13 @@ pub fn verify_explicit_selected(
         for ((state, id), candidates) in frontier.iter().zip(&enabled_by_state) {
             for candidate in candidates {
                 let instance = candidate.instance();
-                let stepped = scratch.step_enumerated(state, level, candidate, checked_bounds)?;
+                let stepped = scratch.step_enumerated(
+                    state,
+                    level,
+                    candidate,
+                    checked_bounds,
+                    &mut |_| false,
+                )?;
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.
                 let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
