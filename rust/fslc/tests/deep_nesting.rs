@@ -736,3 +736,64 @@ fn eval_reads_a_deeply_nested_map_key_instead_of_overflowing_the_stack() {
     };
     drop_nested_key(*left);
 }
+
+/// `m[0] == 0`, which holds in [`constant_map_model`].
+fn true_term() -> fsl_core::KernelExpr {
+    fsl_core::KernelExpr::Binary {
+        op: "==".to_owned(),
+        left: Box::new(fsl_core::KernelExpr::Index(
+            Box::new(fsl_core::KernelExpr::Var("m".to_owned())),
+            Box::new(fsl_core::KernelExpr::Num(0)),
+        )),
+        right: Box::new(fsl_core::KernelExpr::Num(0)),
+    }
+}
+
+/// `terms` copies of [`true_term`] joined by `and`, nested to the left or to
+/// the right.
+fn conjunction(terms: usize, left_nested: bool) -> fsl_core::KernelExpr {
+    let mut expr = true_term();
+    for _ in 1..terms {
+        let (left, right) = if left_nested {
+            (expr, true_term())
+        } else {
+            (true_term(), expr)
+        };
+        expr = fsl_core::KernelExpr::Binary {
+            op: "and".to_owned(),
+            left: Box::new(left),
+            right: Box::new(right),
+        };
+    }
+    expr
+}
+
+/// Takes a [`conjunction`] apart one level at a time.
+fn drop_conjunction(mut expr: fsl_core::KernelExpr) {
+    while let fsl_core::KernelExpr::Binary { op, left, right } = expr {
+        if op != "and" {
+            break;
+        }
+        expr = if matches!(*left, fsl_core::KernelExpr::Binary { ref op, .. } if op == "and") {
+            *left
+        } else {
+            *right
+        };
+    }
+}
+
+/// An `and` chain is evaluated connective by connective without passing
+/// through `eval` between them, so every conjunct is evaluated.
+#[test]
+fn eval_decides_a_deeply_nested_conjunction_instead_of_overflowing_the_stack() {
+    let (model, state) = constant_map_model();
+    for left_nested in [true, false] {
+        let chain = conjunction(EVALUATED_DEPTH, left_nested);
+        assert_eq!(
+            eval_on_small_stack(&model, &state, &chain).expect("evaluate the conjunction"),
+            fsl_core::FslValue::Bool(true),
+            "left-nested: {left_nested}"
+        );
+        drop_conjunction(chain);
+    }
+}

@@ -158,12 +158,26 @@ fn eval_observing(
     old_state: Option<&State>,
     observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
-    // Only an `is` on the spine can bind; without one the copy would stay
-    // equal to `bindings`.
-    if matches!(expr, Expr::Is { .. })
-        || (matches!(expr, Expr::Binary { op, .. } if fsl_core::pattern_binding_flows(op, false))
-            && connective_may_bind(expr))
+    if let Expr::Binary { op, left, right } = expr
+        && is_connective(op)
     {
+        // Only an `is` on the spine can bind; without one the copy would stay
+        // equal to `bindings`.
+        let binds = connective_may_bind(expr);
+        let mut copy;
+        let bindings = if binds && fsl_core::pattern_binding_flows(op, false) {
+            copy = bindings.clone();
+            &mut copy
+        } else {
+            bindings
+        };
+        return recursion::guard(|| {
+            eval_connective(
+                op, left, right, binds, state, bindings, model, old_state, observed,
+            )
+        });
+    }
+    if matches!(expr, Expr::Is { .. }) {
         eval_with_bindings_observing(
             expr,
             state,
@@ -968,40 +982,11 @@ fn eval_binary(
     old_state: Option<&State>,
     mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
-    if matches!(op, "and" | "or" | "=>") {
-        if !connective_may_bind(left) && !connective_may_bind(right) {
-            return eval_unbinding_connective(
-                op, left, right, state, bindings, model, old_state, observed,
-            );
-        }
-        let mut local = bindings.clone();
-        let left = as_bool(eval_with_bindings_observing(
-            left,
-            state,
-            &mut local,
-            model,
-            old_state,
-            observed.as_deref_mut(),
-        )?)?;
-        match (op, left) {
-            ("and", false) => {
-                // Retain reached conjunct evidence even when its RHS is skipped.
-                *bindings = local;
-                return Ok(Value::Bool(false));
-            }
-            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
-            _ => {}
-        }
-        if !fsl_core::pattern_binding_flows(op, true) {
-            local.clone_from(bindings);
-        }
-        let right = as_bool(eval_with_bindings_observing(
-            right, state, &mut local, model, old_state, observed,
-        )?)?;
-        if fsl_core::pattern_binding_flows(op, false) {
-            *bindings = local;
-        }
-        return Ok(Value::Bool(right));
+    if is_connective(op) {
+        let binds = connective_may_bind(left) || connective_may_bind(right);
+        return eval_connective(
+            op, left, right, binds, state, bindings, model, old_state, observed,
+        );
     }
     if let Some(value) = compare_in_place(op, left, right, state, bindings, model) {
         return Ok(value);
@@ -1067,37 +1052,103 @@ fn eval_binary(
     }
 }
 
-/// An `and`/`or`/`=>` whose operands cannot add a binding
-/// ([`connective_may_bind`]), so the scope copy [`eval_binary`] makes for
-/// one that can would stay equal to `bindings`: both operands are evaluated
-/// on `bindings` itself.
+fn is_connective(op: &str) -> bool {
+    matches!(op, "and" | "or" | "=>")
+}
+
+/// `left op right` for a connective, where `binds` is whether the spine it
+/// heads may add a binding ([`connective_may_bind`]), decided once where the
+/// spine is entered.
+///
+/// A connective operand is part of the same spine, so it is evaluated here
+/// again with the same `binds` rather than deciding it anew. Where `binds` is
+/// false, both operands are evaluated on `bindings` itself, which a scope copy
+/// would leave equal to `bindings`. Where it is true, every connective on the
+/// spine scopes its operands on a copy, including one whose own operands
+/// cannot bind.
 #[allow(clippy::too_many_arguments)]
-fn eval_unbinding_connective(
+fn eval_connective(
     op: &str,
     left: &Expr,
     right: &Expr,
+    binds: bool,
     state: &State,
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
     mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
-    let left = as_bool(eval_with_bindings_observing(
+    if !binds {
+        let left = as_bool(eval_spine_operand(
+            left,
+            false,
+            state,
+            bindings,
+            model,
+            old_state,
+            observed.as_deref_mut(),
+        )?)?;
+        match (op, left) {
+            ("and", false) => return Ok(Value::Bool(false)),
+            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+            _ => {}
+        }
+        return Ok(Value::Bool(as_bool(eval_spine_operand(
+            right, false, state, bindings, model, old_state, observed,
+        )?)?));
+    }
+    let mut local = bindings.clone();
+    let left = as_bool(eval_spine_operand(
         left,
+        true,
         state,
-        bindings,
+        &mut local,
         model,
         old_state,
         observed.as_deref_mut(),
     )?)?;
     match (op, left) {
-        ("and", false) => return Ok(Value::Bool(false)),
+        ("and", false) => {
+            // Retain reached conjunct evidence even when its RHS is skipped.
+            *bindings = local;
+            return Ok(Value::Bool(false));
+        }
         ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
         _ => {}
     }
-    Ok(Value::Bool(as_bool(eval_with_bindings_observing(
-        right, state, bindings, model, old_state, observed,
-    )?)?))
+    if !fsl_core::pattern_binding_flows(op, true) {
+        local.clone_from(bindings);
+    }
+    let right = as_bool(eval_spine_operand(
+        right, true, state, &mut local, model, old_state, observed,
+    )?)?;
+    if fsl_core::pattern_binding_flows(op, false) {
+        *bindings = local;
+    }
+    Ok(Value::Bool(right))
+}
+
+/// An operand of [`eval_connective`]: a connective continues the spine with
+/// the same `binds`, under the stack guard [`eval`] would have taken for it;
+/// anything else is evaluated as [`eval_binary`]'s operands were.
+#[allow(clippy::too_many_arguments)]
+fn eval_spine_operand(
+    expr: &Expr,
+    binds: bool,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    match expr {
+        Expr::Binary { op, left, right } if is_connective(op) => recursion::guard(|| {
+            eval_connective(
+                op, left, right, binds, state, bindings, model, old_state, observed,
+            )
+        }),
+        _ => eval_with_bindings_observing(expr, state, bindings, model, old_state, observed),
+    }
 }
 
 /// Whether evaluating `expr` in place may add to the bindings it is given.
@@ -1110,7 +1161,7 @@ fn connective_may_bind(expr: &Expr) -> bool {
     while let Some(expr) = pending.pop() {
         match expr {
             Expr::Is { .. } => return true,
-            Expr::Binary { op, left, right } if matches!(op.as_str(), "and" | "or" | "=>") => {
+            Expr::Binary { op, left, right } if is_connective(op) => {
                 pending.push(left);
                 pending.push(right);
             }
