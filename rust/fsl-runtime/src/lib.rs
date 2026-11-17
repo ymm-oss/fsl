@@ -583,6 +583,9 @@ fn eval_place(
         Index(&'expr Expr),
         Field(&'expr str),
     }
+    if let Some(Operand::Value(value)) = borrowed_operand(expr, state, bindings, model) {
+        return Ok(Some(value.clone()));
+    }
     let mut steps = Vec::new();
     let mut root = expr;
     let name = loop {
@@ -631,6 +634,140 @@ fn eval_place(
         };
     }
     Ok(Some(current.clone()))
+}
+
+/// An operand read in place: a value the state, the bindings or the model
+/// already hold, or a literal.
+#[derive(Clone, Copy)]
+enum Operand<'a> {
+    Value(&'a Value),
+    Int(i64),
+    Bool(bool),
+    Enum { type_name: &'a str, member: &'a str },
+}
+
+/// `expr` read without evaluating it to an owned value, when it is a literal,
+/// a name, or an `Index`/`Field` chain over one whose keys are themselves
+/// such operands, and every lookup on the way succeeds.
+///
+/// It resolves names in [`eval_inner`]'s `Var` order and validates enum
+/// literals as [`eval_inner`] does. It has no effects, so `None` (a shape it
+/// does not read, or a step that would fail) leaves the caller to evaluate
+/// `expr` the general way, which then reports the same value or error.
+fn borrowed_operand<'a>(
+    expr: &'a Expr,
+    state: &'a State,
+    bindings: &'a Bindings,
+    model: &'a KernelModel,
+) -> Option<Operand<'a>> {
+    match expr {
+        Expr::Num(value) => Some(Operand::Int(*value)),
+        Expr::Bool(value) => Some(Operand::Bool(*value)),
+        Expr::EnumMember {
+            type_name, member, ..
+        } => match model.types.get(type_name) {
+            Some(TypeDef::Enum { members, .. }) if members.contains(member) => {
+                Some(Operand::Enum { type_name, member })
+            }
+            _ => None,
+        },
+        Expr::Var(name) => bindings
+            .get(name)
+            .or_else(|| state.get(name))
+            .or_else(|| model.consts.get(name))
+            .or_else(|| model.enum_members.get(name))
+            .map(Operand::Value),
+        Expr::Index(base, index) => {
+            let Some(Operand::Value(base)) = borrowed_operand(base, state, bindings, model) else {
+                return None;
+            };
+            let key = borrowed_operand(index, state, bindings, model)?;
+            index_by_operand(base, key).map(Operand::Value)
+        }
+        Expr::Field(base, field) => {
+            let Some(Operand::Value(Value::Struct { fields, .. })) =
+                borrowed_operand(base, state, bindings, model)
+            else {
+                return None;
+            };
+            fields.get(field).map(Operand::Value)
+        }
+        _ => None,
+    }
+}
+
+/// `left op right` for `==`/`!=` on operands read in place, or `None` when
+/// the general evaluation decides it.
+fn compare_in_place(
+    op: &str,
+    left: &Expr,
+    right: &Expr,
+    state: &State,
+    bindings: &Bindings,
+    model: &KernelModel,
+) -> Option<Value> {
+    if !matches!(op, "==" | "!=") {
+        return None;
+    }
+    let equal = operands_equal(
+        borrowed_operand(left, state, bindings, model)?,
+        borrowed_operand(right, state, bindings, model)?,
+    )?;
+    Some(Value::Bool(equal == (op == "==")))
+}
+
+/// [`index_place`] for a key read in place, or `None` where it would fail.
+fn index_by_operand<'a>(base: &'a Value, key: Operand<'_>) -> Option<&'a Value> {
+    match (base, key) {
+        (Value::Map(values), Operand::Value(key)) => values.get(key),
+        (Value::Map(values), Operand::Int(key)) => values.get(&Value::Int(key)),
+        (Value::Map(values), Operand::Bool(key)) => values.get(&Value::Bool(key)),
+        (Value::Map(values), Operand::Enum { .. }) => values
+            .iter()
+            .find(|(candidate, _)| operands_equal(Operand::Value(candidate), key) == Some(true))
+            .map(|(_, value)| value),
+        (Value::Seq(values), Operand::Int(index) | Operand::Value(&Value::Int(index))) => {
+            usize::try_from(index)
+                .ok()
+                .and_then(|index| values.get(index))
+        }
+        _ => None,
+    }
+}
+
+/// `==` on two operands read in place, or `None` when either needs the
+/// relation normalization `==` applies first.
+fn operands_equal(left: Operand<'_>, right: Operand<'_>) -> Option<bool> {
+    let needs_normalizing = |operand: Operand<'_>| {
+        matches!(operand, Operand::Value(Value::Relation(_) | Value::Some(_)))
+    };
+    if needs_normalizing(left) || needs_normalizing(right) {
+        return None;
+    }
+    Some(match (left, right) {
+        (Operand::Value(value), other) | (other, Operand::Value(value)) => match other {
+            Operand::Value(other) => value == other,
+            Operand::Int(literal) => matches!(value, Value::Int(value) if *value == literal),
+            Operand::Bool(literal) => matches!(value, Value::Bool(value) if *value == literal),
+            Operand::Enum { type_name, member } => matches!(
+                value,
+                Value::Enum { type_name: t, member: m } if t == type_name && m == member
+            ),
+        },
+        (Operand::Int(left), Operand::Int(right)) => left == right,
+        (Operand::Bool(left), Operand::Bool(right)) => left == right,
+        (
+            Operand::Enum {
+                type_name: left_type,
+                member: left_member,
+            },
+            Operand::Enum {
+                type_name: right_type,
+                member: right_member,
+            },
+        ) => left_type == right_type && left_member == right_member,
+        _ => false,
+    })
 }
 
 /// The element `base[index]` addresses, with `Expr::Index`'s errors.
@@ -859,6 +996,9 @@ fn eval_binary(
             *bindings = local;
         }
         return Ok(Value::Bool(right));
+    }
+    if let Some(value) = compare_in_place(op, left, right, state, bindings, model) {
+        return Ok(value);
     }
     let left = eval_observing(
         left,
