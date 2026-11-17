@@ -1139,11 +1139,7 @@ fn binder_domain(
     old_state: Option<&State>,
 ) -> Result<Vec<Value>, RuntimeError> {
     Ok(match binder {
-        Binder::Typed { type_name, .. } => {
-            let type_name = qualified_type(type_name)?;
-            let ty = model.typed_binder_type(&type_name);
-            model.domain_values(&ty)?
-        }
+        Binder::Typed { type_name, .. } => model.typed_binder_domain(qualified_type(type_name)?)?,
         Binder::Range { lo, hi, .. } => {
             let mut local = bindings.clone();
             let lo = as_int(eval(lo, state, &mut local, model, old_state)?)?;
@@ -1280,13 +1276,13 @@ fn eval_relation_unary(
     }
 }
 
-fn qualified_type(name: &fsl_core::QualifiedName) -> Result<String, RuntimeError> {
+fn qualified_type(name: &fsl_core::QualifiedName) -> Result<&str, RuntimeError> {
     if name.namespace.is_some() {
         Err(runtime_error(
             "qualified type remained after kernel lowering",
         ))
     } else {
-        Ok(name.name.clone())
+        Ok(&name.name)
     }
 }
 

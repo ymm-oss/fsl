@@ -707,11 +707,9 @@ fn compute_binder_values(
             type_name,
             where_expr: None,
             ..
-        } => {
-            let type_name = super::qualified_type(type_name)?;
-            let ty = model.typed_binder_type(&type_name);
-            Ok(Some(model.domain_values(&ty)?))
-        }
+        } => Ok(Some(
+            model.typed_binder_domain(super::qualified_type(type_name)?)?,
+        )),
         Binder::Range {
             lo,
             hi,
