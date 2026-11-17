@@ -3332,8 +3332,8 @@ pub fn find_boundary_violation(
     // `visited` and the parent links are one packed `StateStore`, and each
     // candidate is stepped from the state it was enumerated at without
     // evaluating its guards again (issue #1851, the #1247 path). A queue
-    // node keeps its `State` next to its store id, so a popped state is not
-    // decoded again.
+    // node is a store id: the queue holds most of the states the search has
+    // reached, and a popped state is decoded from the store once.
     let mut scratch = Monitor::new(model.clone())?;
     let initial_state = std::mem::take(&mut scratch.state);
     let (mut visited, root) = trace::StateStore::with_root(&initial_state);
@@ -3348,11 +3348,13 @@ pub fn find_boundary_violation(
         });
     }
 
-    let mut queue = VecDeque::from([(initial_state, root, 0_usize)]);
-    while let Some((state, id, step)) = queue.pop_front() {
+    drop(initial_state);
+    let mut queue = VecDeque::from([(root, 0_usize)]);
+    while let Some((id, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
+        let state = visited.state(id);
         for candidate in scratch.candidates_at(&state)? {
             let instance = candidate.instance();
             let stepped = scratch.step_enumerated(&state, step, &candidate, None)?;
@@ -3378,7 +3380,7 @@ pub fn find_boundary_violation(
                         states_explored: visited.len(),
                     });
                 }
-                queue.push_back((stepped.state, child, step + 1));
+                queue.push_back((child, step + 1));
             }
         }
     }
@@ -3587,15 +3589,18 @@ pub fn expression_reachability(
     }
     // Visited states are one packed `StateStore`, and each candidate is
     // stepped from the state it was enumerated at without evaluating its
-    // guards again (issue #1851, the #1247 path).
+    // guards again (issue #1851, the #1247 path). A queue node is a store
+    // id, decoded once when it is popped, as in `find_boundary_violation`.
     let mut scratch = Monitor::new(model.clone())?;
     let initial_state = std::mem::take(&mut scratch.state);
     let (mut visited, root) = trace::StateStore::with_root(&initial_state);
-    let mut queue = VecDeque::from([(initial_state, root, 0_usize)]);
+    drop(initial_state);
+    let mut queue = VecDeque::from([(root, 0_usize)]);
     let mut results: Vec<Option<Reachability>> = vec![None; expressions.len()];
     let mut pending: BTreeSet<usize> = (0..expressions.len()).collect();
 
-    'walk: while let Some((state, id, step)) = queue.pop_front() {
+    'walk: while let Some((id, step)) = queue.pop_front() {
+        let state = visited.state(id);
         let mut resolved = Vec::new();
         for &index in &pending {
             let truth = with_total_division(|| {
@@ -3647,7 +3652,7 @@ pub fn expression_reachability(
                     }
                     break 'walk;
                 }
-                queue.push_back((stepped.state, child, step + 1));
+                queue.push_back((child, step + 1));
             }
         }
     }
