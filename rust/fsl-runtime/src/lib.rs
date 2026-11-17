@@ -158,8 +158,11 @@ fn eval_observing(
     old_state: Option<&State>,
     observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
+    // Only an `is` on the spine can bind; without one the copy would stay
+    // equal to `bindings`.
     if matches!(expr, Expr::Is { .. })
-        || matches!(expr, Expr::Binary { op, .. } if fsl_core::pattern_binding_flows(op, false))
+        || (matches!(expr, Expr::Binary { op, .. } if fsl_core::pattern_binding_flows(op, false))
+            && connective_may_bind(expr))
     {
         eval_with_bindings_observing(
             expr,
