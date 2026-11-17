@@ -643,6 +643,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
                             // The Worker request surface has no `--vacuity`
                             // option at all (issue #729): always compute.
                             skip_vacuity_probe: false,
+                            vacuity_reachability: None,
                         },
                     )
                     .0;
@@ -693,6 +694,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
             // The Worker request surface has no `--vacuity` option at all
             // (issue #729): always compute.
             skip_vacuity_probe: false,
+            vacuity_reachability: None,
         },
     );
     finalize_verify_output(request, &model, implements, output, compose_warnings)
@@ -1225,6 +1227,7 @@ mod tests {
                 elapsed_s,
                 statistics,
                 skip_vacuity_probe: false,
+                vacuity_reachability: None,
             },
         )
         .0
@@ -1519,6 +1522,7 @@ mod tests {
                 elapsed_s: 0.0,
                 statistics: &fsl_solver::VerificationStatistics::default(),
                 skip_vacuity_probe: false,
+                vacuity_reachability: None,
             },
         )
         .0

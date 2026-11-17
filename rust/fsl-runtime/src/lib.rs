@@ -3329,6 +3329,28 @@ pub fn find_boundary_violation(
     depth: usize,
     budget: usize,
 ) -> Result<BoundaryProbe, RuntimeError> {
+    find_boundary_violation_reaching(model, &[], depth, budget).map(|(probe, _)| probe)
+}
+
+/// [`find_boundary_violation`], also deciding
+/// [`expression_reachability`]`(model, expressions, depth, budget)` on the
+/// same walk.
+///
+/// Both searches start at the same initial state, step the same candidates
+/// in the same order, skip the same violating successors, and stop at the
+/// same budget; they differ only in that this one stops at a finding. So the
+/// reachability is `Some` exactly when no finding stopped the walk, and it
+/// is then the one [`expression_reachability`] returns.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] as [`find_boundary_violation`] does.
+pub fn find_boundary_violation_reaching(
+    model: &KernelModel,
+    expressions: &[Expr],
+    depth: usize,
+    budget: usize,
+) -> Result<(BoundaryProbe, Option<Vec<Reachability>>), RuntimeError> {
     // `visited` and the parent links are one packed `StateStore`, and each
     // candidate is stepped from the state it was enumerated at without
     // evaluating its guards again (issue #1851, the #1247 path). A queue
@@ -3341,20 +3363,26 @@ pub fn find_boundary_violation(
     if !model.actions.is_empty()
         && let Some(violation) = check_state_bounds(&initial_state, model, 0, None)?
     {
-        return Ok(BoundaryProbe {
+        let probe = BoundaryProbe {
             finding: Some((violation, visited.trace(root))),
             exhausted: false,
             states_explored: visited.len(),
-        });
+        };
+        return Ok((probe, None));
     }
 
     drop(initial_state);
+    let mut reachability = ReachabilityProbe::new(expressions);
     let mut queue = VecDeque::from([(root, 0_usize)]);
     while let Some((id, step)) = queue.pop_front() {
-        if step >= depth {
+        if step >= depth && reachability.is_decided() {
             continue;
         }
         let state = visited.state(id);
+        reachability.visit(&state, &scratch.model);
+        if step >= depth {
+            continue;
+        }
         for candidate in scratch.candidates_at(&state)? {
             let instance = candidate.instance();
             let stepped = scratch.step_enumerated(&state, step, &candidate, None)?;
@@ -3362,11 +3390,12 @@ pub fn find_boundary_violation(
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
                     let mut found_trace = visited.trace(id);
                     found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
-                    return Ok(BoundaryProbe {
+                    let probe = BoundaryProbe {
                         finding: Some((violation, found_trace)),
                         exhausted: false,
                         states_explored: visited.len(),
-                    });
+                    };
+                    return Ok((probe, None));
                 }
                 continue;
             }
@@ -3374,21 +3403,24 @@ pub fn find_boundary_violation(
                 visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
             {
                 if visited.len() >= budget {
-                    return Ok(BoundaryProbe {
+                    reachability.exhaust();
+                    let probe = BoundaryProbe {
                         finding: None,
                         exhausted: true,
                         states_explored: visited.len(),
-                    });
+                    };
+                    return Ok((probe, Some(reachability.finish())));
                 }
                 queue.push_back((child, step + 1));
             }
         }
     }
-    Ok(BoundaryProbe {
+    let probe = BoundaryProbe {
         finding: None,
         exhausted: false,
         states_explored: visited.len(),
-    })
+    };
+    Ok((probe, Some(reachability.finish())))
 }
 
 /// The outcome of [`first_self_violation`]'s bounded self-consistency
@@ -3596,42 +3628,12 @@ pub fn expression_reachability(
     let (mut visited, root) = trace::StateStore::with_root(&initial_state);
     drop(initial_state);
     let mut queue = VecDeque::from([(root, 0_usize)]);
-    let mut results: Vec<Option<Reachability>> = vec![None; expressions.len()];
-    let mut pending: BTreeSet<usize> = (0..expressions.len()).collect();
+    let mut reachability = ReachabilityProbe::new(expressions);
 
     'walk: while let Some((id, step)) = queue.pop_front() {
         let state = visited.state(id);
-        let mut resolved = Vec::new();
-        for &index in &pending {
-            let truth = with_total_division(|| {
-                eval(
-                    &expressions[index],
-                    &state,
-                    &mut Bindings::new(),
-                    &scratch.model,
-                    None,
-                )
-            })
-            .and_then(as_bool);
-            match truth {
-                Ok(true) => {
-                    results[index] = Some(Reachability::Reachable);
-                    resolved.push(index);
-                }
-                Err(_) => {
-                    // Absorbed per-candidate, not propagated: see the doc
-                    // comment above. Fail-closed, unlike the pre-#729
-                    // behavior this replaces.
-                    results[index] = Some(Reachability::Exhausted);
-                    resolved.push(index);
-                }
-                Ok(false) => {}
-            }
-        }
-        for index in resolved {
-            pending.remove(&index);
-        }
-        if pending.is_empty() {
+        reachability.visit(&state, &scratch.model);
+        if reachability.is_decided() {
             break 'walk;
         }
         if step >= depth {
@@ -3647,19 +3649,89 @@ pub fn expression_reachability(
                 visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
             {
                 if visited.len() >= budget {
-                    for &index in &pending {
-                        results[index] = Some(Reachability::Exhausted);
-                    }
+                    reachability.exhaust();
                     break 'walk;
                 }
                 queue.push_back((child, step + 1));
             }
         }
     }
-    Ok(results
-        .into_iter()
-        .map(|result| result.unwrap_or(Reachability::Unreachable))
-        .collect())
+    Ok(reachability.finish())
+}
+
+/// The per-expression verdicts of a reachability walk
+/// ([`expression_reachability`], [`find_boundary_violation_reaching`]).
+struct ReachabilityProbe<'e> {
+    expressions: &'e [Expr],
+    results: Vec<Option<Reachability>>,
+    pending: BTreeSet<usize>,
+}
+
+impl<'e> ReachabilityProbe<'e> {
+    fn new(expressions: &'e [Expr]) -> Self {
+        Self {
+            expressions,
+            results: vec![None; expressions.len()],
+            pending: (0..expressions.len()).collect(),
+        }
+    }
+
+    /// Whether every expression has its verdict.
+    fn is_decided(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// Decide every pending expression that is true, or cannot be
+    /// evaluated, in the reached `state`.
+    fn visit(&mut self, state: &State, model: &KernelModel) {
+        let mut resolved = Vec::new();
+        for &index in &self.pending {
+            let truth = with_total_division(|| {
+                eval(
+                    &self.expressions[index],
+                    state,
+                    &mut Bindings::new(),
+                    model,
+                    None,
+                )
+            })
+            .and_then(as_bool);
+            match truth {
+                Ok(true) => {
+                    self.results[index] = Some(Reachability::Reachable);
+                    resolved.push(index);
+                }
+                Err(_) => {
+                    // Absorbed per-candidate, not propagated: see
+                    // `expression_reachability`'s doc comment. Fail-closed,
+                    // unlike the pre-#729 behavior this replaces.
+                    self.results[index] = Some(Reachability::Exhausted);
+                    resolved.push(index);
+                }
+                Ok(false) => {}
+            }
+        }
+        for index in resolved {
+            self.pending.remove(&index);
+        }
+    }
+
+    /// The walk stopped at its budget: every pending expression is undecided.
+    fn exhaust(&mut self) {
+        for &index in &self.pending {
+            self.results[index] = Some(Reachability::Exhausted);
+        }
+        self.pending.clear();
+    }
+
+    /// The verdicts, with every expression no reached state made true
+    /// [`Reachability::Unreachable`].
+    fn finish(self) -> Vec<Reachability> {
+        self.results
+            .into_iter()
+            .map(|result| result.unwrap_or(Reachability::Unreachable))
+            .collect()
+    }
 }
 
 /// Wrap `expr` in a nested `exists` quantifier over `binders`, outermost
@@ -3758,6 +3830,32 @@ fn vacuity_reachability_warning(
     })
 }
 
+/// How [`verification_warnings`] decides its reachability vacuity lanes.
+#[derive(Clone, Copy, Debug)]
+pub enum VacuityProbe<'a> {
+    /// Walk the budgeted reachability probe.
+    Run,
+    /// Report neither lane nor its truncation (`--vacuity ignore`).
+    Skip,
+    /// The probe's verdicts for [`vacuity_probe_expressions`], already
+    /// decided by a walk of the same model, depth and budget
+    /// ([`find_boundary_violation_reaching`]).
+    Walked(&'a [Reachability]),
+}
+
+/// The expressions the reachability vacuity probe asks about, in the order
+/// [`verification_warnings`] reads their verdicts: every implication
+/// antecedent candidate, then every `leadsTo` trigger.
+#[must_use]
+pub fn vacuity_probe_expressions(model: &KernelModel) -> Vec<Expr> {
+    let mut expressions: Vec<Expr> = vacuous_implication_candidates(model)
+        .into_iter()
+        .map(|(_, expression)| expression)
+        .collect();
+    expressions.extend(vacuous_leadsto_candidates(model));
+    expressions
+}
+
 /// Build the verification warnings shared by native and browser frontends.
 ///
 /// The two reachability vacuity lanes are computed here, with one shared,
@@ -3770,15 +3868,17 @@ fn vacuity_reachability_warning(
 /// coverage) owned by one function without giving `fsl-runtime` a solver
 /// dependency.
 ///
-/// `skip_vacuity_probe` skips the whole reachability BFS (neither
+/// [`VacuityProbe::Skip`] skips the whole reachability BFS (neither
 /// `vacuous_implication`/`vacuous_leadsto` nor `vacuity_probe_truncated` is
 /// computed or emitted) rather than computing it and filtering the result.
 /// INVARIANT (issue #729): only the `verify`/`sweep` CLI option parsing for
-/// `--vacuity ignore` may pass `true` here. No-cache baseline adapters reach
+/// `--vacuity ignore` may pass `Skip` here. No-cache baseline adapters reach
 /// that owner with the default `warn` policy. Other callers -- the wasm
 /// Worker (which has no `--vacuity` option), induction's internal BMC base pass, and
-/// tests -- must pass `false` so the probe always runs and `--vacuity
-/// error` never silently loses evidence it would otherwise catch.
+/// tests -- must pass `Run` (or `Walked` verdicts) so the probe always runs
+/// and `--vacuity error` never silently loses evidence it would otherwise
+/// catch. [`VacuityProbe::Walked`] reuses the verdicts of a walk that
+/// already decided them, which BMC's boundary pre-pass does.
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn verification_warnings(
@@ -3789,17 +3889,11 @@ pub fn verification_warnings(
     deadlock_state: Option<&State>,
     action_coverage: &BTreeMap<String, bool>,
     solver_vacuity: &[JsonValue],
-    skip_vacuity_probe: bool,
+    vacuity_probe: VacuityProbe<'_>,
 ) -> Vec<JsonValue> {
     let mut warnings = model_warnings(model);
-    if !skip_vacuity_probe {
+    if !matches!(vacuity_probe, VacuityProbe::Skip) {
         let implication_candidates = vacuous_implication_candidates(model);
-        let leadsto_candidates = vacuous_leadsto_candidates(model);
-        let mut probe_expressions: Vec<Expr> = implication_candidates
-            .iter()
-            .map(|(_, expression)| expression.clone())
-            .collect();
-        probe_expressions.extend(leadsto_candidates.iter().cloned());
         // A `RuntimeError` from the state-space walk itself (see
         // `expression_reachability`'s doc comment -- distinct from a
         // per-candidate evaluation error, which resolves `Exhausted`
@@ -3821,9 +3915,16 @@ pub fn verification_warnings(
         // run before vacuity warnings are ever rendered, so this path is
         // not reachable on any spec that reaches `verification_warnings` in
         // the first place. See `docs/design/DESIGN-vacuity.md`.
-        let probe_results =
-            expression_reachability(model, &probe_expressions, depth, CONCRETE_PROBE_BUDGET)
-                .unwrap_or_default();
+        let probe_results = match vacuity_probe {
+            VacuityProbe::Walked(results) => results.to_vec(),
+            VacuityProbe::Run | VacuityProbe::Skip => expression_reachability(
+                model,
+                &vacuity_probe_expressions(model),
+                depth,
+                CONCRETE_PROBE_BUDGET,
+            )
+            .unwrap_or_default(),
+        };
         for (candidate_index, (property_index, _)) in implication_candidates.iter().enumerate() {
             let property = &model.invariants[*property_index];
             let name = model.names().public_property(&property.name).into_string();

@@ -681,6 +681,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fslc/src/verification.rs",
+        1335,
+        "probe_bmc_boundary",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fslc/src/literate_access.rs",
         111,
         "capture_literate",

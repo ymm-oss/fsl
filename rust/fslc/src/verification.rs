@@ -1200,6 +1200,7 @@ fn render_bmc(
     request: &BmcRequest<'_>,
     prepared: &PreparedBmc,
     solved: &SolvedBmc,
+    vacuity_reachability: Option<&[fsl_runtime::Reachability]>,
     started: Instant,
 ) -> (Value, i32) {
     fslc_rust::verification_output::render_bmc_output(
@@ -1213,6 +1214,7 @@ fn render_bmc(
             elapsed_s: started.elapsed().as_secs_f64(),
             statistics: &solved.statistics,
             skip_vacuity_probe: request.skip_vacuity_probe,
+            vacuity_reachability,
         },
     )
 }
@@ -1269,14 +1271,22 @@ fn execute_bmc(
             .state
             .iter()
             .any(|(_, ty)| contains_sequence(&prepared.model, ty));
-    if !deferred {
-        probe_bmc_boundary(request, &prepared, started)?;
-    }
+    let vacuity_reachability = if deferred {
+        None
+    } else {
+        probe_bmc_boundary(request, &prepared, started)?
+    };
     let solved = solve_bmc(request, &prepared);
     let (verdict, output) = match &solved {
         Ok(solved) => (
             bmc_verdict(&prepared.model, &solved.result, request.deadlock),
-            render_bmc(request, &prepared, solved, started),
+            render_bmc(
+                request,
+                &prepared,
+                solved,
+                vacuity_reachability.as_deref(),
+                started,
+            ),
         ),
         Err(output) => (BmcVerdict::Failed, output.clone()),
     };
@@ -1310,11 +1320,14 @@ fn prepare_bmc(request: &BmcRequest<'_>) -> Result<PreparedBmc, CommandResult> {
     })
 }
 
+/// The concrete boundary pre-pass. Its walk also decides the vacuity probe
+/// rendering would otherwise walk again over the same states; the verdicts
+/// are returned when it did.
 fn probe_bmc_boundary(
     request: &BmcRequest<'_>,
     prepared: &PreparedBmc,
     started: Instant,
-) -> Result<(), CommandResult> {
+) -> Result<Option<Vec<fsl_runtime::Reachability>>, CommandResult> {
     let model = &prepared.model;
     let checked_bounds = &prepared.checked_bounds;
     // Some concrete boundary outcomes (notably an over-capacity Seq successor)
@@ -1325,12 +1338,18 @@ fn probe_bmc_boundary(
         && request.initial_state.is_none()
         && fsl_runtime::deterministic_initial_state(model).is_ok()
     {
-        match fsl_runtime::find_boundary_violation(
+        let expressions = if request.skip_vacuity_probe {
+            Vec::new()
+        } else {
+            fsl_runtime::vacuity_probe_expressions(model)
+        };
+        match fsl_runtime::find_boundary_violation_reaching(
             model,
+            &expressions,
             request.depth,
             fsl_runtime::CONCRETE_PROBE_BUDGET,
         ) {
-            Ok(probe) => {
+            Ok((probe, reachability)) => {
                 if let Some((violation, trace)) = probe.finding
                     && violation.kind != "partial_op"
                 {
@@ -1350,17 +1369,19 @@ fn probe_bmc_boundary(
                             // which never emits `warnings`, so this value is
                             // inert here; threaded through for consistency.
                             skip_vacuity_probe: request.skip_vacuity_probe,
+                            vacuity_reachability: None,
                         },
                     ));
                 }
                 // `exhausted && finding.is_none()` falls through here exactly
                 // like a completed empty search: the pre-pass is an evidence
                 // detour, not a verdict authority (issue #697).
+                return Ok(reachability.filter(|_| !request.skip_vacuity_probe));
             }
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// Per-check wall-clock limit for the #1149 ranking pre-pass. A check that
