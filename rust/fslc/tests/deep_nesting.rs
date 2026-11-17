@@ -641,3 +641,98 @@ fn the_generated_witness_is_still_deeper_than_the_unguarded_crash_threshold() {
         "the invariant's if-chain is the deep structure under test"
     );
 }
+
+/// How deep the evaluator tests below nest one expression. A release build of
+/// an evaluator walk that recurses without the guard overflows a 1 MiB stack
+/// well below this.
+const EVALUATED_DEPTH: usize = 16_384;
+
+/// The stack each evaluator test runs on: small, so the guard has to grow it.
+const EVALUATOR_STACK: usize = 1024 * 1024;
+
+/// A model whose state `m` maps every key to `0`, so `m[0]`, `m[m[0]]`, and
+/// every deeper nesting read `0`.
+fn constant_map_model() -> (fsl_core::KernelModel, fsl_runtime::State) {
+    let source = "spec ConstantMap {\n  type K = 0..1\n  state { m: Map<K, K> }\n  \
+                  init { forall k: K { m[k] = 0 } }\n  action stay() { m = m }\n}\n";
+    let document = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+        .expect("parse constant map model");
+    let model = fsl_core::build_model(document).expect("build constant map model");
+    let state = fsl_runtime::Monitor::new(model.clone())
+        .expect("initialize constant map model")
+        .state;
+    (model, state)
+}
+
+/// `fsl_runtime::eval` on `expr` with no bindings, on an [`EVALUATOR_STACK`]
+/// thread.
+fn eval_on_small_stack(
+    model: &fsl_core::KernelModel,
+    state: &fsl_runtime::State,
+    expr: &fsl_core::KernelExpr,
+) -> Result<fsl_core::FslValue, fsl_runtime::RuntimeError> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(EVALUATOR_STACK)
+            .spawn_scoped(scope, || {
+                fsl_runtime::eval(
+                    expr,
+                    state,
+                    &mut std::collections::BTreeMap::new(),
+                    model,
+                    None,
+                )
+            })
+            .expect("spawn evaluator thread")
+            .join()
+            .expect("evaluator thread")
+    })
+}
+
+/// `m[m[...m[0]...]]`, nested `depth` deep in the key.
+fn nested_key(depth: usize) -> fsl_core::KernelExpr {
+    let mut expr = fsl_core::KernelExpr::Num(0);
+    for _ in 0..depth {
+        expr = fsl_core::KernelExpr::Index(
+            Box::new(fsl_core::KernelExpr::Var("m".to_owned())),
+            Box::new(expr),
+        );
+    }
+    expr
+}
+
+/// Takes a [`nested_key`] chain apart one level at a time: the derived `Drop`
+/// recurses once per level.
+fn drop_nested_key(mut expr: fsl_core::KernelExpr) {
+    while let fsl_core::KernelExpr::Index(_, key) = expr {
+        expr = *key;
+    }
+}
+
+/// The in-place read of an `Index` chain recurses on its key without passing
+/// through `eval`'s own guard, both when the chain is evaluated and when it is
+/// an operand of `==`.
+#[test]
+fn eval_reads_a_deeply_nested_map_key_instead_of_overflowing_the_stack() {
+    use fsl_core::{FslValue, KernelExpr};
+
+    let (model, state) = constant_map_model();
+    let chain = nested_key(EVALUATED_DEPTH);
+    assert_eq!(
+        eval_on_small_stack(&model, &state, &chain).expect("evaluate the nested key"),
+        FslValue::Int(0)
+    );
+    let comparison = KernelExpr::Binary {
+        op: "==".to_owned(),
+        left: Box::new(chain),
+        right: Box::new(KernelExpr::Num(0)),
+    };
+    assert_eq!(
+        eval_on_small_stack(&model, &state, &comparison).expect("compare the nested key"),
+        FslValue::Bool(true)
+    );
+    let KernelExpr::Binary { left, .. } = comparison else {
+        unreachable!("built as a comparison");
+    };
+    drop_nested_key(*left);
+}

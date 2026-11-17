@@ -169,7 +169,7 @@ happened to exhaust the stack first, so guarding it does not fix the file, it re
 Implementing the fix took six rounds of guard-rebuild-recrash before the witness completed. Neither
 earlier count was a bad measurement; both were single measurements read as a census.
 
-Sixteen cycles are guarded, in four crates. **Fourteen are crash-witnessed; two are not**, and the table
+Seventeen cycles are guarded, in four crates. **Fifteen are crash-witnessed; two are not**, and the table
 says which, because a reader who cannot tell them apart cannot tell this apart from the preventive
 spraying the design forbids:
 
@@ -191,6 +191,7 @@ spraying the design forbids:
 | `fsl-core` | `expr_text.rs` `expr_text_with_origins` | `verify --engine induction` on a 2500-term `helpful` argument (#1164) | envelopes and diagnostics that render an expression |
 | `fsl-verifier` | `induction.rs` `eval_state_independent` | `verify --engine induction` on a 3900-term `helpful` argument (#1164) | induction's ranked `leadsTo` |
 | `fsl-runtime` | `lib.rs` `eval` | `verify`, all four engines, on a 300-term `+` / `and` chain (#1164) | every `verify` engine (the bmc/induction boundary monitor, explicit), trace replay |
+| `fsl-runtime` | `lib.rs` `borrowed_operand` | `fsl_runtime::eval` on a 16,384-deep `m[m[…m[0]…]]` key, 1 MiB stack (#1851) | every `verify` engine, trace replay |
 
 The two #622 rows were found by changing the *witness*, not the code, and they are the clearest evidence
 for this section's thesis. #620's witness put its depth in a refinement mapping, so no amount of

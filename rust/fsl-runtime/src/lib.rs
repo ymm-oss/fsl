@@ -657,6 +657,9 @@ enum Operand<'a> {
 /// literals as [`eval_inner`] does. It has no effects, so `None` (a shape it
 /// does not read, or a step that would fail) leaves the caller to evaluate
 /// `expr` the general way, which then reports the same value or error.
+///
+/// Its `Index`/`Field` arms recurse on the spec's structure without passing
+/// through [`eval`], so they take the stack guard themselves.
 fn borrowed_operand<'a>(
     expr: &'a Expr,
     state: &'a State,
@@ -680,21 +683,21 @@ fn borrowed_operand<'a>(
             .or_else(|| model.consts.get(name))
             .or_else(|| model.enum_members.get(name))
             .map(Operand::Value),
-        Expr::Index(base, index) => {
+        Expr::Index(base, index) => recursion::guard(|| {
             let Some(Operand::Value(base)) = borrowed_operand(base, state, bindings, model) else {
                 return None;
             };
             let key = borrowed_operand(index, state, bindings, model)?;
             index_by_operand(base, key).map(Operand::Value)
-        }
-        Expr::Field(base, field) => {
+        }),
+        Expr::Field(base, field) => recursion::guard(|| {
             let Some(Operand::Value(Value::Struct { fields, .. })) =
                 borrowed_operand(base, state, bindings, model)
             else {
                 return None;
             };
             fields.get(field).map(Operand::Value)
-        }
+        }),
         _ => None,
     }
 }
