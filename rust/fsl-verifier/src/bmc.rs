@@ -8,8 +8,8 @@ use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
 use crate::eval::{
-    FailureClass, IntegerRangeDraft, classified_evaluation_status_in, eval, eval_in,
-    evaluation_status, integer_range_draft, integer_range_draft_in, integer_range_error,
+    EvaluationStatus, FailureClass, IntegerRangeDraft, classified_evaluation_status_in, eval,
+    eval_in, evaluation_status, integer_range_draft, integer_range_draft_in, integer_range_error,
     integer_range_plan, materialize_integer_range, prepared_quantified_status,
     prepared_quantified_status_in, prepared_quantified_value, prepared_quantified_value_in,
     property_evaluation_status, property_evaluation_status_in, property_range_source_status,
@@ -24,7 +24,8 @@ use crate::scoped_query::{
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
-    ActionInstance, action_guards_in, action_has_partial_operation_candidate, action_instances,
+    ActionGuardDefinedness, ActionInstance, action_guards_in,
+    action_has_partial_operation_candidate, action_instances,
     classified_action_guard_definedness_in, classified_action_statements_evaluation_status_in,
     init_constraints, init_evaluation_status, initial_state as symbolic_initial_state,
     transition_constraint_in,
@@ -1961,65 +1962,24 @@ async fn check_typed_action_partial_operations<S: SmtSolver>(
             )?
             .has_partial_operation;
         }
-        if !guard_evaluation.has_partial_operation
-            && !body_status.has_partial_operation
-            && !ensures_have_partial_operation
+        let has_candidate = guard_evaluation.has_partial_operation
+            || body_status.has_partial_operation
+            || ensures_have_partial_operation;
+        if let Some(violation) = probe_instance_definedness(
+            solver,
+            model,
+            instance,
+            guard_evaluation,
+            body_status,
+            InstanceProbes::Search { has_candidate },
+            states,
+            choices,
+            instances,
+            step,
+        )
+        .await?
         {
-            continue;
-        }
-        let guard_failure = guard_evaluation.first_partial;
-        solver.set_query_context("partial_op", &action.name);
-        if probe(solver, &guard_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
-                    solver,
-                    model,
-                    action,
-                    instance,
-                    &guard_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
-                )
-                .await?,
-            ));
-        }
-        let guard_undefined = solver.not(&guard_evaluation.defined)?;
-        if probe(solver, &guard_undefined).await? {
-            return Err(VerifyError::new(format!(
-                "action '{}' guard evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
-        }
-
-        let body_failure =
-            solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
-        if probe(solver, &body_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
-                    solver,
-                    model,
-                    action,
-                    instance,
-                    &body_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
-                )
-                .await?,
-            ));
-        }
-        let body_undefined = solver.and(&[
-            guard_evaluation.enabled.clone(),
-            solver.not(&body_status.fully_defined)?,
-        ])?;
-        if probe(solver, &body_undefined).await? {
-            return Err(VerifyError::new(format!(
-                "action '{}' body evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
+            return Ok(Some(violation));
         }
     }
     Ok(None)
@@ -2088,60 +2048,179 @@ async fn check_action_partial_operations<S: SmtSolver>(
     let failure = with_lemmas(solver, range_lemmas, solver.or(&undefined)?)?;
     let any_undefined = probe(solver, &failure).await?;
     for (instance, guard_evaluation, body_status, guard_undefined, body_undefined) in evaluations {
-        let action = &model.actions[instance.action_index];
-        let guard_failure = guard_evaluation.first_partial;
-        solver.set_query_context("partial_op", &action.name);
-        if guard_evaluation.has_partial_operation && probe(solver, &guard_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
-                    solver,
-                    model,
-                    action,
-                    instance,
-                    &guard_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
-                )
-                .await?,
-            ));
-        }
-        if any_undefined
-            && probe(solver, &with_lemmas(solver, range_lemmas, guard_undefined)?).await?
+        if let Some(violation) = probe_instance_definedness(
+            solver,
+            model,
+            instance,
+            guard_evaluation,
+            body_status,
+            InstanceProbes::DefinednessPass {
+                any_undefined,
+                range_lemmas,
+                guard_undefined,
+                body_undefined,
+            },
+            states,
+            choices,
+            instances,
+            step,
+        )
+        .await?
         {
-            return Err(VerifyError::new(format!(
-                "action '{}' guard evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
+            return Ok(Some(violation));
         }
+    }
+    Ok(None)
+}
 
-        let body_failure =
-            solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
-        if body_status.has_partial_operation && probe(solver, &body_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
+/// Which of an instance's definedness probes a caller asks. The two filters
+/// stay different: the definedness pass exists for soundness (#1240, #1258),
+/// and each filter keeps its caller's query sequence, and so its evidence.
+enum InstanceProbes<'a, T> {
+    /// [`check_typed_action_partial_operations`]: an instance with no typed
+    /// partial-operation candidate (guard, body or `ensures`) asks nothing;
+    /// any other asks all four probes, each term built when it is asked.
+    Search { has_candidate: bool },
+    /// [`check_action_partial_operations`]: a partial probe is asked only when
+    /// its evaluation has a partial operation, and the prebuilt non-partial
+    /// probes, with the range lemmas conjoined, only when the disjunctive
+    /// probe answered `sat`.
+    DefinednessPass {
+        any_undefined: bool,
+        range_lemmas: &'a [T],
+        guard_undefined: T,
+        body_undefined: T,
+    },
+}
+
+/// One action instance's guard and enabled-body definedness at `step`, in
+/// the order the errors are reported: guard partial, guard non-partial, body
+/// partial, body non-partial. `probes` decides which are asked.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn probe_instance_definedness<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    instance: &ActionInstance<S::Term>,
+    guard_evaluation: ActionGuardDefinedness<S::Term>,
+    body_status: EvaluationStatus<S::Term>,
+    probes: InstanceProbes<'_, S::Term>,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+) -> Result<Option<BmcViolation>, VerifyError> {
+    if let InstanceProbes::Search {
+        has_candidate: false,
+    } = probes
+    {
+        return Ok(None);
+    }
+    let asks_partial = |has_partial_operation: bool| match probes {
+        InstanceProbes::Search { .. } => true,
+        InstanceProbes::DefinednessPass { .. } => has_partial_operation,
+    };
+    let asks_guard_partial = asks_partial(guard_evaluation.has_partial_operation);
+    let asks_body_partial = asks_partial(body_status.has_partial_operation);
+    let is_search = matches!(probes, InstanceProbes::Search { .. });
+    let (any_undefined, range_lemmas, pass_guard_undefined, pass_body_undefined) = match probes {
+        InstanceProbes::Search { .. } => (false, &[][..], None, None),
+        InstanceProbes::DefinednessPass {
+            any_undefined,
+            range_lemmas,
+            guard_undefined,
+            body_undefined,
+        } => (
+            any_undefined,
+            range_lemmas,
+            Some(guard_undefined),
+            Some(body_undefined),
+        ),
+    };
+    let action = &model.actions[instance.action_index];
+    let guard_failure = guard_evaluation.first_partial;
+    solver.set_query_context("partial_op", &action.name);
+    if asks_guard_partial && probe(solver, &guard_failure).await? {
+        return Ok(Some(
+            make_action_partial_operation_violation(
+                solver,
+                model,
+                action,
+                instance,
+                &guard_failure,
+                states,
+                choices,
+                instances,
+                step,
+            )
+            .await?,
+        ));
+    }
+    // Keep the search terms alive through the body probes, as in the original
+    // search loop. Z3 AST owner lifetimes can affect witness selection. The
+    // definedness pass instead keeps its lemma conjunctions statement-local.
+    let (_guard_undefined, guard_is_undefined) = if is_search {
+        let term = solver.not(&guard_evaluation.defined)?;
+        let answer = probe(solver, &term).await?;
+        (Some(term), answer)
+    } else {
+        (
+            None,
+            any_undefined
+                && probe(
                     solver,
-                    model,
-                    action,
-                    instance,
-                    &body_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
+                    &with_lemmas(solver, range_lemmas, pass_guard_undefined.unwrap())?,
                 )
                 .await?,
-            ));
-        }
-        if any_undefined
-            && probe(solver, &with_lemmas(solver, range_lemmas, body_undefined)?).await?
-        {
-            return Err(VerifyError::new(format!(
-                "action '{}' body evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
-        }
+        )
+    };
+    if guard_is_undefined {
+        return Err(VerifyError::new(format!(
+            "action '{}' guard evaluation has a non-partial failure",
+            model.action_display_name(&action.name)
+        )));
+    }
+
+    let body_failure =
+        solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
+    if asks_body_partial && probe(solver, &body_failure).await? {
+        return Ok(Some(
+            make_action_partial_operation_violation(
+                solver,
+                model,
+                action,
+                instance,
+                &body_failure,
+                states,
+                choices,
+                instances,
+                step,
+            )
+            .await?,
+        ));
+    }
+    let (_body_undefined, body_is_undefined) = if is_search {
+        let term = solver.and(&[
+            guard_evaluation.enabled.clone(),
+            solver.not(&body_status.fully_defined)?,
+        ])?;
+        let answer = probe(solver, &term).await?;
+        (Some(term), answer)
+    } else {
+        (
+            None,
+            any_undefined
+                && probe(
+                    solver,
+                    &with_lemmas(solver, range_lemmas, pass_body_undefined.unwrap())?,
+                )
+                .await?,
+        )
+    };
+    if body_is_undefined {
+        return Err(VerifyError::new(format!(
+            "action '{}' body evaluation has a non-partial failure",
+            model.action_display_name(&action.name)
+        )));
     }
     Ok(None)
 }
