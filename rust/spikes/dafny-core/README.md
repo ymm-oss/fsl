@@ -261,4 +261,5 @@ almost no CPU, so the random mode keeps them few.
   action results or outputs, so neither does the core.
 - Contract functions and the IO shell (DB transaction per action, outbox, replay
   of production logs) are the follow-ups listed in #1908.
-- Not wired into CI (CI has no Dafny); no changelog fragment (no product change).
+- Not wired into CI (CI has no Dafny). The changelog fragment is
+  `changelog.d/1908-dafny-core-spike.documented.md` (no product change).
