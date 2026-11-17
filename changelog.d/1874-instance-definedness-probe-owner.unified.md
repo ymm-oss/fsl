@@ -10,4 +10,6 @@ answered `sat`. The solver sees the same queries in the same order; command
 output and exit codes are unchanged. A test-only recording solver pins the
 query sequence of eight specs with partial operations in guards, bodies and
 `ensures`. The search's SMT term owners retain their original lifetimes;
-a full-evidence regression detects witness drift from early term destruction.
+a full-evidence regression detects witness drift from early term destruction,
+pinned to each measured platform's digest (other platforms check that two
+runs agree and print the digest).

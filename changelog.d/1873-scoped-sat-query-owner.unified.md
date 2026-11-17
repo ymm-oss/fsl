@@ -12,6 +12,11 @@ too, which the helpers did not agree on, stays each caller's, as a
 which still builds the conjunction inside the scope, because Z3's search
 statistics depend on it; if that conjunction cannot be built, the scope is
 now closed instead of being left open. The solver sees the same queries in
-the same order; command output and exit codes are unchanged. The inline
-obligation blocks of `prove_ranked_leadstos_assuming` and of
-`prove_induction_scoped` keep their own sequence.
+the same order; command output and exit codes are unchanged. Four of the six
+inline obligation blocks of `prove_ranked_leadstos_assuming` (helpful
+fairness, sticky enabledness, plain and helpful progress) also use the owner,
+keeping their `unknown` errors and pop-failure precedence; when an assertion,
+check or model read fails inside one of them, the scope is now popped before
+the error is returned, and a failing pop takes precedence. Non-negativity,
+no-deadlock and `prove_induction_scoped` keep their own sequence, because they
+interleave term construction with assertions after the push.

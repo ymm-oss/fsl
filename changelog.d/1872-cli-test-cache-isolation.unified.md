@@ -8,4 +8,6 @@ its directory explicitly. `tests/cli_cache_isolation_guard.rs` fails when a
 function spawns the binary with a bare `Command::new(env!(..))` and sets
 neither `FSLC_CACHE=off` nor its own `FSLC_CACHE_DIR`, or when a test source
 names the binary otherwise without the helper or its own cache setup; it has
-no allowlist. Test assertions and product behaviour are unchanged.
+no allowlist. A cache directory name is never reused after its test thread exits, and
+bounded retries skip permission-denied names while Windows finishes deleting
+directories. Test assertions and product behaviour are unchanged.
