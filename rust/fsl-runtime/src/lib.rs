@@ -408,9 +408,14 @@ fn eval_inner(
             body,
         } => {
             // Nested binder-local evaluation is outside the enclosing evidence frame.
-            let candidates = binder_values(binder, state, bindings, model, old_state)?;
+            // One scope serves every candidate: `eval` and the `where` filter
+            // leave the bindings they are given as they found them (an `is`
+            // binding stays inside the `and` that made it), so rebinding the
+            // binder is all that differs between two candidates' scopes.
+            let candidates = binder_domain(binder, state, bindings, model, old_state)?;
+            let mut local = bindings.clone();
             if quantifier == "forall" {
-                for (value, mut local) in candidates {
+                for value in candidates {
                     local.insert(binder_name(binder).to_owned(), value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
@@ -421,7 +426,7 @@ fn eval_inner(
                 }
                 Ok(Value::Bool(true))
             } else {
-                for (value, mut local) in candidates {
+                for value in candidates {
                     local.insert(binder_name(binder).to_owned(), value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
@@ -453,8 +458,9 @@ fn eval_inner(
             // Aggregate sources, filters and values likewise keep their own scope.
             let mut matches = 0_i64;
             let mut sum = 0_i64;
-            for (candidate, mut local) in binder_values(binder, state, bindings, model, old_state)?
-            {
+            // One scope serves every candidate, as for `Quantified`.
+            let mut local = bindings.clone();
+            for candidate in binder_domain(binder, state, bindings, model, old_state)? {
                 local.insert(binder_name(binder).to_owned(), candidate);
                 if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                     continue;
@@ -820,6 +826,11 @@ fn eval_binary(
     mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
     if matches!(op, "and" | "or" | "=>") {
+        if !connective_may_bind(left) && !connective_may_bind(right) {
+            return eval_unbinding_connective(
+                op, left, right, state, bindings, model, old_state, observed,
+            );
+        }
         let mut local = bindings.clone();
         let left = as_bool(eval_with_bindings_observing(
             left,
@@ -910,6 +921,59 @@ fn eval_binary(
     }
 }
 
+/// An `and`/`or`/`=>` whose operands cannot add a binding
+/// ([`connective_may_bind`]), so the scope copy [`eval_binary`] makes for
+/// one that can would stay equal to `bindings`: both operands are evaluated
+/// on `bindings` itself.
+#[allow(clippy::too_many_arguments)]
+fn eval_unbinding_connective(
+    op: &str,
+    left: &Expr,
+    right: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    let left = as_bool(eval_with_bindings_observing(
+        left,
+        state,
+        bindings,
+        model,
+        old_state,
+        observed.as_deref_mut(),
+    )?)?;
+    match (op, left) {
+        ("and", false) => return Ok(Value::Bool(false)),
+        ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+        _ => {}
+    }
+    Ok(Value::Bool(as_bool(eval_with_bindings_observing(
+        right, state, bindings, model, old_state, observed,
+    )?)?))
+}
+
+/// Whether evaluating `expr` in place may add to the bindings it is given.
+///
+/// Only an `is` pattern binds, and only an `is` on the `and`/`or`/`=>`
+/// spine is evaluated in place: [`eval_observing`] evaluates every other
+/// operand, and an `and` or `is` it meets, on a copy of the bindings.
+fn connective_may_bind(expr: &Expr) -> bool {
+    let mut pending = vec![expr];
+    while let Some(expr) = pending.pop() {
+        match expr {
+            Expr::Is { .. } => return true,
+            Expr::Binary { op, left, right } if matches!(op.as_str(), "and" | "or" | "=>") => {
+                pending.push(left);
+                pending.push(right);
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn binder_values(
     binder: &Binder,
     state: &State,
@@ -917,7 +981,21 @@ fn binder_values(
     model: &KernelModel,
     old_state: Option<&State>,
 ) -> Result<Vec<(Value, Bindings)>, RuntimeError> {
-    let values = match binder {
+    Ok(binder_domain(binder, state, bindings, model, old_state)?
+        .into_iter()
+        .map(|value| (value, bindings.clone()))
+        .collect())
+}
+
+/// The values `binder` ranges over, in enumeration order.
+fn binder_domain(
+    binder: &Binder,
+    state: &State,
+    bindings: &Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Vec<Value>, RuntimeError> {
+    Ok(match binder {
         Binder::Typed { type_name, .. } => {
             let type_name = qualified_type(type_name)?;
             let ty = model.typed_binder_type(&type_name);
@@ -937,11 +1015,7 @@ fn binder_values(
                 _ => return Err(runtime_error("collection binder requires Set or Seq")),
             }
         }
-    };
-    Ok(values
-        .into_iter()
-        .map(|value| (value, bindings.clone()))
-        .collect())
+    })
 }
 
 fn binder_where_holds(
