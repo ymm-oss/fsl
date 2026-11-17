@@ -204,14 +204,19 @@ pub fn verify_explicit_selected(
     };
     let (mut seen, root) = StateStore::with_root(&initial_state);
     let mut frontier = vec![(initial_state, root)];
+    // Every stored state but the root passed the state bounds and invariants
+    // of the step that stored it, under the same selection; unless an
+    // invariant reads `old()`, they would pass again (`Monitor::execute_from`).
+    let admits_stored = !super::invariants_read_old(&scratch.model);
 
     for level in 0..=depth {
         result.depth_reached = level;
         result.max_frontier_width = result.max_frontier_width.max(frontier.len());
 
         for (state, id) in &frontier {
-            if let Some(violation) =
-                check_state_selected(state, None, &scratch.model, level, checked_bounds)?
+            if (*id == root || !admits_stored)
+                && let Some(violation) =
+                    check_state_selected(state, None, &scratch.model, level, checked_bounds)?
             {
                 result.violation = Some(ExplicitViolation {
                     trace: seen.trace(*id),
@@ -293,7 +298,7 @@ pub fn verify_explicit_selected(
                     level,
                     candidate,
                     checked_bounds,
-                    &mut |_| false,
+                    &mut |next| admits_stored && seen.id_of(next).is_some_and(|id| id != root),
                 )?;
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.

@@ -3833,7 +3833,7 @@ pub fn expression_reachability(
 
 /// Whether an invariant's value can depend on the pre-state of the step
 /// that reached the state it is checked in.
-fn invariants_read_old(model: &KernelModel) -> bool {
+pub(crate) fn invariants_read_old(model: &KernelModel) -> bool {
     model
         .invariants
         .iter()

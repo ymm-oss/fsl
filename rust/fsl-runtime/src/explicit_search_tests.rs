@@ -128,3 +128,19 @@ fn boundary_probe_rechecks_an_old_reading_invariant_on_a_stored_state() {
     assert_eq!(violation.step, 3);
     assert_eq!(action.as_deref(), Some("back"));
 }
+
+/// The explicit engine skips only the state checks of a stored successor:
+/// the `trans` property of the edge that reaches it again is still evaluated.
+#[test]
+fn explicit_search_checks_trans_on_an_edge_into_a_stored_state() {
+    let result = verify_explicit(model(&stored_edge("trans")), 5, 1_000).expect("explicit");
+    let violation = result.violation.expect("violation");
+    assert_eq!(violation.violation.kind, "partial_op");
+    assert_eq!(violation.violation.step, 3);
+    let action = violation
+        .trace
+        .last()
+        .and_then(|step| step.action.as_ref())
+        .map(|action| action.name.clone());
+    assert_eq!(action.as_deref(), Some("back"));
+}
