@@ -239,7 +239,8 @@ pub fn analyze_refinement(refinement: &SurfaceRefinement) -> Value {
                     located_node(id.clone(), "preserve_progress", "preserve progress", *span),
                 );
                 insert_edge(&mut edges, edge(&ref_id, "preserves_progress", &id));
-                for (leadsto, actions, response_span) in responses {
+                for response in responses {
+                    let leadsto = &response.leads_to;
                     let response_id = format!("progress_response:{leadsto}");
                     insert_node(
                         &mut nodes,
@@ -247,7 +248,7 @@ pub fn analyze_refinement(refinement: &SurfaceRefinement) -> Value {
                             response_id.clone(),
                             "progress_response",
                             leadsto,
-                            *response_span,
+                            response.span,
                         ),
                     );
                     insert_edge(&mut edges, edge(&id, "responds_by", &response_id));
@@ -257,7 +258,7 @@ pub fn analyze_refinement(refinement: &SurfaceRefinement) -> Value {
                         &mut edges,
                         edge(&response_id, "preserves_progress", &abs_id),
                     );
-                    let mut actions = actions.clone();
+                    let mut actions = response.actions.clone();
                     actions.sort();
                     for action in actions {
                         let action_id = format!("impl_action:{action}");
