@@ -29,6 +29,9 @@ mod enabled_calls_tests;
 #[cfg(test)]
 mod explicit_search_tests;
 
+#[cfg(test)]
+mod double_assignment_tests;
+
 /// Work counters the structural tests of #1842 read, so a scaling
 /// regression fails without a wall-clock deadline.
 #[cfg(test)]
@@ -5660,24 +5663,24 @@ fn execute_init_statement_inner(
     Ok(())
 }
 
-fn compute_statement_update(
-    statement: &Statement,
+fn compute_statement_update<'statement>(
+    statement: &'statement Statement,
     old_state: &State,
     next: &mut State,
-    writes: &mut BTreeSet<String>,
+    writes: &mut BTreeSet<WriteKey<'statement>>,
     bindings: &mut Bindings,
     model: &KernelModel,
 ) -> Result<(), RuntimeError> {
     match statement {
         Statement::Assign { target, value, .. } => {
             let value = eval(value, old_state, bindings, model, None)?;
-            let write_key = lvalue_key(target, old_state, bindings, model)?;
-            if !writes.insert(write_key.clone()) {
+            let place = assign_place(target, old_state, bindings, model)?;
+            if let Some(write_key) = writes.replace(WriteKey::of(&place)) {
                 return Err(runtime_error(format!(
                     "double assignment to '{write_key}' on the same execution path"
                 )));
             }
-            assign(target, value, old_state, next, bindings, model)?;
+            write_place(place, value, next, Some(old_state), model)?;
         }
         Statement::If {
             condition,
@@ -5713,16 +5716,41 @@ fn compute_statement_update(
     Ok(())
 }
 
-fn assign(
-    target: &LValue,
-    value: Value,
-    read_state: &State,
-    target_state: &mut State,
-    bindings: &mut Bindings,
-    model: &KernelModel,
-) -> Result<(), RuntimeError> {
-    let place = assign_place(target, read_state, bindings, model)?;
-    write_place(place, value, target_state, Some(read_state), model)
+/// The part of the state an action's assignment writes, as
+/// [`compute_statement_update`] tells a second write to it on one path.
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct WriteKey<'target> {
+    root: &'target str,
+    index: Option<Value>,
+    field: Option<&'target str>,
+}
+
+impl<'target> WriteKey<'target> {
+    fn of(place: &AssignPlace<'target>) -> Self {
+        let (root, index, field) = match place {
+            AssignPlace::Var(root) => (*root, None, None),
+            AssignPlace::Part(root, PartPlace::Index(index)) => (*root, Some(index.clone()), None),
+            AssignPlace::Part(root, PartPlace::Field(field)) => (*root, None, Some(*field)),
+            AssignPlace::Part(root, PartPlace::IndexField(index, field)) => {
+                (*root, Some(index.clone()), Some(*field))
+            }
+        };
+        Self { root, index, field }
+    }
+}
+
+/// The text [`lvalue_key`] gives the same target.
+impl fmt::Display for WriteKey<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.root)?;
+        if let Some(index) = &self.index {
+            write!(formatter, "[{index:?}]")?;
+        }
+        if let Some(field) = self.field {
+            write!(formatter, ".{field}")?;
+        }
+        Ok(())
+    }
 }
 
 /// An assignment target with its index expression evaluated.
@@ -5738,8 +5766,8 @@ enum PartPlace<'target> {
     IndexField(Value, &'target str),
 }
 
-/// Resolve `target` against `read_state`: the first half of [`assign`],
-/// which evaluates the index expression before it looks up the root.
+/// Resolve `target` against `read_state`, evaluating its index expression
+/// before [`write_place`] looks up the root.
 fn assign_place<'target>(
     target: &'target LValue,
     read_state: &State,
@@ -5758,19 +5786,14 @@ fn assign_place<'target>(
                 name,
                 PartPlace::IndexField(eval(index_expr, read_state, bindings, model, None)?, field),
             ),
-            LValue::Field(_, _) => {
-                return Err(runtime_error(
-                    "nested field lvalue is not supported by grammar",
-                ));
-            }
+            LValue::Field(_, _) => return Err(runtime_error("nested field lvalue")),
         },
     })
 }
 
-/// Write `value` at `place` in `target_state`: the second half of
-/// [`assign`]. A root `target_state` does not hold yet is taken from
-/// `read_state`. Every check runs before the write, so a failed write leaves
-/// `target_state` unchanged.
+/// Write `value` at `place` in `target_state`. A root `target_state` does
+/// not hold yet is taken from `read_state`. Every check runs before the
+/// write, so a failed write leaves `target_state` unchanged.
 fn write_place(
     place: AssignPlace<'_>,
     value: Value,

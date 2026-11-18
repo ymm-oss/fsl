@@ -3,3 +3,4 @@ Deciding whether an `and`/`or`/`=>` chain can bind a pattern no longer allocates
 The explicit engine takes the vacuity probe's verdicts from its own walk, as BMC's pre-pass does, when that walk checked every bound, was not stopped by a violation or its state budget, and stored fewer states than the probe's budget; otherwise the probe walks on its own as before.
 Cloning an enum or struct value shares its type and member names instead of copying them.
 A quantifier rebinds its binder in place instead of inserting its name again for every candidate.
+An assignment's index is evaluated once, and the double-assignment check compares the written location instead of its text.
