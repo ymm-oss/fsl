@@ -7,6 +7,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [5.2.0] - 2026-11-18
 
+- Changed (#1848, performance): `verify --engine bmc` decides the vacuity reachability probe on the walk of its concrete boundary pre-pass instead of walking the same states again while rendering.
+  Both walks start from the same initial state, step the same candidates in the same order, skip the same violating successors and stop at the same `CONCRETE_PROBE_BUDGET`, so the probe's verdicts are the ones a separate walk reports; when a `partial_op` or `type_bound` finding stops the pre-pass, the probe walks on its own as before.
+  Verdicts, warnings and witnesses are unchanged.
+- Changed (#1851, refs #1885, performance): the explicit engine, BMC's concrete boundary pre-pass and the vacuity reachability probe cost less per state, and the pre-pass and the probe hold less memory; what they explore and report is unchanged.
+  The pre-pass and probe queue store ids instead of full states.
+  A successor the search already stored, and every explicit frontier state but the root, is not checked against the state bounds and invariants again unless an invariant reads `old()`; the step's `trans` and `ensures` still are.
+  Concrete evaluation no longer copies the bindings for an `and`/`or`/`=>` chain or a quantifier that cannot bind, compares and indexes names, places and literals in place, and lists a typed binder's domain from its type name.
 - Changed (#1885, refs #1851, #1247): `verify --engine explicit`, the explicit
   half of `--engine auto`, the concrete boundary probe that runs before BMC, and
   the vacuity reachability probe cost less per state; what they explore and
