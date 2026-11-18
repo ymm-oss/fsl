@@ -433,9 +433,10 @@ fn eval_inner(
             // binder is all that differs between two candidates' scopes.
             let candidates = binder_domain(binder, state, bindings, model, old_state)?;
             let mut local = bindings.clone();
+            let name = binder_name(binder);
             if quantifier == "forall" {
                 for value in candidates {
-                    local.insert(binder_name(binder).to_owned(), value);
+                    rebind(&mut local, name, value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
                     }
@@ -446,7 +447,7 @@ fn eval_inner(
                 Ok(Value::Bool(true))
             } else {
                 for value in candidates {
-                    local.insert(binder_name(binder).to_owned(), value);
+                    rebind(&mut local, name, value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
                     }
@@ -1240,6 +1241,15 @@ fn eval_spine_leaf(
     eval_with_bindings_observing(expr, state, bindings, model, old_state, observed)
         .and_then(as_bool)
         .map_err(Box::new)
+}
+
+/// Bind `name` to `value` in `bindings`, reusing the key once it is there.
+fn rebind(bindings: &mut Bindings, name: &str, value: Value) {
+    if let Some(slot) = bindings.get_mut(name) {
+        *slot = value;
+    } else {
+        bindings.insert(name.to_owned(), value);
+    }
 }
 
 /// Whether evaluating `expr` in place may add to the bindings it is given.
