@@ -114,6 +114,10 @@ pub struct BmcOutputOptions<'a> {
     /// so the probe always runs and `--vacuity error` never silently loses
     /// evidence it would otherwise catch.
     pub skip_vacuity_probe: bool,
+    /// The vacuity probe's verdicts when a walk of the same model, depth and
+    /// budget already decided them (BMC's boundary pre-pass); `None` walks
+    /// the probe while rendering.
+    pub vacuity_reachability: Option<&'a [fsl_runtime::Reachability]>,
 }
 
 /// The source location a typed-model diagnostic carries, if the model bound one
@@ -2505,6 +2509,7 @@ pub fn render_explicit_output(
             elapsed_s,
             statistics: &statistics,
             skip_vacuity_probe,
+            vacuity_reachability: None,
         };
         let (mut output, status) = if violation.kind == "partial_op" {
             let boundary = fsl_runtime::Violation {
@@ -2530,6 +2535,7 @@ pub fn render_explicit_output(
             elapsed_s,
             statistics: &statistics,
             skip_vacuity_probe,
+            vacuity_reachability: None,
         };
         let (mut output, status) =
             render_deadlock_failure(envelope, model, &compatible, step, &options);
@@ -2569,6 +2575,7 @@ pub fn render_explicit_output(
             elapsed_s,
             statistics: &statistics,
             skip_vacuity_probe,
+            vacuity_reachability: None,
         };
         let (mut output, status) =
             render_reachable_failure(envelope, model, &compatible, &unreached, &options);
@@ -2676,6 +2683,7 @@ fn render_explicit_budget(
         // This branch never renders `warnings` (see `add_common`), so the
         // vacuity probe is never invoked from here regardless of this value.
         skip_vacuity_probe: false,
+        vacuity_reachability: None,
     };
     add_common(&mut output, model, compatible, &options);
     output.insert("depth".to_owned(), json!(result.depth));
@@ -2719,6 +2727,7 @@ fn render_explicit_success(
             elapsed_s,
             statistics,
             skip_vacuity_probe,
+            vacuity_reachability: None,
         };
         let (mut output, status) = render_success(output, model, compatible, &options);
         add_explicit_metadata(&mut output, model, result);
@@ -2734,6 +2743,7 @@ fn render_explicit_success(
         elapsed_s,
         statistics,
         skip_vacuity_probe,
+        vacuity_reachability: None,
     };
     add_common(&mut output, model, compatible, &options);
     output.insert("depth".to_owned(), json!(result.depth));
@@ -3342,7 +3352,11 @@ fn shared_warnings(
             .map(|entry| &entry.state),
         &result.action_coverage,
         &solver_vacuity_warnings(model, result),
-        options.skip_vacuity_probe,
+        match (options.skip_vacuity_probe, options.vacuity_reachability) {
+            (true, _) => fsl_runtime::VacuityProbe::Skip,
+            (false, Some(walked)) => fsl_runtime::VacuityProbe::Walked(walked),
+            (false, None) => fsl_runtime::VacuityProbe::Run,
+        },
     )
 }
 
@@ -4115,6 +4129,7 @@ mod tests {
                 elapsed_s: 0.0,
                 statistics: &statistics,
                 skip_vacuity_probe: false,
+                vacuity_reachability: None,
             },
         );
         let (mut explicit_output, explicit_status) = render_explicit_output(

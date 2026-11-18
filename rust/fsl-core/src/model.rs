@@ -334,6 +334,33 @@ impl KernelModel {
         }
     }
 
+    /// [`KernelModel::domain_values`] of the type a typed binder names, read
+    /// from the type's name.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`ModelError`] [`KernelModel::domain_values`] returns.
+    pub fn typed_binder_domain(&self, type_name: &str) -> Result<Vec<Value>, ModelError> {
+        if type_name != "Bool" {
+            match self.types.get(type_name) {
+                Some(TypeDef::Domain { lo, hi, .. }) => {
+                    return Ok((*lo..=*hi).map(Value::Int).collect());
+                }
+                Some(TypeDef::Enum { members, .. }) => {
+                    return Ok(members
+                        .iter()
+                        .map(|member| Value::Enum {
+                            type_name: type_name.to_owned(),
+                            member: member.clone(),
+                        })
+                        .collect());
+                }
+                _ => {}
+            }
+        }
+        self.domain_values(&self.typed_binder_type(type_name))
+    }
+
     /// The value of a static binder bound, or the engines' refusal of it.
     ///
     /// `spell` renders a name in the message: engines keep the Kernel name,

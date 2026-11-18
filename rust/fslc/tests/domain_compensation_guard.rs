@@ -305,7 +305,7 @@ fn compensation_never_enabled_detector_changes_when_trigger_guard_is_removed() {
         None,
         &result.action_coverage,
         &[],
-        false,
+        fsl_runtime::VacuityProbe::Run,
     );
     assert!(
         !warnings.iter().any(|warning| {

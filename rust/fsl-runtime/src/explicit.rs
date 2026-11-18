@@ -204,14 +204,19 @@ pub fn verify_explicit_selected(
     };
     let (mut seen, root) = StateStore::with_root(&initial_state);
     let mut frontier = vec![(initial_state, root)];
+    // Every stored state but the root passed the state bounds and invariants
+    // of the step that stored it, under the same selection; unless an
+    // invariant reads `old()`, they would pass again (`Monitor::execute_from`).
+    let admits_stored = !super::invariants_read_old(&scratch.model);
 
     for level in 0..=depth {
         result.depth_reached = level;
         result.max_frontier_width = result.max_frontier_width.max(frontier.len());
 
         for (state, id) in &frontier {
-            if let Some(violation) =
-                check_state_selected(state, None, &scratch.model, level, checked_bounds)?
+            if (*id == root || !admits_stored)
+                && let Some(violation) =
+                    check_state_selected(state, None, &scratch.model, level, checked_bounds)?
             {
                 result.violation = Some(ExplicitViolation {
                     trace: seen.trace(*id),
@@ -288,7 +293,13 @@ pub fn verify_explicit_selected(
         for ((state, id), candidates) in frontier.iter().zip(&enabled_by_state) {
             for candidate in candidates {
                 let instance = candidate.instance();
-                let stepped = scratch.step_enumerated(state, level, candidate, checked_bounds)?;
+                let stepped = scratch.step_enumerated(
+                    state,
+                    level,
+                    candidate,
+                    checked_bounds,
+                    &mut |next| admits_stored && seen.id_of(next).is_some_and(|id| id != root),
+                )?;
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.
                 let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
@@ -701,11 +712,9 @@ fn compute_binder_values(
             type_name,
             where_expr: None,
             ..
-        } => {
-            let type_name = super::qualified_type(type_name)?;
-            let ty = model.typed_binder_type(&type_name);
-            Ok(Some(model.domain_values(&ty)?))
-        }
+        } => Ok(Some(
+            model.typed_binder_domain(super::qualified_type(type_name)?)?,
+        )),
         Binder::Range {
             lo,
             hi,

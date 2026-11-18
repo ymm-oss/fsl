@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+spec PartialOpStop {
+  type Count = 0..5
+
+  state {
+    x: Count,
+    y: Int
+  }
+
+  init {
+    x = 0
+    y = 0
+  }
+
+  action advance() {
+    requires x < 5
+    x = x + 1
+  }
+
+  action divide() {
+    requires x == 1
+    y = 10 / (x - 1)
+  }
+
+  invariant LateStaysZero {
+    x == 4 => y == 0
+  }
+}

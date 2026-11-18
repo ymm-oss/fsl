@@ -33,7 +33,7 @@ fn vacuous_leadsto_is_reported_when_the_trigger_is_unreachable() {
         None,
         &BTreeMap::new(),
         &[],
-        false,
+        fsl_runtime::VacuityProbe::Run,
     );
     assert!(
         warnings
@@ -59,7 +59,7 @@ fn vacuous_leadsto_is_reported_when_the_trigger_is_unreachable() {
         None,
         &BTreeMap::new(),
         &[],
-        false,
+        fsl_runtime::VacuityProbe::Run,
     );
     assert!(
         !warnings
@@ -88,7 +88,7 @@ fn never_enabled_action_carries_name_location_and_requirement_metadata() {
         None,
         &BTreeMap::from([("blocked".to_owned(), false)]),
         &[],
-        false,
+        fsl_runtime::VacuityProbe::Run,
     );
     let warning = warnings
         .iter()
@@ -127,7 +127,7 @@ fn zero_span_internal_action_is_not_a_never_enabled_finding() {
         None,
         &BTreeMap::from([("sentinel".to_owned(), false)]),
         &[],
-        false,
+        fsl_runtime::VacuityProbe::Run,
     );
     assert!(
         warnings

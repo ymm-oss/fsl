@@ -183,6 +183,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-runtime/src/lib.rs",
+        4584,
+        "check_successor",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-runtime/src/lib.rs",
         4106,
         "check_state_bounds",
         ResultOption
@@ -206,6 +213,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-runtime/src/lib.rs",
         389,
         "eval_place",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-runtime/src/lib.rs",
+        611,
+        "eval_place_steps",
         ResultOption
     ),
     entry!(
@@ -677,6 +691,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fslc/src/verification.rs",
         340,
         "monotone_direction",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/verification.rs",
+        1335,
+        "probe_bmc_boundary",
         ResultOption
     ),
     entry!(

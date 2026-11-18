@@ -13192,6 +13192,7 @@ fn testgen_walk_violation_output(
                 elapsed_s: 0.0,
                 statistics: &statistics,
                 skip_vacuity_probe: false,
+                vacuity_reachability: None,
             },
         );
     }
@@ -13240,6 +13241,7 @@ fn testgen_walk_violation_output(
             // The violation branch never emits `warnings`, so the vacuity
             // probe is never reached from here.
             skip_vacuity_probe: false,
+            vacuity_reachability: None,
         },
     )
 }
