@@ -504,8 +504,8 @@ impl Decoder<'_> {
             }
             TAG_BOOL => Value::Bool(self.byte() != 0),
             TAG_ENUM => Value::Enum {
-                type_name: self.string(),
-                member: self.string(),
+                type_name: self.string().into(),
+                member: self.string().into(),
             },
             TAG_NONE => Value::None,
             TAG_SOME => Value::Some(Box::new(self.value())),
@@ -513,7 +513,10 @@ impl Decoder<'_> {
                 let type_name = self.string();
                 let len = self.len();
                 let fields = (0..len).map(|_| (self.string(), self.value())).collect();
-                Value::Struct { type_name, fields }
+                Value::Struct {
+                    type_name: type_name.into(),
+                    fields,
+                }
             }
             TAG_MAP => {
                 let len = self.len();
@@ -552,14 +555,14 @@ mod tests {
 
     fn sample() -> State {
         let claim = |st: &str, amount| Value::Struct {
-            type_name: "DesignClaim".to_owned(),
+            type_name: "DesignClaim".into(),
             fields: BTreeMap::from([
                 ("amount".to_owned(), Value::Int(amount)),
                 (
                     "st".to_owned(),
                     Value::Enum {
-                        type_name: "DesignSt".to_owned(),
-                        member: st.to_owned(),
+                        type_name: "DesignSt".into(),
+                        member: st.into(),
                     },
                 ),
             ]),
@@ -614,8 +617,8 @@ mod tests {
             State::from([(
                 left.to_owned(),
                 Value::Enum {
-                    type_name: right.to_owned(),
-                    member: String::new(),
+                    type_name: right.into(),
+                    member: "".into(),
                 },
             )])
         };

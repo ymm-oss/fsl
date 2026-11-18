@@ -175,7 +175,9 @@ fn eval_observing(
             eval_connective(
                 op, left, right, binds, state, bindings, model, old_state, observed,
             )
-        });
+        })
+        .map(Value::Bool)
+        .map_err(|error| *error);
     }
     if matches!(expr, Expr::Is { .. }) {
         eval_with_bindings_observing(
@@ -260,7 +262,7 @@ fn eval_inner(
                 .collect::<Result<_, _>>()?,
         )),
         Expr::Struct { name, fields } => Ok(Value::Struct {
-            type_name: name.clone(),
+            type_name: name.as_str().into(),
             fields: fields
                 .iter()
                 .map(|(field, expr)| {
@@ -297,8 +299,8 @@ fn eval_inner(
                 )));
             }
             Ok(Value::Enum {
-                type_name: type_name.clone(),
-                member: member.clone(),
+                type_name: type_name.as_str().into(),
+                member: member.as_str().into(),
             })
         }
         Expr::Call { name, .. } => {
@@ -816,7 +818,7 @@ fn operands_equal(left: Operand<'_>, right: Operand<'_>) -> Option<bool> {
             Operand::Bool(literal) => matches!(value, Value::Bool(value) if *value == literal),
             Operand::Enum { type_name, member } => matches!(
                 value,
-                Value::Enum { type_name: t, member: m } if t == type_name && m == member
+                Value::Enum { type_name: t, member: m } if **t == *type_name && **m == *member
             ),
         },
         (Operand::Int(left), Operand::Int(right)) => left == right,
@@ -1031,7 +1033,9 @@ fn eval_binary(
         let binds = connective_may_bind(left) || connective_may_bind(right);
         return eval_connective(
             op, left, right, binds, state, bindings, model, old_state, observed,
-        );
+        )
+        .map(Value::Bool)
+        .map_err(|error| *error);
     }
     if let Some(value) = compare_in_place(op, left, right, state, bindings, model) {
         return Ok(value);
@@ -1111,6 +1115,10 @@ fn is_connective(op: &str) -> bool {
 /// would leave equal to `bindings`. Where it is true, every connective on the
 /// spine scopes its operands on a copy, including one whose own operands
 /// cannot bind.
+///
+/// A long spine recurses once per connective and every frame on it holds the
+/// slot its operand's result is returned in, so the result is a Boolean and
+/// the rare error is boxed rather than a [`Value`] beside a [`RuntimeError`].
 #[allow(clippy::too_many_arguments)]
 fn eval_connective(
     op: &str,
@@ -1122,28 +1130,46 @@ fn eval_connective(
     model: &KernelModel,
     old_state: Option<&State>,
     mut observed: Option<&mut Bindings>,
-) -> Result<Value, RuntimeError> {
-    if !binds {
-        let left = as_bool(eval_spine_operand(
-            left,
-            false,
-            state,
-            bindings,
-            model,
-            old_state,
-            observed.as_deref_mut(),
-        )?)?;
-        match (op, left) {
-            ("and", false) => return Ok(Value::Bool(false)),
-            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
-            _ => {}
-        }
-        return Ok(Value::Bool(as_bool(eval_spine_operand(
-            right, false, state, bindings, model, old_state, observed,
-        )?)?));
+) -> Result<bool, Box<RuntimeError>> {
+    if binds {
+        return eval_binding_connective(
+            op, left, right, state, bindings, model, old_state, observed,
+        );
     }
+    let left = eval_spine_operand(
+        left,
+        false,
+        state,
+        bindings,
+        model,
+        old_state,
+        observed.as_deref_mut(),
+    )?;
+    match (op, left) {
+        ("and", false) => return Ok(false),
+        ("or", true) | ("=>", false) => return Ok(true),
+        _ => {}
+    }
+    eval_spine_operand(right, false, state, bindings, model, old_state, observed)
+}
+
+/// [`eval_connective`] where `binds` is true. A long spine recurses through
+/// one of the two once per connective, so this half is kept out of line and
+/// the frame of the half that cannot bind stays small.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn eval_binding_connective(
+    op: &str,
+    left: &Expr,
+    right: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
+) -> Result<bool, Box<RuntimeError>> {
     let mut local = bindings.clone();
-    let left = as_bool(eval_spine_operand(
+    let left = eval_spine_operand(
         left,
         true,
         state,
@@ -1151,26 +1177,24 @@ fn eval_connective(
         model,
         old_state,
         observed.as_deref_mut(),
-    )?)?;
+    )?;
     match (op, left) {
         ("and", false) => {
             // Retain reached conjunct evidence even when its RHS is skipped.
             *bindings = local;
-            return Ok(Value::Bool(false));
+            return Ok(false);
         }
-        ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+        ("or", true) | ("=>", false) => return Ok(true),
         _ => {}
     }
     if !fsl_core::pattern_binding_flows(op, true) {
         local.clone_from(bindings);
     }
-    let right = as_bool(eval_spine_operand(
-        right, true, state, &mut local, model, old_state, observed,
-    )?)?;
+    let right = eval_spine_operand(right, true, state, &mut local, model, old_state, observed)?;
     if fsl_core::pattern_binding_flows(op, false) {
         *bindings = local;
     }
-    Ok(Value::Bool(right))
+    Ok(right)
 }
 
 /// An operand of [`eval_connective`]: a connective continues the spine with
@@ -1185,15 +1209,37 @@ fn eval_spine_operand(
     model: &KernelModel,
     old_state: Option<&State>,
     observed: Option<&mut Bindings>,
-) -> Result<Value, RuntimeError> {
+) -> Result<bool, Box<RuntimeError>> {
     match expr {
         Expr::Binary { op, left, right } if is_connective(op) => recursion::guard(|| {
-            eval_connective(
-                op, left, right, binds, state, bindings, model, old_state, observed,
-            )
+            if binds {
+                eval_binding_connective(
+                    op, left, right, state, bindings, model, old_state, observed,
+                )
+            } else {
+                eval_connective(
+                    op, left, right, false, state, bindings, model, old_state, observed,
+                )
+            }
         }),
-        _ => eval_with_bindings_observing(expr, state, bindings, model, old_state, observed),
+        _ => eval_spine_leaf(expr, state, bindings, model, old_state, observed),
     }
+}
+
+/// An operand of [`eval_connective`] that is not itself a connective. Kept out
+/// of line so its [`Value`] stays out of the frames of the spine's recursion.
+#[inline(never)]
+fn eval_spine_leaf(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<bool, Box<RuntimeError>> {
+    eval_with_bindings_observing(expr, state, bindings, model, old_state, observed)
+        .and_then(as_bool)
+        .map_err(Box::new)
 }
 
 /// Whether evaluating `expr` in place may add to the bindings it is given.
@@ -5863,13 +5909,13 @@ pub fn value_conforms(
             Some(fsl_core::TypeDef::Enum { members, .. }) => matches!(
                 value,
                 Value::Enum { type_name, member }
-                    if type_name == name && members.contains(member)
+                    if **type_name == **name && members.iter().any(|known| **known == **member)
             ),
             Some(fsl_core::TypeDef::Struct { fields: expected }) => {
                 let Value::Struct { type_name, fields } = value else {
                     return Ok(false);
                 };
-                type_name == name
+                **type_name == **name
                     && expected.iter().all(|(field, ty)| {
                         fields
                             .get(field)

@@ -349,8 +349,8 @@ fn eval_inner<S: SmtSolver>(
             model,
             &TypeRef::Named(type_name.clone()),
             &FslValue::Enum {
-                type_name: type_name.clone(),
-                member: member.clone(),
+                type_name: type_name.as_str().into(),
+                member: member.as_str().into(),
             },
         ),
         Expr::Call { name, .. } => Err(VerifyError::new(format!(
@@ -1688,7 +1688,7 @@ fn lookup<S: SmtSolver>(
         return concrete_value(solver, model, &ty, value);
     }
     if let Some(value @ FslValue::Enum { type_name, .. }) = model.enum_members.get(name) {
-        return concrete_value(solver, model, &TypeRef::Named(type_name.clone()), value);
+        return concrete_value(solver, model, &TypeRef::Named(type_name.to_string()), value);
     }
     Err(VerifyError::new(format!("unknown identifier '{name}'")))
 }

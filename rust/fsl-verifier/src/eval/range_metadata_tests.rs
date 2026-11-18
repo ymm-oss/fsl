@@ -228,7 +228,7 @@ fn a_actual_parameter_rosters_keep_values_types_and_only_integer_facts() {
                     assert!(r.range_fact.is_none());
                 }
                 FslValue::Enum { member, .. } => {
-                    let ordinal = match member.as_str() {
+                    let ordinal = match &*member {
                         "Red" => 0,
                         "Blue" => 1,
                         _ => unreachable!(),

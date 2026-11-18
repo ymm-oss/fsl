@@ -945,7 +945,7 @@ fn resolve_enum_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Opti
         .domain_values(key_type)
         .ok()?
         .into_iter()
-        .find(|value| matches!(value, Value::Enum { member, .. } if member == name))
+        .find(|value| matches!(value, Value::Enum { member, .. } if **member == *name))
 }
 
 /// Resolve `name` as an integer constant only for bounded integer key types.

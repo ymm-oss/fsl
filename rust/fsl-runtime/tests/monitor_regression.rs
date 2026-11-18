@@ -284,8 +284,8 @@ fn action_parameters_must_belong_to_their_declared_domains() {
         (
             "choice",
             FslValue::Enum {
-                type_name: "Choice".to_owned(),
-                member: "A".to_owned(),
+                type_name: "Choice".into(),
+                member: "A".into(),
             },
         ),
         ("flag", FslValue::Bool(false)),
@@ -308,15 +308,15 @@ fn action_parameters_must_belong_to_their_declared_domains() {
         (
             "choice",
             FslValue::Enum {
-                type_name: "Other".to_owned(),
-                member: "A".to_owned(),
+                type_name: "Other".into(),
+                member: "A".into(),
             },
         ),
         (
             "choice",
             FslValue::Enum {
-                type_name: "Choice".to_owned(),
-                member: "Missing".to_owned(),
+                type_name: "Choice".into(),
+                member: "Missing".into(),
             },
         ),
         ("flag", FslValue::Int(0)),
@@ -446,7 +446,7 @@ fn place_read_chain_keeps_the_bottom_up_failure_order() {
 
     let model = model("spec Place { state { z: Int } init { z = 0 } action stay() { z = z } }");
     let leaf = |a: i64| FslValue::Struct {
-        type_name: "P".to_owned(),
+        type_name: "P".into(),
         fields: BTreeMap::from([("a".to_owned(), FslValue::Int(a))]),
     };
     let row = |i: i64| FslValue::Map((0..2).map(|j| (FslValue::Int(j), leaf(i + j))).collect());
@@ -525,7 +525,7 @@ fn enabled_lists_parameter_bindings_first_parameter_slowest() {
                 .map(|value| match value {
                     FslValue::Int(value) => value.to_string(),
                     FslValue::Bool(value) => value.to_string(),
-                    FslValue::Enum { member, .. } => member.clone(),
+                    FslValue::Enum { member, .. } => member.to_string(),
                     other => format!("{other:?}"),
                 })
                 .collect::<Vec<_>>()

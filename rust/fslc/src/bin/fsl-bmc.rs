@@ -140,7 +140,7 @@ fn fsl_value_json(value: &fsl_core::FslValue) -> serde_json::Value {
     match value {
         fsl_core::FslValue::Int(value) => json!(value),
         fsl_core::FslValue::Bool(value) => json!(value),
-        fsl_core::FslValue::Enum { member, .. } => json!(member),
+        fsl_core::FslValue::Enum { member, .. } => json!(**member),
         fsl_core::FslValue::None => serde_json::Value::Null,
         fsl_core::FslValue::Some(value) => fsl_value_json(value),
         fsl_core::FslValue::Struct { fields, .. } => serde_json::Value::Object(
@@ -174,7 +174,7 @@ fn map_key(value: &fsl_core::FslValue) -> String {
     match value {
         fsl_core::FslValue::Int(value) => value.to_string(),
         fsl_core::FslValue::Bool(value) => value.to_string(),
-        fsl_core::FslValue::Enum { member, .. } => member.clone(),
+        fsl_core::FslValue::Enum { member, .. } => member.to_string(),
         _ => format!("{value:?}"),
     }
 }

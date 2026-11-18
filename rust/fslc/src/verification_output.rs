@@ -1098,7 +1098,7 @@ fn argument_kind_fits(
                 Some(TypeDef::Domain { .. }) => matches!(value, FslValue::Int(_)),
                 Some(TypeDef::Enum { .. }) => matches!(
                     value,
-                    FslValue::Enum { type_name: value_type, .. } if value_type == type_name
+                    FslValue::Enum { type_name: value_type, .. } if **value_type == **type_name
                 ),
                 _ => false,
             },

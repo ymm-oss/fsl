@@ -563,7 +563,7 @@ fn map_key(value: &FslValue) -> String {
     match value {
         FslValue::Int(value) => value.to_string(),
         FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
+        FslValue::Enum { member, .. } => member.to_string(),
         _ => format!("{value:?}"),
     }
 }

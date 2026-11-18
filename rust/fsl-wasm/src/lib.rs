@@ -3155,14 +3155,14 @@ mod tests {
         );
 
         let before = FslValue::Struct {
-            type_name: "Job".to_owned(),
+            type_name: "Job".into(),
             fields: BTreeMap::from([
                 ("status".to_owned(), FslValue::Int(0)),
                 ("priority".to_owned(), FslValue::Int(0)),
             ]),
         };
         let after = FslValue::Struct {
-            type_name: "Job".to_owned(),
+            type_name: "Job".into(),
             fields: BTreeMap::from([
                 ("status".to_owned(), FslValue::Int(1)),
                 ("priority".to_owned(), FslValue::Int(0)),
@@ -3271,7 +3271,7 @@ mod tests {
                 state: BTreeMap::from([(
                     "packet".to_owned(),
                     FslValue::Struct {
-                        type_name: "Packet".to_owned(),
+                        type_name: "Packet".into(),
                         fields: BTreeMap::from([
                             ("kind".to_owned(), FslValue::Int(0)),
                             ("value".to_owned(), FslValue::Int(0)),
@@ -3286,7 +3286,7 @@ mod tests {
                 state: BTreeMap::from([(
                     "packet".to_owned(),
                     FslValue::Struct {
-                        type_name: "Packet".to_owned(),
+                        type_name: "Packet".into(),
                         fields: BTreeMap::from([
                             ("kind".to_owned(), FslValue::Int(1)),
                             ("value".to_owned(), FslValue::Int(1)),

@@ -1055,3 +1055,31 @@ fn a_requires_disjunct_that_binds_does_not_bind_for_a_later_guard() {
         .expect_err("the later guard reads an unbound name");
     assert!(error.message.contains("'v'"), "{error:?}");
 }
+
+/// `(m[0] == 1 or o is some(v)) and v == 1`, with the caller's `v` at 0. The
+/// spine binds, and the `or` nested in it scopes the binding of its `is` to
+/// its own operand, so `v == 1` reads the caller's `v` and is false.
+#[test]
+fn eval_keeps_a_binding_in_a_disjunction_nested_in_a_binding_spine() {
+    let (model, state, is_term) = bound_option_model();
+    let binary = |op: &str, left, right| fsl_core::KernelExpr::Binary {
+        op: op.to_owned(),
+        left: Box::new(left),
+        right: Box::new(right),
+    };
+    let false_term = binary(
+        "==",
+        fsl_core::KernelExpr::Index(
+            Box::new(fsl_core::KernelExpr::Var("m".to_owned())),
+            Box::new(fsl_core::KernelExpr::Num(0)),
+        ),
+        fsl_core::KernelExpr::Num(1),
+    );
+    let spine = binary("and", binary("or", false_term, is_term), v_equals(1));
+    let mut bindings =
+        std::collections::BTreeMap::from([("v".to_owned(), fsl_core::FslValue::Int(0))]);
+    assert_eq!(
+        fsl_runtime::eval(&spine, &state, &mut bindings, &model, None).expect("evaluate the spine"),
+        fsl_core::FslValue::Bool(false)
+    );
+}

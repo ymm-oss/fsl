@@ -67,7 +67,7 @@ fn map_key(value: &FslValue) -> String {
     match value {
         FslValue::Int(value) => value.to_string(),
         FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
+        FslValue::Enum { member, .. } => member.to_string(),
         _ => format!("{value:?}"),
     }
 }
@@ -77,7 +77,7 @@ pub fn fsl_value_json(value: &FslValue) -> Value {
     match value {
         FslValue::Int(value) => json!(value),
         FslValue::Bool(value) => json!(value),
-        FslValue::Enum { member, .. } => json!(member),
+        FslValue::Enum { member, .. } => json!(**member),
         FslValue::None => Value::Null,
         // State values cannot contain an Option around a struct or collection,
         // so an untyped value can identify a nested Option from its payload.
@@ -142,7 +142,7 @@ fn format_value(model: &KernelModel, value: &FslValue, ty: &TypeRef) -> String {
     match value {
         FslValue::Int(value) => value.to_string(),
         FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
+        FslValue::Enum { member, .. } => member.to_string(),
         FslValue::None => "none".to_owned(),
         FslValue::Some(value) => format!(
             "some({})",

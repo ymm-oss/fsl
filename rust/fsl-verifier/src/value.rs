@@ -367,13 +367,13 @@ pub(crate) fn concrete_value<S: SmtSolver>(
                 term: solver.int_value(*value),
             })
         }
-        (TypeRef::Named(name), FslValue::Enum { type_name, member }) if name == type_name => {
+        (TypeRef::Named(name), FslValue::Enum { type_name, member }) if **name == **type_name => {
             let Some(TypeDef::Enum { members, .. }) = model.types.get(name) else {
                 return Err(VerifyError::new(format!("'{name}' is not an enum")));
             };
             let index = members
                 .iter()
-                .position(|candidate| candidate == member)
+                .position(|candidate| **candidate == **member)
                 .ok_or_else(|| VerifyError::new(format!("unknown enum member '{member}'")))?;
             Ok(SymbolicValue::Scalar {
                 ty: ty.clone(),
@@ -398,7 +398,7 @@ pub(crate) fn concrete_value<S: SmtSolver>(
             present: solver.bool_value(true),
             value: Box::new(concrete_value(solver, model, inner, value)?),
         }),
-        (TypeRef::Named(name), FslValue::Struct { type_name, fields }) if name == type_name => {
+        (TypeRef::Named(name), FslValue::Struct { type_name, fields }) if **name == **type_name => {
             let Some(TypeDef::Struct { fields: expected }) = model.types.get(name) else {
                 return Err(VerifyError::new(format!("'{name}' is not a struct")));
             };
@@ -1805,7 +1805,7 @@ pub(crate) fn project_value<S: SmtSolver>(
                 return Err(VerifyError::new("struct has no named type"));
             };
             Ok(FslValue::Struct {
-                type_name: type_name.clone(),
+                type_name: type_name.as_str().into(),
                 fields: fields
                     .iter()
                     .map(|(name, value)| Ok((name.clone(), project_value(solver, model, value)?)))
@@ -1919,8 +1919,8 @@ fn project_scalar<S: SmtSolver>(
             return Ok(FslValue::Int(value));
         };
         return Ok(FslValue::Enum {
-            type_name: name.clone(),
-            member: member.clone(),
+            type_name: name.as_str().into(),
+            member: member.as_str().into(),
         });
     }
     Ok(FslValue::Int(value))

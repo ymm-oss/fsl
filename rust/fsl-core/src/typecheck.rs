@@ -1431,14 +1431,14 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
         crate::FslValue::Int(value) => Expr::Num(value),
         crate::FslValue::Bool(value) => Expr::Bool(value),
         crate::FslValue::Enum { type_name, member } => Expr::EnumMember {
-            type_name,
-            member,
+            type_name: type_name.to_string(),
+            member: member.to_string(),
             source_bare: false,
         },
         crate::FslValue::None => Expr::None,
         crate::FslValue::Some(value) => Expr::Some(Box::new(value_expression(*value)?)),
         crate::FslValue::Struct { type_name, fields } => Expr::Struct {
-            name: type_name,
+            name: type_name.to_string(),
             fields: fields
                 .into_iter()
                 .map(|(name, value)| Ok((name, value_expression(value)?)))

@@ -247,7 +247,7 @@ fn resolve_target(target: &str, model: &KernelModel) -> Result<(), String> {
         return match model.enum_members.get(member) {
             Some(FslValue::Enum {
                 type_name: actual, ..
-            }) if actual == type_name => Ok(()),
+            }) if **actual == *type_name => Ok(()),
             Some(FslValue::Enum {
                 type_name: actual, ..
             }) => Err(format!(

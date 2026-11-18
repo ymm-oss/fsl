@@ -653,8 +653,8 @@ domain ExplicitEffectSuccess {
     statuses.insert(
         FslValue::Int(0),
         FslValue::Enum {
-            type_name: "WorkEffectStatus".to_owned(),
-            member: "WorkEffectStatus_Failed".to_owned(),
+            type_name: "WorkEffectStatus".into(),
+            member: "WorkEffectStatus_Failed".into(),
         },
     );
     assert_success_is_sticky(&model, &result.state, &wrong);
