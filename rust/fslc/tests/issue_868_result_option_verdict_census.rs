@@ -183,6 +183,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-runtime/src/lib.rs",
+        4584,
+        "check_successor",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-runtime/src/lib.rs",
         4106,
         "check_state_bounds",
         ResultOption
@@ -206,6 +213,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-runtime/src/lib.rs",
         389,
         "eval_place",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-runtime/src/lib.rs",
+        611,
+        "eval_place_steps",
         ResultOption
     ),
     entry!(
@@ -332,6 +346,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-verifier/src/bmc.rs",
         844,
         "check_action_partial_operations",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        2100,
+        "probe_instance_definedness",
         ResultOption
     ),
     entry!(
@@ -674,6 +695,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fslc/src/verification.rs",
+        1335,
+        "probe_bmc_boundary",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fslc/src/literate_access.rs",
         111,
         "capture_literate",
@@ -844,6 +872,20 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-verifier/src/bmc/scoped_query_tests.rs",
+        135,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-verifier/tests/issue_1873_ranked_sequence.rs",
+        140,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fsl-verifier/tests/support/composite_vacuity_fault.rs",
         92,
         "model_eval",
@@ -965,6 +1007,16 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     unresolved_ordinary!("rust/fsl-solver-z3/src/lib.rs", 239, "int_value"),
     unresolved_ordinary!("rust/fsl-solver-z3js/src/lib.rs", 186, "bool_value"),
     unresolved_ordinary!("rust/fsl-solver-z3js/src/lib.rs", 190, "int_value"),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1873_ranked_sequence.rs",
+        54,
+        "bool_value"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1873_ranked_sequence.rs",
+        57,
+        "int_value"
+    ),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 259, "add"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 247, "and"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 285, "assert"),

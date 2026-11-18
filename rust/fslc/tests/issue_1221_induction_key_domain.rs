@@ -8,8 +8,10 @@
 //! obligation asks only the six partial operations, so before #1221 the miss
 //! was `proved` whenever it lay beyond the base depth.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -50,7 +52,7 @@ impl Drop for Fixture {
 
 fn verify(fixture: &Fixture, engine: &str, depth: usize) -> (Value, i32) {
     let depth = depth.to_string();
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             fixture.text(),

@@ -3,8 +3,10 @@
 //! Round-one metadata boundaries and complete impact evidence for #1351.
 //! Detector and preservation labels are calibrated with production reverted.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -60,7 +62,7 @@ fn analyze(source: &str, label: &str, suffix: &[&str]) -> Value {
     std::fs::create_dir_all(&directory).expect("create task-local scratch");
     let path = directory.join("input.fsl");
     std::fs::write(&path, source).expect("write test input");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("analyze")
         .arg(&path)
         .args(suffix)

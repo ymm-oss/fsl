@@ -404,7 +404,7 @@ refine_pair!(p4_free_read_refine, READ_FREE, MAP_FREE);
 
 fn observe_auto(source: &str) -> (Value, i32) {
     let fixture = Fixture::new(source);
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args([
             "verify",
             "model.fsl",
@@ -415,7 +415,6 @@ fn observe_auto(source: &str) -> (Value, i32) {
             "--no-cache",
         ])
         .current_dir(&fixture.0)
-        .env_remove("FSLC_CACHE")
         .output()
         .expect("run working-tree auto engine");
     let actual: Value = serde_json::from_slice(&output.stdout)

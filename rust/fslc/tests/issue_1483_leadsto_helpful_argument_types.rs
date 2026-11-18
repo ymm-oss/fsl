@@ -4,6 +4,9 @@
 //! #1483: helpful actuals obey action parameter types, directly and through use.
 //! Clause lines are source-derived; columns are recorded, not prescribed.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 #[allow(dead_code)] // This target uses only the shared fresh-fixture allocator.
 mod compose_scratch;
@@ -39,9 +42,8 @@ fn fixture(params: &str, argument: &str) -> String {
 }
 
 fn run_cli(binary: &Path, directory: &Path, args: &[&str]) -> (Value, i32) {
-    let output = Command::new(binary)
+    let output = fslc_cli::isolate(&mut Command::new(binary))
         .args(args)
-        .env_remove("FSLC_CACHE")
         .current_dir(directory)
         .output()
         .expect("native command");

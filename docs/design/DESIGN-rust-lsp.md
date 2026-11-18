@@ -123,6 +123,18 @@ forbidden IDs, `process` / `transition` / `kpi` / `time` items, and the mapped a
 `implements` block. `role_scope_mismatches` checks the other direction, so the corpus test fails
 when the walk cannot locate a declaration the parser accepted; nothing is tolerated.
 
+A requirement-style identifier (`REQ-1`, `POL-WAIT-001`) is one name although the lexer reads it
+as several tokens, and the index has no joining rule of its own (issue #1880). The parser reports
+each identifier its `req_id()` read (`fsl_syntax::parse_document_with_requirement_ids`), and the
+walk reads each one that spans several tokens on one line as one name token, wherever the parser
+read it: a business, governance, or requirements declaration (`policy`, `goal`, `control`,
+`requirement`, `acceptance`, `forbidden`, `rule`, `decide`, `scenario`), `satisfies`, `covers`, a
+governance item, or a refinement's `respond`. Hover, definition, references, and rename therefore
+act on the whole identifier, and identifiers that share a prefix are different names. A rename
+still requires an identifier as the replacement, so it can rename an ID to a plain name but not to
+another hyphenated ID. A fourth corpus property compares each multi-token identifier the parser
+read with the index's names.
+
 FSL reserves no words, so in a covered document a word spelled like an index keyword (`status`,
 `count`, `age`, `evidence`, `owner`, `rejected`, `severity`, `respond`, ...) is a name wherever the
 AST declares it: its declaration in a state, field, member, parameter, or `let` position, and its

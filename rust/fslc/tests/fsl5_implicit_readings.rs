@@ -16,8 +16,10 @@
 //! Each document is written in English and in Japanese (keywords, particles
 //! and a glossary); the two spellings read the same.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
@@ -208,7 +210,7 @@ fn scratch(name: &str, text: &str) -> PathBuf {
 
 /// `(stdout, exit)` of `fslc <args...> <path>`, run in `path`'s directory.
 fn fslc(args: &[&str], path: &Path) -> (String, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .arg(path.file_name().expect("file name"))
         .current_dir(path.parent().expect("directory"))

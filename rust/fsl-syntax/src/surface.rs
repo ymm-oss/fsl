@@ -308,9 +308,16 @@ pub enum RefinementItem {
         span: Span,
     },
     PreserveProgress {
-        responses: Vec<(String, Vec<String>, Span)>,
+        responses: Vec<ProgressResponse>,
         span: Span,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgressResponse {
+    pub leads_to: String,
+    pub actions: Vec<String>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1544,8 +1551,13 @@ impl RefinementItem {
                 "preserve_progress",
                 responses
                     .iter()
-                    .map(|(name, actions, span)| {
-                        json!(["progress_respond", name, actions, span.python_loc()])
+                    .map(|response| {
+                        json!([
+                            "progress_respond",
+                            response.leads_to,
+                            response.actions,
+                            response.span.python_loc()
+                        ])
                     })
                     .collect::<Vec<_>>(),
                 span.python_loc()

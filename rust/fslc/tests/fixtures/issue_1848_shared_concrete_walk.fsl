@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: Apache-2.0
+// Two workers claim, run, fail, retry and finish four jobs.
+// Far more states are reachable within depth 20 than `CONCRETE_PROBE_BUDGET` admits, so BMC's concrete boundary pre-pass and its vacuity probe both stop at the budget, and `AllExhaustedOnlyWhenIdle`'s antecedent lies beyond it.
+spec JobQueue {
+  type Job = 0..3
+  type Tries = 0..3
+  enum Worker {
+    Left, Right
+  }
+
+  enum Status {
+    Queued, Claimed, Running, Failed, Finished
+  }
+
+  state {
+    status: Map<Job, Status>,
+    owner: Map<Job, Worker>,
+    tries: Map<Job, Tries>,
+    busy: Map<Worker, Bool>
+  }
+
+  init {
+    forall j: Job {
+      status[j] = Queued
+      owner[j] = Left
+      tries[j] = 0
+    }
+
+    forall w: Worker {
+      busy[w] = false
+    }
+  }
+
+  terminal {
+    forall j: Job {
+      status[j] == Finished
+    }
+  }
+
+  def active(j: Job) = status[j] == Claimed or status[j] == Running
+
+  def holds(w: Worker) = exists j: Job {
+    active(j) and owner[j] == w
+  }
+
+  def exhausted(j: Job) = tries[j] == 3 and status[j] == Finished
+
+  action claim(j: Job, w: Worker) {
+    requires status[j] == Queued and not busy[w]
+    requires forall k: Job {
+      active(k) => owner[k] != w
+    }
+
+    status[j] = Claimed
+    owner[j] = w
+    busy[w] = true
+  }
+
+  action release(j: Job) {
+    requires status[j] == Claimed
+    status[j] = Queued
+    busy[owner[j]] = false
+  }
+
+  action run(j: Job) {
+    requires status[j] == Claimed
+    status[j] = Running
+  }
+
+  action fail(j: Job) {
+    requires status[j] == Running and tries[j] < 3
+    status[j] = Failed
+    tries[j] = tries[j] + 1
+    busy[owner[j]] = false
+  }
+
+  action retry(j: Job) {
+    requires status[j] == Failed
+    status[j] = Queued
+  }
+
+  action finish(j: Job) {
+    requires status[j] == Running
+    status[j] = Finished
+    busy[owner[j]] = false
+  }
+
+  invariant FailedJobsWereTried {
+    forall j: Job {
+      status[j] == Failed => tries[j] >= 1
+    }
+  }
+
+  invariant OneActiveJobPerWorker {
+    forall j: Job {
+      forall k: Job {
+        j != k and active(j) and active(k) => owner[j] != owner[k]
+      }
+    }
+  }
+
+  invariant BusyWorkersOwnAnActiveJob {
+    forall w: Worker {
+      busy[w] == holds(w)
+    }
+  }
+
+  invariant QueuedJobsHaveNoWorker {
+    forall j: Job {
+      status[j] == Queued => not active(j)
+    }
+  }
+
+  invariant FinishedJobsStayWithinTries {
+    forall j: Job {
+      status[j] == Finished => tries[j] <= 3
+    }
+  }
+
+  invariant AllExhaustedOnlyWhenIdle {
+    exhausted(0) and exhausted(1) and exhausted(2) and exhausted(3) => not busy[Left] and not busy[Right]
+  }
+}

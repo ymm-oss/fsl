@@ -4,14 +4,15 @@
 //! native support end to end through the `fslc` binary's JSON envelope and
 //! exit-code contract.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 fn run(args: &[&str]) -> (serde_json::Value, i32) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("workspace root");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root)
         .output()

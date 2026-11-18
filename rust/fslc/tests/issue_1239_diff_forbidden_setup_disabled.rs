@@ -8,8 +8,10 @@
 //! `unknown` / `forbidden_replay_failed`, like a NEW setup step that violates
 //! (#1213) and an OLD setup step that is not enabled.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -22,7 +24,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn run(directory: &Path, arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(directory)
         .output()

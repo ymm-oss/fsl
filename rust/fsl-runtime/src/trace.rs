@@ -10,8 +10,9 @@
 //! link per newly discovered state and walking that chain backward once --
 //! only when a trace is actually needed -- keeps per-node memory bounded by
 //! the state and one action, not the whole path so far. `explicit.rs`
-//! originated this pattern for `verify_explicit_selected`; `find_boundary_violation`
-//! reuses it rather than duplicating it.
+//! originated this pattern for `verify_explicit_selected`; that search,
+//! `find_boundary_violation` and the refinement searches now keep the same
+//! links packed in a [`StateStore`] (issues #1247, #1851).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::rc::Rc;
@@ -192,6 +193,17 @@ pub(crate) struct StateStore {
     scratch: Vec<u8>,
 }
 
+/// The outcome of [`StateStore::insert_child_within`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Admission {
+    /// The state was stored before; its first link stays.
+    Stored,
+    /// The state is new and the store already holds `budget` states.
+    Full,
+    /// The state is new and is now stored under this id.
+    New(usize),
+}
+
 #[derive(Debug)]
 struct StoredState {
     bytes: Rc<[u8]>,
@@ -203,6 +215,14 @@ struct StoredState {
 impl StateStore {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// A store holding `root` alone, as a root, and the id of `root`.
+    pub(crate) fn with_root(root: &State) -> (Self, usize) {
+        let mut store = Self::new();
+        encode_state(root, &mut store.scratch);
+        let id = store.insert_encoded(None);
+        (store, id)
     }
 
     /// The number of distinct states stored (a `visited.len()`).
@@ -232,6 +252,34 @@ impl StateStore {
         }
         let action = self.action_id(action, params);
         Some(self.insert_encoded(Some((parent, action))))
+    }
+
+    /// [`StateStore::insert_child`] under a state budget: a state already
+    /// stored is [`Admission::Stored`] even when the store is full, and a
+    /// new one is [`Admission::Full`], not stored, once `budget` states are.
+    pub(crate) fn insert_child_within(
+        &mut self,
+        state: &State,
+        parent: usize,
+        action: &str,
+        params: &BTreeMap<String, Value>,
+        budget: usize,
+    ) -> Admission {
+        encode_state(state, &mut self.scratch);
+        if self.ids.contains_key(self.scratch.as_slice()) {
+            return Admission::Stored;
+        }
+        if self.nodes.len() >= budget {
+            return Admission::Full;
+        }
+        let action = self.action_id(action, params);
+        Admission::New(self.insert_encoded(Some((parent, action))))
+    }
+
+    /// The id `state` is stored under, if it is stored.
+    pub(crate) fn id_of(&mut self, state: &State) -> Option<usize> {
+        encode_state(state, &mut self.scratch);
+        self.ids.get(self.scratch.as_slice()).copied()
     }
 
     /// The stored state `id`.

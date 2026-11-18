@@ -22,9 +22,12 @@
 //! direct call and requires these tests to fail, so "the guard disappeared" is
 //! machine-checked rather than assumed.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
@@ -162,7 +165,7 @@ fn refinement_trio(directory: &Path, n: usize) -> Trio {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -637,4 +640,180 @@ fn the_generated_witness_is_still_deeper_than_the_unguarded_crash_threshold() {
         WITNESS_STAGES,
         "the invariant's if-chain is the deep structure under test"
     );
+}
+
+/// How deep the evaluator tests below nest one expression. A release build of
+/// an evaluator walk that recurses without the guard overflows a 1 MiB stack
+/// well below this.
+const EVALUATED_DEPTH: usize = 16_384;
+
+/// The stack each evaluator test runs on: small, so the guard has to grow it.
+const EVALUATOR_STACK: usize = 1024 * 1024;
+
+/// A model whose state `m` maps every key to `0`, so `m[0]`, `m[m[0]]`, and
+/// every deeper nesting read `0`.
+fn constant_map_model() -> (fsl_core::KernelModel, fsl_runtime::State) {
+    let source = "spec ConstantMap {\n  type K = 0..1\n  state { m: Map<K, K> }\n  \
+                  init { forall k: K { m[k] = 0 } }\n  action stay() { m = m }\n}\n";
+    let document = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+        .expect("parse constant map model");
+    let model = fsl_core::build_model(document).expect("build constant map model");
+    let state = fsl_runtime::Monitor::new(model.clone())
+        .expect("initialize constant map model")
+        .state;
+    (model, state)
+}
+
+/// `fsl_runtime::eval` on `expr` with no bindings, on an [`EVALUATOR_STACK`]
+/// thread.
+fn eval_on_small_stack(
+    model: &fsl_core::KernelModel,
+    state: &fsl_runtime::State,
+    expr: &fsl_core::KernelExpr,
+) -> Result<fsl_core::FslValue, fsl_runtime::RuntimeError> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(EVALUATOR_STACK)
+            .spawn_scoped(scope, || {
+                fsl_runtime::eval(
+                    expr,
+                    state,
+                    &mut std::collections::BTreeMap::new(),
+                    model,
+                    None,
+                )
+            })
+            .expect("spawn evaluator thread")
+            .join()
+            .expect("evaluator thread")
+    })
+}
+
+/// `m[m[...m[0]...]]`, nested `depth` deep in the key.
+fn nested_key(depth: usize) -> fsl_core::KernelExpr {
+    let mut expr = fsl_core::KernelExpr::Num(0);
+    for _ in 0..depth {
+        expr = fsl_core::KernelExpr::Index(
+            Box::new(fsl_core::KernelExpr::Var("m".to_owned())),
+            Box::new(expr),
+        );
+    }
+    expr
+}
+
+/// Takes a [`nested_key`] chain apart one level at a time: the derived `Drop`
+/// recurses once per level.
+fn drop_nested_key(mut expr: fsl_core::KernelExpr) {
+    while let fsl_core::KernelExpr::Index(_, key) = expr {
+        expr = *key;
+    }
+}
+
+/// The in-place read of an `Index` chain recurses on its key without passing
+/// through `eval`'s own guard, both when the chain is evaluated and when it is
+/// an operand of `==`.
+#[test]
+fn eval_reads_a_deeply_nested_map_key_instead_of_overflowing_the_stack() {
+    use fsl_core::{FslValue, KernelExpr};
+
+    let (model, state) = constant_map_model();
+    let chain = nested_key(EVALUATED_DEPTH);
+    assert_eq!(
+        eval_on_small_stack(&model, &state, &chain).expect("evaluate the nested key"),
+        FslValue::Int(0)
+    );
+    let comparison = KernelExpr::Binary {
+        op: "==".to_owned(),
+        left: Box::new(chain),
+        right: Box::new(KernelExpr::Num(0)),
+    };
+    assert_eq!(
+        eval_on_small_stack(&model, &state, &comparison).expect("compare the nested key"),
+        FslValue::Bool(true)
+    );
+    let KernelExpr::Binary { left, .. } = comparison else {
+        unreachable!("built as a comparison");
+    };
+    drop_nested_key(*left);
+}
+
+/// The in-place read failing deep inside the key leaves `eval` to read the
+/// chain step by step, and each step evaluates its key the same way. Here the
+/// innermost key is outside the map's domain, so every level is read that way.
+#[test]
+fn eval_reports_a_deeply_nested_missing_map_key_instead_of_overflowing_the_stack() {
+    let (model, state) = constant_map_model();
+    let mut chain = nested_key(EVALUATED_DEPTH);
+    let mut innermost = &mut chain;
+    while let fsl_core::KernelExpr::Index(_, key) = innermost {
+        innermost = key;
+    }
+    *innermost = fsl_core::KernelExpr::Num(5);
+    let error = eval_on_small_stack(&model, &state, &chain).expect_err("m[5] is outside");
+    assert!(
+        error.map_key_outside_domain,
+        "the innermost lookup fails: {error:?}"
+    );
+    drop_nested_key(chain);
+}
+
+/// `m[0] == 0`, which holds in [`constant_map_model`].
+fn true_term() -> fsl_core::KernelExpr {
+    fsl_core::KernelExpr::Binary {
+        op: "==".to_owned(),
+        left: Box::new(fsl_core::KernelExpr::Index(
+            Box::new(fsl_core::KernelExpr::Var("m".to_owned())),
+            Box::new(fsl_core::KernelExpr::Num(0)),
+        )),
+        right: Box::new(fsl_core::KernelExpr::Num(0)),
+    }
+}
+
+/// `terms` copies of [`true_term`] joined by `and`, nested to the left or to
+/// the right.
+fn conjunction(terms: usize, left_nested: bool) -> fsl_core::KernelExpr {
+    let mut expr = true_term();
+    for _ in 1..terms {
+        let (left, right) = if left_nested {
+            (expr, true_term())
+        } else {
+            (true_term(), expr)
+        };
+        expr = fsl_core::KernelExpr::Binary {
+            op: "and".to_owned(),
+            left: Box::new(left),
+            right: Box::new(right),
+        };
+    }
+    expr
+}
+
+/// Takes a [`conjunction`] apart one level at a time.
+fn drop_conjunction(mut expr: fsl_core::KernelExpr) {
+    while let fsl_core::KernelExpr::Binary { op, left, right } = expr {
+        if op != "and" {
+            break;
+        }
+        expr = if matches!(*left, fsl_core::KernelExpr::Binary { ref op, .. } if op == "and") {
+            *left
+        } else {
+            *right
+        };
+    }
+}
+
+/// An `and` chain is evaluated connective by connective without passing
+/// through `eval` between them, so every conjunct is evaluated.
+#[test]
+fn eval_decides_a_deeply_nested_conjunction_instead_of_overflowing_the_stack() {
+    let (model, state) = constant_map_model();
+    for left_nested in [true, false] {
+        let chain = conjunction(EVALUATED_DEPTH, left_nested);
+        assert_eq!(
+            eval_on_small_stack(&model, &state, &chain).expect("evaluate the conjunction"),
+            fsl_core::FslValue::Bool(true),
+            "left-nested: {left_nested}"
+        );
+        drop_conjunction(chain);
+    }
 }

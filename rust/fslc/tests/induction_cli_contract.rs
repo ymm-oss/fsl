@@ -11,10 +11,16 @@
 //! The update path executes the same roster, cache handling, normalization,
 //! and exit capture as the ordinary comparison. Ordinary test/CI runs never
 //! write the golden. Review the complete golden diff after regeneration.
+//!
+//! #1888 changes only the pinned unranked leadsTo check counts: an unsat
+//! combined query replaces the cubic enumeration; sat/unknown adds one query
+//! before the existing ordered search. Regenerate rather than editing counts.
+
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Map, Value, json};
 
@@ -180,7 +186,7 @@ fn repository_root() -> PathBuf {
 fn run_induction(case: &Case) -> (Value, i32) {
     let depth = case.depth.to_string();
     let k = case.k.to_string();
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             case.path,

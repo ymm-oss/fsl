@@ -12,7 +12,7 @@ fold so the discarded status has no remaining use on the shared timing path.
  ) -> (Value, i32) {
 -    let (mut verification, verification_status) =
 +    let (mut verification, _) =
-         report_verification_from_source(path, source, depth, deadlock_mode, engine, edition);
+         report_verification_from_source(path, source, options, edition);
 -    if let Some(error) = report_verification_error(&verification, verification_status) {
 -        return error;
 -    }

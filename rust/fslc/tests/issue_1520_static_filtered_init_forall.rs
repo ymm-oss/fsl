@@ -2,8 +2,11 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Static filtered map coverage also applies to refinement's assigned roots.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 
 const REFINE: &[&str] = &["refine", "model.fsl", "abs.fsl", "map.fsl", "--depth", "4"];
 const FREE: &str = "spec RImpl { type K = 0..1 state { m: Map<K, Bool>, free: Bool } init { forall k: K where true { m[k] = true } } action idle() {} }";
@@ -30,10 +33,9 @@ fn observe(id: &str, source: &str, args: &[&str], filter: Option<bool>, mapped: 
     ] {
         std::fs::write(dir.join(name), text).expect("write fixture");
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(dir)
-        .env_remove("FSLC_CACHE")
         .output()
         .expect("run native fslc");
     assert!(output.stderr.is_empty(), "{output:?}");

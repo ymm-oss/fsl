@@ -14,6 +14,9 @@
 //! its errors are those of the full listing: the second test holds each
 //! trace outcome fixed between a small and a large scope.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -86,7 +89,7 @@ fn traces_at(traces: &str, hi: u32) -> String {
 }
 
 fn fslc_check(path: &Path) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("check")
         .arg(path)
         .output()
@@ -120,6 +123,7 @@ fn a_trace_over_a_large_values_scope_checks_under_an_address_space_ceiling() {
         let scratch = Scratch::new(&format!("ceiling-{label}"));
         let path = scratch.write(&source);
         let mut command = Command::new("sh");
+        fslc_cli::isolate(&mut command);
         command.arg("-c").arg(format!(
             "ulimit -v {CEILING_KB} && exec {:?} check {:?}",
             env!("CARGO_BIN_EXE_fslc"),

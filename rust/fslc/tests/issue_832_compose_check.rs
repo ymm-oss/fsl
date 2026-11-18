@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 use serde_json::{Value, json};
 
@@ -12,7 +13,7 @@ fn run_cli(args: &[&str]) -> (Value, i32) {
         .parent()
         .and_then(std::path::Path::parent)
         .expect("workspace root");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root)
         .output()

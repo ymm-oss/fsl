@@ -11,8 +11,10 @@
 //! negative one: a spec with no `within` must produce no column, not a column
 //! of empty cells.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -44,7 +46,7 @@ fn scratch_dir(label: &str) -> PathBuf {
 /// Render one report and return its `#properties` table section.
 fn properties_section(spec: &str, label: &str) -> String {
     let output_path = scratch_dir(label).join("report.html");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "html",
             spec,

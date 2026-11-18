@@ -3,8 +3,10 @@
 //! #1439: unary operators must check operand types even when concrete replay
 //! skips the operand. Seven detectors and three well-typed preservation controls.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -37,7 +39,7 @@ fn check(label: &str, source: &str) -> (Value, i32) {
         .join(label);
     std::fs::create_dir_all(&directory).expect("create per-test unary fixture directory");
     std::fs::write(directory.join("unary.fsl"), source).expect("write inline unary fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["check", "unary.fsl"])
         .current_dir(&directory)
         .output()

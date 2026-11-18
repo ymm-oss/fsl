@@ -14,7 +14,6 @@
 //! golden-diff test by kind).
 
 use std::collections::BTreeSet;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -72,7 +71,7 @@ fn cli_conformance_command_emits_every_registered_outcome_kind() {
     let mut observed = BTreeSet::new();
     for (file, depth) in [("kernel_contract.fsl", 2), ("conformance_failures.fsl", 1)] {
         let path = workspace_root().join("rust/fslc/tests/fixtures").join(file);
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = crate::fslc_cli::command()
             .args([
                 "conformance",
                 path.to_str().expect("UTF-8 path"),

@@ -31,9 +31,11 @@
 //! A debug-profile run of the first test alone measured ~135s; expect this
 //! binary to be one of the slower ones in the suite.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -62,7 +64,7 @@ fn scratch_dir(name: &str) -> PathBuf {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -82,7 +84,7 @@ fn mutate_empty_membership_after_a_verified_baseline_returns_mutation_evidence()
         .replace("status in []", "not (status in [])");
     let path = scratch_dir("empty-membership").join("spec.fsl");
     fs::write(&path, source).expect("write source");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("mutate")
         .arg(&path)
         .args(["--depth", "2"])

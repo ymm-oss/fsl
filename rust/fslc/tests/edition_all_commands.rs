@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_cases.rs"]
 pub(crate) mod cases;
 
@@ -8,7 +11,7 @@ use serde_json::{Value, json};
 use std::process::Output;
 
 fn run(args: &[String]) -> Output {
-    cases::invoke(env!("CARGO_BIN_EXE_fslc"), args, &cases::root())
+    cases::invoke(fslc_cli::command(), args, &cases::root())
 }
 
 fn lsp_row(results: &mut Results, label: &str) {
@@ -88,7 +91,7 @@ pub(crate) fn every_registered_root_has_the_same_admission_before_dialect_or_sid
         let scratch = Scratch::new();
         let args = scratch.args(row.argv, &rejected);
         let expected = cases::refusal(
-            env!("CARGO_BIN_EXE_fslc"),
+            fslc_cli::command(),
             &cases::root(),
             &scratch.0.join("source.fsl"),
         );
@@ -119,7 +122,7 @@ pub(crate) fn every_registered_root_has_the_same_admission_before_dialect_or_sid
             }
             assert!(!missing.parent().unwrap().exists());
             let expected = cases::refusal(
-                env!("CARGO_BIN_EXE_fslc"),
+                fslc_cli::command(),
                 &cases::root(),
                 &scratch.0.join("source.fsl"),
             );

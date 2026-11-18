@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::Value;
 #[path = "support/migration_warnings.rs"]
 mod migration_warnings;
-use std::process::Command;
 
 fn repo_root() -> &'static std::path::Path {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -13,7 +15,7 @@ fn repo_root() -> &'static std::path::Path {
 }
 
 fn run_cli(args: &[&str]) -> (serde_json::Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(repo_root())
         .output()

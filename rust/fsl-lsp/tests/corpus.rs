@@ -226,3 +226,66 @@ fn the_published_corpus_is_indexed_with_the_published_lexicon() {
         "no headed `fsl 5` document was indexed with the published lexicon"
     );
 }
+
+/// Issue 1880: every requirement-style identifier the parser read across
+/// several tokens (`POL-WAIT-001`) is one name of the index — a declaration
+/// or a use whose range is the whole identifier. The identifiers come from
+/// the parser (`fsl_syntax::parse_document_with_requirement_ids`), not from
+/// the index, so an index that splits an identifier into its tokens, or
+/// joins it by a rule of its own, fails here.
+#[test]
+fn valid_corpus_requirement_ids_are_indexed_as_one_name() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let mut files = Vec::new();
+    collect(&root.join("specs"), &mut files);
+    collect(&root.join("examples"), &mut files);
+    files.sort();
+
+    let mut compared = 0_usize;
+    let mut failures = Vec::new();
+    for path in files {
+        let source = std::fs::read_to_string(&path).expect("read corpus source");
+        let options = fsl_syntax::ParseOptions::stable();
+        let Ok((_, ids)) = fsl_syntax::parse_document_with_requirement_ids(
+            fsl_syntax::SourceFile::new(&source),
+            &options,
+        ) else {
+            // ai-project and causal sources never reach the parser; the
+            // first test already fails on a source the index rejects.
+            continue;
+        };
+        let index =
+            DocumentIndex::build(&source, path.to_str(), &options).expect("index valid source");
+        let names = index
+            .symbols
+            .iter()
+            .map(|symbol| (symbol.selection_range, symbol.name.as_str()))
+            .chain(
+                index
+                    .references
+                    .iter()
+                    .map(|reference| (reference.range, reference.name.as_str())),
+            )
+            .collect::<Vec<_>>();
+        for id in ids.iter().filter(|id| !id.hyphens.is_empty()) {
+            compared += 1;
+            let range = fsl_lsp::span_range(&source, id.span);
+            if !names.contains(&(range, id.value.as_str())) {
+                failures.push(format!(
+                    "{}:{}:{}: `{}` is not one name",
+                    path.display(),
+                    range.start.line + 1,
+                    range.start.character + 1,
+                    id.value
+                ));
+            }
+        }
+    }
+    // The corpus held 273 such identifiers when this was written; a reading
+    // change that stopped reporting them would otherwise turn this vacuous.
+    assert!(compared >= 200, "only {compared} identifiers were compared");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

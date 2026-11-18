@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
@@ -24,7 +26,7 @@ fn fixture(source: &str) -> PathBuf {
 }
 
 fn run(command: &[&str], path: &Path) -> (Value, i32) {
-    let mut process = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut process = fslc_cli::command();
     process.args(command).arg(path).env_remove("FSLC_CACHE");
     if command == ["ai", "replay"] {
         process.args(["--logs", "tests/fixtures/error_envelope_empty_records.json"]);

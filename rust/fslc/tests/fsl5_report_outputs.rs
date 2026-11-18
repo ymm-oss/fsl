@@ -20,9 +20,11 @@
 //! in Japanese with a glossary, in `fixtures/fsl5_outputs` (outside
 //! `fixtures/fsl5`, whose sources are the lowering-contract corpus).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -34,7 +36,7 @@ fn fixture(name: &str) -> PathBuf {
 
 /// `(stdout, exit)` of `fslc <args...> <path>`, run in `path`'s directory.
 fn fslc(args: &[&str], path: &Path) -> (String, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .arg(path.file_name().expect("file name"))
         .current_dir(path.parent().expect("directory"))

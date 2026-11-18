@@ -8,6 +8,9 @@
 //! progress). Actual violated inputs must remain violated, not become green.
 //! The physical-name compose helper is explicitly a preservation control.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
 

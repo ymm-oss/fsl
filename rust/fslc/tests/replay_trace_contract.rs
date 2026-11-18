@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -32,7 +35,7 @@ fn replay_path(trace: &Path) -> Output {
 }
 
 fn replay_spec_path(spec: &Path, trace: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args([
             "replay",
             spec.to_str().expect("spec path"),

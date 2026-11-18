@@ -14,8 +14,8 @@ use crate::{
     BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute,
     CorrespondenceOrigin, Edition, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
     GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem,
-    ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName,
-    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, ProgressResponse,
+    QualifiedName, RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
     RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
     SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
     SurfaceRequirements, SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem,
@@ -178,12 +178,13 @@ pub fn parse_surface_document_with(
 /// One requirement-style identifier (`REQ-1`, `AC-PAY-2`, `CTRL-1`) read by
 /// the shared parser: its value, the span from its first to its last
 /// component, and the offset of each `-` joining the components. The
-/// formatter prints these hyphens without spaces so an ID reads as written.
+/// formatter prints these hyphens without spaces so an ID reads as written;
+/// the language server indexes the span as one name.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct IdSpelling {
-    pub(crate) value: String,
-    pub(crate) span: Span,
-    pub(crate) hyphens: Vec<usize>,
+pub struct IdSpelling {
+    pub value: String,
+    pub span: Span,
+    pub hyphens: Vec<usize>,
 }
 
 /// What a frontend read beside the document, for the formatter.
@@ -1642,7 +1643,9 @@ impl<'a> Parser<'a> {
             while !self.eat_symbol("}") {
                 let response_span = self.peek().span;
                 self.expect_ident_value("respond")?;
-                let name = self.expect_ident()?;
+                // An abstract leadsTo lowered from a business policy is named
+                // by its policy ID (`POL-WAIT-001`), read by the same rule.
+                let name = self.req_id()?;
                 self.expect_ident_value("by")?;
                 let mut actions = vec![self.expect_ident()?];
                 while self.eat_symbol(",") {
@@ -1651,7 +1654,11 @@ impl<'a> Parser<'a> {
                     }
                     actions.push(self.expect_ident()?);
                 }
-                responses.push((name, actions, response_span));
+                responses.push(ProgressResponse {
+                    leads_to: name,
+                    actions,
+                    span: response_span,
+                });
             }
             return Ok(RefinementItem::PreserveProgress { responses, span });
         }
@@ -2817,6 +2824,44 @@ verify { values Id = 0..2 }
         assert_eq!(
             ids,
             ["REQ-CHECKOUT-001", "AC-CHECKOUT-002", "FB-CHECKOUT-003"]
+        );
+    }
+
+    #[test]
+    fn respond_reads_a_policy_id_like_its_declaration() {
+        let source = "refinement R { impl I abs A
+  preserve progress { respond POL-WAIT-001 by go, stop respond L by go } }";
+        let SurfaceDocument::Refinement(refinement) =
+            parse_surface_document(source).expect("refinement should parse")
+        else {
+            panic!("expected refinement document");
+        };
+        let responses = refinement
+            .items
+            .iter()
+            .find_map(|item| match item {
+                RefinementItem::PreserveProgress { responses, .. } => Some(responses),
+                _ => None,
+            })
+            .expect("preserve progress");
+        let progress = refinement
+            .items
+            .iter()
+            .find(|item| matches!(item, RefinementItem::PreserveProgress { .. }))
+            .expect("preserve progress");
+        assert_eq!(
+            progress.kernel_ast_v1().to_string(),
+            r#"["preserve_progress",[["progress_respond","POL-WAIT-001",["go","stop"],{"line":2,"column":23}],["progress_respond","L",["go"],{"line":2,"column":56}]],{"line":2,"column":3}]"#
+        );
+        assert_eq!(
+            responses
+                .iter()
+                .map(|response| (response.leads_to.as_str(), response.actions.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("POL-WAIT-001", vec!["go".to_owned(), "stop".to_owned()]),
+                ("L", vec!["go".to_owned()]),
+            ]
         );
     }
 }

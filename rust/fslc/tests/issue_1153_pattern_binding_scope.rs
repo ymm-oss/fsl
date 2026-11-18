@@ -14,8 +14,10 @@
 //! Since #1259 the colliding shapes are rejected at `check` instead (#1157
 //! item 1); the new-name control below is unchanged.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -42,7 +44,7 @@ fn fixture(tag: &str, text: &str) -> PathBuf {
 }
 
 fn verify(path: &Path, engine: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["verify", &path.display().to_string(), "--engine", engine])
         .output()
         .expect("run native CLI");
@@ -66,7 +68,7 @@ const ENGINES: [&str; 4] = ["explicit", "bmc", "induction", "auto"];
 fn assert_rejected(tag: &str, text: &str) {
     let path = fixture(tag, text);
     for command in ["check", "verify"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args([command, &path.display().to_string()])
             .output()
             .expect("run native CLI");

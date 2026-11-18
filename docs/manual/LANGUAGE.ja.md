@@ -1913,6 +1913,9 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。
+  `fslc html` の検証セクションは `--deadlock` に従いますが、witness セクションは
+  常に `--deadlock warn` として生成します。検出された `deadlock_terminal` witness は
+  `ignore` でも表示され、`error` でも witness を生成します。
 - **意図された終端状態**(処理の完了や最終結果など、停止することが正しい状態)は
   `terminal { <predicate> }` ブロックで宣言します。述語を満たす停止状態はデッド
   ロック検査から除外され、それ以外の予期しないデッドロックは引き続き検出されます。
@@ -1937,11 +1940,12 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 
 ```
 fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
-fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
-fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
+fslc check     <file.fsl|file.md> [--edition current|next|4|5] # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
+               [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] [--strict-names] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
 fslc migrate   <path>... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
-fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
-fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
+fslc fmt       <file.fsl|-> [--edition current|next|4|5] [--lang ja|en] [--names alias|canonical] # canonical FSL to stdout; never mutates input
+fslc fmt       <path>... --check [--edition current|next|4|5] [--lang ja|en] [--names alias|canonical] # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
@@ -1961,18 +1965,23 @@ fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexa
                                                  #   induction の trans 選択は全 invariant を保持
                                                  #   induction は全ての暗黙の型境界をベースケースでも検査
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
+               [--instances NAME=N]...           # override verify-block `instances NAME = N`
+               [--values NAME=LO..HI]...         # override verify-block `values NAME = LO..HI`
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
-fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] -o reproducer.json
+               [--no-cache] [--edition current|next|4|5]
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [--deadlock warn|error|ignore] -o reproducer.json
                                                # slice 1: safety-invariant counterexample を reproducer.v1 へ export
-fslc sweep     <file.fsl> [--instances E=lo..hi]... [--depth lo..hi] [--property Name]
+fslc sweep     <file.fsl> [--instances E=lo..hi]... [--values V=lo..hi]... [--depth lo..hi] [--property Name]
+               [--engine bmc|induction] [--k N] [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
+               [--strict-tags] [--requirements ids.txt]
                                                  # opt-in scope sweep over bounded verification
-fslc scenarios <file.fsl|file.md> [--depth K]     # generate integration-test scaffold JSON
+fslc scenarios <file.fsl|file.md> [--depth K] [--deadlock warn|error|ignore] # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
-fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--allow-unwired] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--deadlock warn|error|ignore] [--allow-unwired] [-o out]  # implementation-conformance test scaffold (§12)
 fslc testplan  <file.fsl> [--depth K]             # 閉じた test-plan.v1 の vector 選択 (§12)
-fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
+fslc refine    <impl> <abs> <mapping> [<abs> <mapping>]... [--depth K] # fidelity check of a detailed spec (§10); 組を足すと合成した chain の検査
 fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                  # bounded semantic change analysis
@@ -1983,10 +1992,11 @@ fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
 fslc mutate    <file.fsl> [--depth K] [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
                                                  # built-in + external spec mutation (§15)
-fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
+fslc explain   <file.fsl> [--depth K] [--readable] [--lowering] [--names canonical|alias] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
-fslc html      <file.fsl> [--depth K] [-o report.html] [--no-timing] # self-contained review report (§15)
-fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc html      <file.fsl> [--depth K] [--deadlock warn|error|ignore] [--engine bmc|induction] [-o report.html] [--no-timing] # self-contained review report (§15)
+fslc ledger    <file.fsl> [--depth K] [--deadlock warn|error|ignore] [--engine bmc|induction] [--impl-log run.json]
+               [--evidence result.json]... [--approval record.json]... [--trust-key public.pem]... [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
                [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
                                                   # deterministic ja/en requirements document from the Requirement Claim IR (§13);
@@ -2000,24 +2010,25 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
                                                   # structural drift check: generated claim blocks vs a
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
+               [--requirement ID]... [--depth K] [--deadlock warn|error|ignore] [--engine bmc|induction]
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                   # new records use v5/v6; requirements_document binds a claim_set_digest (§13)
-fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
+fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]...
                                                   # approved (exit 0) | drifted (exit 0、分析結果)
                                                   # | signature-invalid (exit 1); DESIGN-approval.md 参照
-fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
+fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]...
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
-fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
+fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] [--deadlock warn|error|ignore] [--edition current|next|4|5] # Functional DDD / effect findings
 fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
 fslc domain expand <file.fsl> [-o out.fsl]                      # generated kernel FSL
-fslc domain generate <file.fsl> [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
-fslc domain testgen <file.fsl> [--target vitest] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
+fslc domain generate <file.fsl> [--profile functional-ddd] [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
+fslc domain testgen <file.fsl> [--depth K] [--strict] [--target vitest|pytest|swift|kotlin|dart|phpunit] [--deadlock warn|error|ignore] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
 fslc domain replay <file.fsl> --logs events.jsonl              # domain runtime replay evidence
-fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
+fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] [--deadlock warn|error|ignore] # dbsystem compatibility findings (§13.5)
 fslc db observe <file.fsl> --trace events.json                  # runtime observation evidence
-fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DDL -> dbsystem
-fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
-fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
+fslc db import <file.sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o out.fsl] # SQL DDL / minimal Prisma -> dbsystem
+fslc ai check <file.fsl> [--depth K] [--engine bmc|induction] [--deadlock warn|error|ignore] # ai_component hard-contract findings (§13.6)
+fslc ai replay <file.fsl> --logs events.jsonl [--component Name] # AI runtime event replay evidence
 ```
 
 エディションの lint findings は、安定したタクソノミー `deprecated`、
@@ -3363,6 +3374,14 @@ refinement DesignRefinesReq {
 メタデータで、impl の action を名指ししなければなりません。公平性を作ることも、
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 `fair action` 宣言から来ます。
+`respond` の名前は抽象の `leadsTo` の正規の名前で、厳密に照合します。要件形式の ID
+と同じ文法で読む(§13.1.1。`lint` の ID テンプレートは適用しません)ので、業務層や
+`fsl 5` の要件層の policy の進行性は `policy` が宣言したとおりの policy ID で名指しします
+— `respond POL-WAIT-001 by promote`。上の層の仕様を書き換える必要はありません(#1782)。ID は宣言と同じく引用符なしで書きます。引用符つきの名前は
+構文エラーで、`fmt` は ID を空白なしで出力します。抽象側が宣言していない名前は
+`respond` の位置の `error/type`(exit 2)で、メッセージに抽象側の `leadsTo` 名の一覧が
+入ります: `unknown abstract leadsTo 'POL_WAIT_001'; abstract spec 'WaitingBusiness'
+declares leadsTo 'POL-WAIT-001'`。
 抽象の Int/Bool 定数は P/Q、`decreases`、範囲と入れ子のフィルターでリテラルになります。
 別モデルの impl 定数との binder 衝突と、読まれる抽象の const/state の同名は拒否します。
 const と同名の local は先に `check` が拒否します。**破壊的な受理の削除 (#1595):** 性質の pattern が、字句 scope で使う map の
@@ -4210,7 +4229,9 @@ fair ではありません。辺に対応する event がなければ `lifecycle
 インスタンス（原文には書かない入力）の `relation` のいずれか。より大きな式の中でだけ
 使う入力はどこにも格納されず `stored: []`）、`guards[]`（event の action の
 `requires` ごとに `index`、`expr`、`conjunctive: true`、`explain --lowering` が示す
-`origins`）を持ちます。event のガードはすべて成り立たなければなりません。
+`origins`）を持ちます。`explain` のほかの出力と同じく、`readings` は用語集の名前を
+`--names` の指定（既定は `alias`）で綴り、`leave_stage` のような生成された名前は正規名の
+ままです。event のガードはすべて成り立たなければなりません。
 `allow … only when` はガードを一つ加えるだけで、別のガードが拒む event を可能にする
 ことはありません。`--readable` は同じ内容を `Lifecycles:` 節と、各 event の action の下の
 `verb:`（省いたとき）、`fair:`、`input …:`、`guards:` の行で示します。`explain` の
@@ -5905,13 +5926,20 @@ DESIGN-*.md があります)。
   落ちた組み込みミュータントは `gate.dropped` に記録するだけで不合格にしません。
   どちらのフラグも無ければ出力と exit code は変わりません。→
   [`DESIGN-mutate.md`](../design/DESIGN-mutate.md)
-- **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
-  か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
-  マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
-  それを壊せる」)+ witness のナレーションの上のテキストビュー。人間のレビューを、
-  論理式を読むことから、具体例を裁定することへ移します。`--readable` なしでは
-  JSON モードが引き続き利用できます。`fsl 5` ヘッダーの requirements 文書では、原文が
-  暗黙にしている読み方も示します（`readings`。§13.2「暗黙の読み方を見る」）。→
+- **`fslc explain --readable`** — 骨格のテキストビュー。`Spec: NAME (depth K)` の
+  見出し、検証の世界(インスタンスと値の境界)、状態、インラインの `implements` の
+  対象の refinement の結果を示す `Implements:` 節、各 action(パラメータ、
+  `[fair]`、branch の lowering の `branch:` 行、要件タグ、`requires`、`writes`)、
+  各プロパティとその本体、暗黙の型境界の検査(`Automatic checks:`)を示します。
+  counterfactual も witness も計算しません(#1839)。2 行目の
+  `Counterfactual scope: invariant/reachable (leadsTo liveness skipped; use verify)`
+  は JSON の分析の範囲を述べるもので、テキストが計算したものではありません。
+  `--depth` が効くのは `Implements:` の検査だけで、`implements` のない spec では
+  深さによって違うのは見出しだけです。`--readable` なしの JSON 出力は、KPI の射影を
+  含む骨格、counterfactual(「この規則がなければ、この手順でそれを壊せる」)、
+  witness を持ち、人間のレビューを、論理式を読むことから具体例を裁定することへ
+  移します。`fsl 5` ヘッダーの requirements 文書では、テキストは原文が暗黙にしている
+  読み方も示します(`Lifecycles:` 節と action ごとの行。§13.2「暗黙の読み方を見る」)。→
   [`DESIGN-explain.md`](../design/DESIGN-explain.md)
 - **`fslc analyze`** — 構造的な観測 JSON を出力します。`--projection tsg` は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
@@ -5971,7 +5999,11 @@ DESIGN-*.md があります)。
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
-  非専門家によるプロジェクトレビューに使うためのものです。既定では非決定的な
+  非専門家によるプロジェクトレビューに使うためのものです。検証セクションは
+  `--deadlock` に従いますが、witness セクションは常に `--deadlock warn` として
+  生成します (#1871)。そのため、`ignore` でも検出された `deadlock_terminal` witness は
+  表示され、`error` で検証がデッドロック違反を報告しても witness は生成されます。
+  既定では非決定的な
   timing を保持します。HTML 専用の `--no-timing`(既定 false、別名なし)は、
   `verification.cost.elapsed_s`、
   `verification.cost.solver.check_elapsed_s`、

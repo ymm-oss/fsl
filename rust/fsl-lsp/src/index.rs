@@ -123,6 +123,9 @@ pub struct DocumentIndex {
     /// The action names an `implements` mapping of a next-edition document
     /// maps (`action impl(args) -> abs(args)`): uses, not declarations.
     mapped: HashSet<(u32, u32)>,
+    /// The requirement-style identifiers the parser read across several
+    /// tokens (`POL-WAIT-001`), each read as one name ([`read_tokens`]).
+    ids: Vec<fsl_syntax::IdSpelling>,
     pub symbols: Vec<Symbol>,
     pub references: Vec<Reference>,
     pub imports: Vec<ImportBinding>,
@@ -205,15 +208,22 @@ impl DocumentIndex {
         _path: Option<&str>,
         parse_options: &fsl_syntax::ParseOptions,
     ) -> Result<Self, IndexError> {
-        let parsed = if fslc_rust::frontend_output::is_ai_project(source)
+        let (parsed, ids) = if fslc_rust::frontend_output::is_ai_project(source)
             || fsl_syntax::is_causal_source(source)
         {
-            None
+            (None, Vec::new())
         } else {
-            Some(
-                fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), parse_options)
-                    .map_err(|error| IndexError(error.to_string()))?,
+            let (parsed, ids) = fsl_syntax::parse_document_with_requirement_ids(
+                fsl_syntax::SourceFile::new(source),
+                parse_options,
             )
+            .map_err(|error| IndexError(error.to_string()))?;
+            // A semantic token, which each name becomes, cannot span lines.
+            let ids = ids
+                .into_iter()
+                .filter(|id| !id.hyphens.is_empty() && id.span.start.line == id.span.end.line)
+                .collect::<Vec<_>>();
+            (Some(parsed), ids)
         };
         let refinement = parsed.as_ref().is_some_and(|parsed| {
             matches!(parsed.surface, fsl_syntax::SurfaceDocument::Refinement(_))
@@ -240,7 +250,7 @@ impl DocumentIndex {
             _ => (Lexicon::Published, Vec::new()),
         };
         drop(parsed);
-        let reading = read_tokens(source, *parse_options, lexicon, &glossary)
+        let reading = read_tokens(source, *parse_options, lexicon, &glossary, &ids)
             .map_err(|error| IndexError(error.to_string()))?;
         let tokens = &reading.tokens;
         let mut symbols = Vec::new();
@@ -575,6 +585,7 @@ impl DocumentIndex {
             lexicon,
             glossary,
             mapped,
+            ids,
             symbols,
             references,
             imports,
@@ -749,6 +760,7 @@ impl DocumentIndex {
             self.parse_options,
             self.lexicon,
             &self.glossary,
+            &self.ids,
         )
     }
 
@@ -1771,12 +1783,16 @@ struct Reading {
 /// Lex `source` for the walk. In a next-edition requirements document each
 /// glossary alias reads as its canonical name and each Japanese keyword as
 /// its English spelling, the way the parser reads them, so the walk reads
-/// one language. A particle stays as written: it is a keyword there.
+/// one language. A particle stays as written: it is a keyword there. Each of
+/// `ids`, an identifier the parser read across several tokens
+/// (`POL-WAIT-001`), reads as one name spelled as the parser read it, never
+/// as an alias.
 fn read_tokens(
     source: &str,
     options: fsl_syntax::ParseOptions,
     lexicon: Lexicon,
     glossary: &[GlossaryRow],
+    ids: &[fsl_syntax::IdSpelling],
 ) -> Result<Reading, fsl_syntax::LexError> {
     let mut tokens = fsl_syntax::lex_with(source, &options)?;
     let mut aliased = BTreeMap::new();
@@ -1796,6 +1812,29 @@ fn read_tokens(
                 english.clone_into(word);
             }
         }
+    }
+    if !ids.is_empty() {
+        let starts = ids
+            .iter()
+            .map(|id| (id.span.start.offset, id))
+            .collect::<HashMap<_, _>>();
+        let mut through = 0;
+        tokens.retain_mut(|token| {
+            let offset = token.span.start.offset;
+            if offset < through {
+                aliased.remove(&offset);
+                return false;
+            }
+            if let Some(id) = starts.get(&offset) {
+                through = id.span.end.offset;
+                aliased.remove(&offset);
+                *token = Token {
+                    kind: TokenKind::Ident(id.value.clone()),
+                    span: id.span,
+                };
+            }
+            true
+        });
     }
     Ok(Reading { tokens, aliased })
 }
@@ -2668,7 +2707,7 @@ mod tests {
         let requirement = index
             .symbols
             .iter()
-            .find(|symbol| symbol.name == "REQ")
+            .find(|symbol| symbol.name == "REQ-1")
             .expect("`requirement REQ-1` must declare its ID");
         assert_eq!(requirement.role, SymbolRole::Property);
         assert!(index.misprojected_declarations().is_empty());

@@ -215,8 +215,28 @@ fn selected_transition_induction_model(
     Ok(Some(model))
 }
 
-#[allow(clippy::too_many_lines)]
+/// How an induction run that got past its base case ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InductionVerdict {
+    Proved,
+    /// A counterexample to induction (`unknown_cti`).
+    Cti,
+    /// A ranked `leadsTo` whose ranking failed (`unknown_cti`, `leadsTo_rank`).
+    RankFailure,
+}
+
 pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i32) {
+    match run_induction(request) {
+        Ok((_, output)) | Err(output) => output,
+    }
+}
+
+/// `Err` is an output no induction verdict decided: an error, or the base
+/// case's own BMC envelope.
+#[allow(clippy::too_many_lines)]
+fn run_induction(
+    request: InductionRequest<'_>,
+) -> Result<(InductionVerdict, CommandResult), CommandResult> {
     let InductionRequest {
         selection,
         depth,
@@ -229,7 +249,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         .and_then(|model| model.map_or_else(|| load_selected_model(selection), Ok))
     {
         Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
+        Err(error) => return Err((spec_load_error_output(&error), 2)),
     };
     let selection = ModelSelection {
         path: selection.path,
@@ -246,17 +266,15 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         initial_state: None,
         skip_vacuity_probe,
     };
-    let (base_solved, (base_value, base_status)) = match execute_bmc(&base_request, started, true) {
-        Ok(execution) => execution,
-        Err(output) => return output,
-    };
+    let (base_solved, base_verdict, (base_value, base_status)) =
+        execute_bmc(&base_request, started, true)?;
     let Value::Object(base) = &base_value else {
-        return error_exit(error_output(
+        return Err(error_exit(error_output(
             "internal",
             "BMC returned a non-object envelope",
-        ));
+        )));
     };
-    if base.get("result").and_then(Value::as_str) != Some("verified") {
+    if base_verdict != BmcVerdict::Verified {
         // A base-case `leadsTo` violation may be a raw BMC stall/lasso trace
         // that a ranking proof can diagnose more precisely (e.g. a missing
         // `fair` on the `helpful` action, or a permanently-blocked helpful
@@ -264,8 +282,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         // which prefers `_prove_ranked_leadstos`' rank_failure over the raw
         // BMC counterexample whenever ranking has something more specific to
         // say.
-        if base.get("result").and_then(Value::as_str) == Some("violated")
-            && base.get("violation_kind").and_then(Value::as_str) == Some("leadsTo")
+        if base_verdict == BmcVerdict::LeadsToViolated
             && let Ok(model) = load_induction_model(selection, auxiliary)
             && let Ok(mut solver) = fsl_solver_z3::Z3Solver::new()
             && let Ok(ranked) =
@@ -274,48 +291,57 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         {
             let mut statistics = base_solved.statistics.clone();
             statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
-            return render_rank_failure(&model, failure, depth, started, &statistics);
+            return Ok((
+                InductionVerdict::RankFailure,
+                render_rank_failure(&model, failure, depth, started, &statistics),
+            ));
         }
-        return (base_value, base_status);
+        return Err((base_value, base_status));
     }
 
-    let model = match load_induction_model(selection, auxiliary) {
-        Ok(model) => model,
-        Err(output) => return output,
-    };
+    let model = load_induction_model(selection, auxiliary)?;
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return error_exit(error_output("internal", &error.to_string())),
+        Err(error) => return Err(error_exit(error_output("internal", &error.to_string()))),
     };
     let induction = match block_on_native(fsl_verifier::prove_induction(&model, &mut solver, k)) {
         Ok(result) => result,
-        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
+        Err(error) => return Err(error_exit(error_output("semantics", &error.to_string()))),
     };
 
     if let Some(cti) = &induction.cti {
         let mut statistics = base_solved.statistics.clone();
         statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
-        return render_induction_cti(&model, cti, depth, started, &statistics);
+        return Ok((
+            InductionVerdict::Cti,
+            render_induction_cti(&model, cti, depth, started, &statistics),
+        ));
     }
 
     let ranked = match block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver)) {
         Ok(result) => result,
-        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
+        Err(error) => return Err(error_exit(error_output("semantics", &error.to_string()))),
     };
     let mut statistics = base_solved.statistics.clone();
     statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
     if let Some(failure) = &ranked.failure {
-        return render_rank_failure(&model, failure, depth, started, &statistics);
+        return Ok((
+            InductionVerdict::RankFailure,
+            render_rank_failure(&model, failure, depth, started, &statistics),
+        ));
     }
-    render_induction_success(
-        &model,
-        base,
-        &induction,
-        &ranked,
-        depth,
-        started,
-        &statistics,
-    )
+    Ok((
+        InductionVerdict::Proved,
+        render_induction_success(
+            &model,
+            base,
+            &induction,
+            &ranked,
+            depth,
+            started,
+            &statistics,
+        ),
+    ))
 }
 
 fn load_induction_model(
@@ -1051,22 +1077,36 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
             Ok(findings) => findings,
             Err(output) => return output,
         };
-    let (output, status) =
-        finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
-            envelope(),
-            &model,
-            &result,
-            checked_bounds.as_ref(),
-            request.deadlock,
-            started.elapsed().as_secs_f64(),
-            &vacuity,
-            &reachable_diagnostics,
-            request.skip_vacuity_probe,
-        ));
-    if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
-        return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
+    let fallback = explicit_budget_fallback(&result, request.deadlock);
+    let rendered = fslc_rust::verification_output::render_explicit_output(
+        envelope(),
+        &model,
+        &result,
+        checked_bounds.as_ref(),
+        request.deadlock,
+        started.elapsed().as_secs_f64(),
+        &vacuity,
+        &reachable_diagnostics,
+        request.skip_vacuity_probe,
+    );
+    // Rendering replays the explicit witnesses; a replay failure is an
+    // internal error, never a fallback.
+    if let Some(reason) = fallback
+        && rendered.is_ok()
+    {
+        return auto_fallback_to_bmc(request, &reason, "budget");
     }
-    (output, status)
+    finish_explicit_output(rendered)
+}
+
+/// The reason `--engine auto` falls back to BMC after a completed explicit
+/// run: the run is `unknown_budget`. `None` keeps the explicit verdict.
+fn explicit_budget_fallback(
+    result: &fsl_runtime::ExplicitResult,
+    deadlock: DeadlockMode,
+) -> Option<String> {
+    fslc_rust::verification_output::explicit_budget_unknown(result, deadlock)
+        .then(|| budget_fallback_message(result.states_explored))
 }
 
 // A short-lived return value, not a stored collection; keep the raw runtime result.
@@ -1120,22 +1160,26 @@ fn annotate_auto_fallback(output: &mut Value, reason: &str, kind: &str) {
     );
 }
 
-/// Builds the budget-exhaustion fallback reason from the explicit engine's
-/// own `states_explored` count so the message names the actual state count
-/// observed, not a generic placeholder.
+/// Builds the budget-exhaustion fallback reason from a cached explicit
+/// envelope's `states_explored` count so the message names the actual state
+/// count observed, not a generic placeholder.
 fn budget_fallback_reason(explicit_output: &Value) -> String {
     match explicit_output
         .get("states_explored")
         .and_then(Value::as_u64)
     {
-        Some(states_explored) => format!(
-            "explicit-state exploration reached its {states_explored}-state budget; falling back to symbolic BMC"
-        ),
+        Some(states_explored) => budget_fallback_message(states_explored),
         None => {
             "explicit-state exploration exceeded the state budget; falling back to symbolic BMC"
                 .to_owned()
         }
     }
+}
+
+fn budget_fallback_message(states_explored: impl std::fmt::Display) -> String {
+    format!(
+        "explicit-state exploration reached its {states_explored}-state budget; falling back to symbolic BMC"
+    )
 }
 
 fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32) {
@@ -1148,7 +1192,7 @@ fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32
 pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
     match execute_bmc(&request, started, false) {
-        Ok((_, output)) | Err(output) => output,
+        Ok((_, _, output)) | Err(output) => output,
     }
 }
 
@@ -1156,6 +1200,7 @@ fn render_bmc(
     request: &BmcRequest<'_>,
     prepared: &PreparedBmc,
     solved: &SolvedBmc,
+    vacuity_reachability: Option<&[fsl_runtime::Reachability]>,
     started: Instant,
 ) -> (Value, i32) {
     fslc_rust::verification_output::render_bmc_output(
@@ -1169,6 +1214,7 @@ fn render_bmc(
             elapsed_s: started.elapsed().as_secs_f64(),
             statistics: &solved.statistics,
             skip_vacuity_probe: request.skip_vacuity_probe,
+            vacuity_reachability,
         },
     )
 }
@@ -1186,11 +1232,38 @@ fn contains_sequence(model: &KernelModel, ty: &TypeRef) -> bool {
     }
 }
 
+/// The verdict `render_bmc_output` reports for a solved run, read off the
+/// typed result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BmcVerdict {
+    Verified,
+    /// A `leadsTo` violation, which the induction base hands to ranking.
+    LeadsToViolated,
+    Failed,
+}
+
+fn bmc_verdict(
+    model: &KernelModel,
+    result: &fsl_verifier::BmcResult,
+    deadlock: DeadlockMode,
+) -> BmcVerdict {
+    use fslc_rust::verification_output::{BmcRunFailure, UnreachedReachables, first_bmc_failure};
+
+    match first_bmc_failure(model, result, deadlock, UnreachedReachables::Fail) {
+        None => BmcVerdict::Verified,
+        // Without its diagnostics a `leadsTo` violation renders as an error.
+        Some(BmcRunFailure::LeadsTo(violation)) if violation.leads_to.is_some() => {
+            BmcVerdict::LeadsToViolated
+        }
+        Some(_) => BmcVerdict::Failed,
+    }
+}
+
 fn execute_bmc(
     request: &BmcRequest<'_>,
     started: Instant,
     symbolic_first: bool,
-) -> Result<(SolvedBmc, CommandResult), CommandResult> {
+) -> Result<(SolvedBmc, BmcVerdict, CommandResult), CommandResult> {
     let prepared = prepare_bmc(request)?;
     let deferred = symbolic_first
         && !prepared
@@ -1198,20 +1271,31 @@ fn execute_bmc(
             .state
             .iter()
             .any(|(_, ty)| contains_sequence(&prepared.model, ty));
-    if !deferred {
-        probe_bmc_boundary(request, &prepared, started)?;
-    }
+    let vacuity_reachability = if deferred {
+        None
+    } else {
+        probe_bmc_boundary(request, &prepared, started)?
+    };
     let solved = solve_bmc(request, &prepared);
-    let output = match &solved {
-        Ok(solved) => render_bmc(request, &prepared, solved, started),
-        Err(output) => output.clone(),
+    let (verdict, output) = match &solved {
+        Ok(solved) => (
+            bmc_verdict(&prepared.model, &solved.result, request.deadlock),
+            render_bmc(
+                request,
+                &prepared,
+                solved,
+                vacuity_reachability.as_deref(),
+                started,
+            ),
+        ),
+        Err(output) => (BmcVerdict::Failed, output.clone()),
     };
     // Only a successful all-bounds base makes the concrete search redundant.
     // Every non-success retains the existing boundary evidence and priority.
-    if deferred && output.0.get("result").and_then(Value::as_str) != Some("verified") {
+    if deferred && verdict != BmcVerdict::Verified {
         probe_bmc_boundary(request, &prepared, started)?;
     }
-    Ok((solved?, output))
+    Ok((solved?, verdict, output))
 }
 
 fn prepare_bmc(request: &BmcRequest<'_>) -> Result<PreparedBmc, CommandResult> {
@@ -1236,11 +1320,14 @@ fn prepare_bmc(request: &BmcRequest<'_>) -> Result<PreparedBmc, CommandResult> {
     })
 }
 
+/// The concrete boundary pre-pass. Its walk also decides the vacuity probe
+/// rendering would otherwise walk again over the same states; the verdicts
+/// are returned when it did.
 fn probe_bmc_boundary(
     request: &BmcRequest<'_>,
     prepared: &PreparedBmc,
     started: Instant,
-) -> Result<(), CommandResult> {
+) -> Result<Option<Vec<fsl_runtime::Reachability>>, CommandResult> {
     let model = &prepared.model;
     let checked_bounds = &prepared.checked_bounds;
     // Some concrete boundary outcomes (notably an over-capacity Seq successor)
@@ -1251,12 +1338,18 @@ fn probe_bmc_boundary(
         && request.initial_state.is_none()
         && fsl_runtime::deterministic_initial_state(model).is_ok()
     {
-        match fsl_runtime::find_boundary_violation(
+        let expressions = if request.skip_vacuity_probe {
+            Vec::new()
+        } else {
+            fsl_runtime::vacuity_probe_expressions(model)
+        };
+        match fsl_runtime::find_boundary_violation_reaching(
             model,
+            &expressions,
             request.depth,
             fsl_runtime::CONCRETE_PROBE_BUDGET,
         ) {
-            Ok(probe) => {
+            Ok((probe, reachability)) => {
                 if let Some((violation, trace)) = probe.finding
                     && violation.kind != "partial_op"
                 {
@@ -1276,17 +1369,19 @@ fn probe_bmc_boundary(
                             // which never emits `warnings`, so this value is
                             // inert here; threaded through for consistency.
                             skip_vacuity_probe: request.skip_vacuity_probe,
+                            vacuity_reachability: None,
                         },
                     ));
                 }
                 // `exhausted && finding.is_none()` falls through here exactly
                 // like a completed empty search: the pre-pass is an evidence
                 // detour, not a verdict authority (issue #697).
+                return Ok(reachability.filter(|_| !request.skip_vacuity_probe));
             }
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// Per-check wall-clock limit for the #1149 ranking pre-pass. A check that
@@ -1448,6 +1543,33 @@ fn lemma_violated_steps(
         .collect()
 }
 
+/// Whether `--lemma` may use a candidate as an auxiliary invariant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LemmaVerdict {
+    Proved,
+    Rejected,
+}
+
+impl LemmaVerdict {
+    fn status(self) -> &'static str {
+        match self {
+            Self::Proved => "proved",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+fn lemma_entry(
+    verdict: LemmaVerdict,
+    source: &str,
+    name: &str,
+    proof: Value,
+) -> (LemmaVerdict, Value) {
+    let mut entry = json!({"expression":source,"name":name,"status":verdict.status(),"used":false});
+    entry["proof"] = proof;
+    (verdict, entry)
+}
+
 fn adjudicate_lemma(
     model: &KernelModel,
     name: &str,
@@ -1455,7 +1577,8 @@ fn adjudicate_lemma(
     source: &str,
     depth: usize,
     k_ind: usize,
-) -> Value {
+) -> (LemmaVerdict, Value) {
+    let rejected = |proof| lemma_entry(LemmaVerdict::Rejected, source, name, proof);
     let mut candidate = model.clone();
     candidate.invariants.clear();
     candidate.transitions.clear();
@@ -1471,43 +1594,37 @@ fn adjudicate_lemma(
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => {
-            return json!({
-                "expression":source,"name":name,"status":"rejected","used":false,
-                "proof":{"result":"error","kind":"internal","message":error.to_string()},
-            });
+            return rejected(
+                json!({"result":"error","kind":"internal","message":error.to_string()}),
+            );
         }
     };
     let bounded =
         match block_on_native(fsl_verifier::verify_bounded(&candidate, &mut solver, depth)) {
             Ok(result) => result,
             Err(error) => {
-                return json!({
-                    "expression":source,"name":name,"status":"rejected","used":false,
-                    "proof":{"result":"error","kind":"semantics","message":error.to_string()},
-                });
+                return rejected(
+                    json!({"result":"error","kind":"semantics","message":error.to_string()}),
+                );
             }
         };
     if let Some(violation) = bounded.violation {
-        return json!({
-            "expression":source,"name":name,"status":"rejected","used":false,
-            "proof":{
-                "result":"violated","violation_kind":violation.kind,
-                "invariant":candidate.action_scoped_display_name(
-                    &violation.name,
-                    violation.last_action.as_deref(),
-                ),
-                "violated_at_step":violation.step,
-                "trace": ::fslc_rust::trace_json(&candidate, &violation.trace),
-            },
-        });
+        return rejected(json!({
+            "result":"violated","violation_kind":violation.kind,
+            "invariant":candidate.action_scoped_display_name(
+                &violation.name,
+                violation.last_action.as_deref(),
+            ),
+            "violated_at_step":violation.step,
+            "trace": ::fslc_rust::trace_json(&candidate, &violation.trace),
+        }));
     }
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => {
-            return json!({
-                "expression":source,"name":name,"status":"rejected","used":false,
-                "proof":{"result":"error","kind":"internal","message":error.to_string()},
-            });
+            return rejected(
+                json!({"result":"error","kind":"internal","message":error.to_string()}),
+            );
         }
     };
     // Lemma truth only: the definedness obligation is asked in the target
@@ -1517,35 +1634,33 @@ fn adjudicate_lemma(
         &mut solver,
         k_ind,
     )) {
-        Ok(proof) if proof.cti.is_none() => json!({
-            "expression":source,"name":name,"status":"proved","used":false,
-            "proof":{
+        Ok(proof) if proof.cti.is_none() => lemma_entry(
+            LemmaVerdict::Proved,
+            source,
+            name,
+            json!({
                 "result":"proved","k":proof.k_used.get(name).copied().unwrap_or(k_ind),
                 "checked_to_depth":depth,"completeness":"unbounded",
-            },
-        }),
+            }),
+        ),
         Ok(proof) => {
             let cti = proof.cti.as_ref().expect("non-proved induction has a CTI");
-            json!({
-                "expression":source,"name":name,"status":"rejected","used":false,
-                "proof":{
-                    "result":"unknown_cti",
-                    "invariant":candidate
-                        .action_scoped_display_name(&cti.name, trace_last_action(&cti.trace)),
-                    "k":cti.k,
-                    "checked_to_depth":depth,"completeness":"bounded",
-                    "trace_type":"induction_cti",
-                    "cti":{
-                        "states": ::fslc_rust::trace_json(&candidate, &cti.trace),
-                        "violated_at":cti.k,
-                    },
+            rejected(json!({
+                "result":"unknown_cti",
+                "invariant":candidate
+                    .action_scoped_display_name(&cti.name, trace_last_action(&cti.trace)),
+                "k":cti.k,
+                "checked_to_depth":depth,"completeness":"bounded",
+                "trace_type":"induction_cti",
+                "cti":{
+                    "states": ::fslc_rust::trace_json(&candidate, &cti.trace),
+                    "violated_at":cti.k,
                 },
-            })
+            }))
         }
-        Err(error) => json!({
-            "expression":source,"name":name,"status":"rejected","used":false,
-            "proof":{"result":"error","kind":"semantics","message":error.to_string()},
-        }),
+        Err(error) => {
+            rejected(json!({"result":"error","kind":"semantics","message":error.to_string()}))
+        }
     }
 }
 
@@ -1649,7 +1764,7 @@ fn run_induction_with_lemmas(
                 continue;
             }
         };
-        let entry = adjudicate_lemma(
+        let (verdict, entry) = adjudicate_lemma(
             &model,
             &name,
             &expression,
@@ -1657,7 +1772,7 @@ fn run_induction_with_lemmas(
             options.depth,
             options.k_ind,
         );
-        if entry.get("status").and_then(Value::as_str) == Some("proved") {
+        if verdict == LemmaVerdict::Proved {
             proved_candidates.push((entries.len(), name.clone(), expression, source.to_owned()));
         }
         entries.push(entry);
@@ -1667,20 +1782,19 @@ fn run_induction_with_lemmas(
     // since `run_induction_with_lemmas` is called directly from
     // `run_verify_cli_from_source` rather than through `execute_cli_verification`.
     let skip_vacuity_probe = options.vacuity == "ignore";
-    let (mut result, status) = loop {
-        let (current, status) = run_induction_filtered(InductionRequest {
+    let (proved, (mut result, status)) = loop {
+        let (current, status) = match run_induction(InductionRequest {
             selection,
             depth: options.depth,
             deadlock,
             k: options.k_ind,
             auxiliary: &auxiliary,
             skip_vacuity_probe,
-        });
-        if current.get("result").and_then(Value::as_str) != Some("unknown_cti")
-            || current.get("violation_kind").and_then(Value::as_str) == Some("leadsTo_rank")
-        {
-            break (current, status);
-        }
+        }) {
+            Ok((InductionVerdict::Cti, output)) => output,
+            Ok((verdict, output)) => break (verdict == InductionVerdict::Proved, output),
+            Err(output) => break (false, output),
+        };
         let Some((candidate_index, violated_steps)) = proved_candidates
             .iter()
             .enumerate()
@@ -1689,7 +1803,7 @@ fn run_induction_with_lemmas(
                 (!steps.is_empty()).then_some((index, steps))
             })
         else {
-            break (current, status);
+            break (false, (current, status));
         };
         let (entry_index, name, expression, source) = proved_candidates.remove(candidate_index);
         if let Value::Object(entry) = &mut entries[entry_index] {
@@ -1706,7 +1820,6 @@ fn run_induction_with_lemmas(
         auxiliary.push((name, expression));
         auxiliary_sources.push(source);
     };
-    let proved = result.get("result").and_then(Value::as_str) == Some("proved");
     if let Value::Object(output) = &mut result {
         output.insert("lemmas".to_owned(), Value::Array(entries));
         output.insert("lemma_cti_exclusions".to_owned(), Value::Array(exclusions));
@@ -1754,6 +1867,21 @@ fn load_lemma_model(
     Ok((model, occupied_names))
 }
 
+/// The first input of every verify-cache key. Changing it orphans every
+/// entry written under the old value.
+const VERIFY_CACHE_KEY_SALT: &str = "fslc-rust-verify-cache-v4";
+/// The verify-cache generation under [`cache_root`]: an entry lives at
+/// `<root>/<VERIFY_CACHE_ENTRY_DIRECTORY>/<key[..2]>/<key>.json`.
+const VERIFY_CACHE_ENTRY_DIRECTORY: &str = "verify/v3";
+/// The cross-depth pointers of a generation, a subdirectory of
+/// [`VERIFY_CACHE_ENTRY_DIRECTORY`] so that both move together. No entry
+/// shard collides with it: a shard is two hex digits.
+const VERIFY_CACHE_POINTER_DIRECTORY: &str = "xdepth";
+/// The `schema` field of a verify-cache entry.
+const VERIFY_CACHE_ENTRY_SCHEMA: &str = "fslc-rust-cache.v2";
+/// The `schema` field of a cross-depth pointer.
+const VERIFY_CACHE_POINTER_SCHEMA: &str = "fslc-rust-cache-pointer.v2";
+
 fn cache_enabled(options: &CliVerifyOptions) -> bool {
     options.use_cache
         && options.from_state.is_none()
@@ -1776,18 +1904,11 @@ fn cache_root() -> Option<PathBuf> {
 }
 
 fn verify_cache_keys(
-    source_path: &Path,
     identity_path: &Path,
     options: &CliVerifyOptions,
     sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
-    verify_cache_keys_for_engine(
-        source_path,
-        identity_path,
-        options,
-        &options.engine,
-        sources,
-    )
+    verify_cache_keys_for_engine(identity_path, options, &options.engine, sources)
 }
 
 /// Cache keys are always computed for a concrete engine. The `auto` engine
@@ -1795,14 +1916,12 @@ fn verify_cache_keys(
 /// explicit and bmc keys, and stores use whichever engine actually decided,
 /// so verdicts are shared with plain `--engine explicit`/`--engine bmc` runs.
 fn verify_cache_keys_for_engine(
-    source_path: &Path,
     identity_path: &Path,
     options: &CliVerifyOptions,
     engine: &str,
     sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
     verify_cache_keys_with_solver_version(
-        source_path,
         identity_path,
         options,
         engine,
@@ -1812,7 +1931,6 @@ fn verify_cache_keys_for_engine(
 }
 
 fn verify_cache_keys_with_solver_version(
-    source_path: &Path,
     identity_path: &Path,
     options: &CliVerifyOptions,
     engine: &str,
@@ -1820,7 +1938,6 @@ fn verify_cache_keys_with_solver_version(
     sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
     verify_cache_keys_with_fingerprints(
-        source_path,
         identity_path,
         options,
         engine,
@@ -1900,12 +2017,6 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
 /// output carries it, so hashing it only made an unchanged spec miss after a
 /// move, rename, or second checkout.
 fn verify_cache_keys_with_fingerprints(
-    // The dependency domain now comes entirely from `sources` (what was
-    // actually read); this key no longer walks a directory rooted at the
-    // checked spec's own path, so it is unused here. Kept as a parameter
-    // because every caller still has it on hand and the signature reads as
-    // "the key for verifying this source, given these deps" either way.
-    _source_path: &Path,
     identity_path: &Path,
     options: &CliVerifyOptions,
     engine: &str,
@@ -1916,7 +2027,8 @@ fn verify_cache_keys_with_fingerprints(
     let mut sorted_sources = sources.to_vec();
     sorted_sources.sort();
     let mut digest = Sha256::new();
-    digest.update(b"fslc-rust-verify-cache-v4\0");
+    digest.update(VERIFY_CACHE_KEY_SALT.as_bytes());
+    digest.update(b"\0");
     digest.update(env!("CARGO_PKG_VERSION").as_bytes());
     digest.update(b"\0identity-source\0");
     digest.update(std::fs::read(identity_path).map_err(|error| error.to_string())?);
@@ -1948,15 +2060,41 @@ fn verify_cache_keys_with_fingerprints(
     Ok((format!("{:x}", digest.finalize()), xdepth))
 }
 
+/// Whether two `chain` steps can share a verify-cache entry, answered before
+/// either runs. A step is its manifest kind (`spec`, `refine`, `impl`) and the
+/// bytes of its layer's root file, `None` when that file could not be read.
+///
+/// Only a `spec` step runs `verify`; refine and `impl` steps never read or
+/// write this cache. Two `spec` steps share an entry only when their keys
+/// (exact, or cross-depth, which ignores depth) are equal, and both keys hash
+/// the root file's bytes ([`verify_cache_keys_with_fingerprints`]). Equal root
+/// bytes is therefore the answer: it covers every pair that can share an
+/// entry, plus some that cannot (different options or dependencies).
+pub(crate) fn chain_steps_may_share_verify_cache_entry(
+    (left_kind, left_root): (&str, Option<&str>),
+    (right_kind, right_root): (&str, Option<&str>),
+) -> bool {
+    left_kind == "spec" && right_kind == "spec" && left_root.is_some() && left_root == right_root
+}
+
 fn verify_cache_path(key: &str) -> Option<PathBuf> {
     if !valid_cache_key(key) {
         return None;
     }
     Some(
         cache_root()?
-            .join("verify/v3")
+            .join(VERIFY_CACHE_ENTRY_DIRECTORY)
             .join(&key[..2])
             .join(format!("{key}.json")),
+    )
+}
+
+fn verify_cache_pointer_path(xdepth: &str) -> Option<PathBuf> {
+    Some(
+        cache_root()?
+            .join(VERIFY_CACHE_ENTRY_DIRECTORY)
+            .join(VERIFY_CACHE_POINTER_DIRECTORY)
+            .join(format!("{xdepth}.json")),
     )
 }
 
@@ -1982,11 +2120,9 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
         );
         return Some(output);
     }
-    let pointer_path = cache_root()?
-        .join("verify/v3/xdepth")
-        .join(format!("{xdepth}.json"));
+    let pointer_path = verify_cache_pointer_path(xdepth)?;
     let pointer: Value = serde_json::from_slice(&std::fs::read(pointer_path).ok()?).ok()?;
-    if pointer.get("schema").and_then(Value::as_str) != Some("fslc-rust-cache-pointer.v2")
+    if pointer.get("schema").and_then(Value::as_str) != Some(VERIFY_CACHE_POINTER_SCHEMA)
         || pointer.get("xdepth").and_then(Value::as_str) != Some(xdepth)
     {
         return None;
@@ -2011,7 +2147,7 @@ fn verified_cache_entry_output(
     expected_key: &str,
     expected_xdepth: &str,
 ) -> Option<Value> {
-    (entry.get("schema").and_then(Value::as_str) == Some("fslc-rust-cache.v2")
+    (entry.get("schema").and_then(Value::as_str) == Some(VERIFY_CACHE_ENTRY_SCHEMA)
         && entry.get("key").and_then(Value::as_str) == Some(expected_key)
         && entry.get("xdepth").and_then(Value::as_str) == Some(expected_xdepth))
     .then(|| entry.get("output").cloned())?
@@ -2081,7 +2217,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     let temporary = parent.join(cache_temporary_name(key));
     let explicit = output.get("engine").and_then(Value::as_str) == Some("explicit");
     let entry = json!({
-        "schema": "fslc-rust-cache.v2",
+        "schema": VERIFY_CACHE_ENTRY_SCHEMA,
         "key": key,
         "xdepth": xdepth,
         "backend": if explicit { "native-explicit" } else { "native-z3" },
@@ -2095,21 +2231,19 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     publish_cache_file(&temporary, &path, serde_json::to_vec(&entry).ok());
     if output.get("result").and_then(Value::as_str) == Some("violated")
         && let Some(step) = output.get("violated_at_step").and_then(Value::as_u64)
-        && let Some(root) = cache_root()
+        && let Some(pointer) = verify_cache_pointer_path(xdepth)
+        && let Some(directory) = pointer.parent()
+        && std::fs::create_dir_all(directory).is_ok()
     {
-        let directory = root.join("verify/v3/xdepth");
-        if std::fs::create_dir_all(&directory).is_ok() {
-            let pointer = directory.join(format!("{xdepth}.json"));
-            let temporary = directory.join(cache_temporary_name(xdepth));
-            let bytes = serde_json::to_vec(&json!({
-                "schema": "fslc-rust-cache-pointer.v2",
-                "xdepth": xdepth,
-                "entry_key": key,
-                "violated_at_step": step,
-            }))
-            .ok();
-            publish_cache_file(&temporary, &pointer, bytes);
-        }
+        let temporary = directory.join(cache_temporary_name(xdepth));
+        let bytes = serde_json::to_vec(&json!({
+            "schema": VERIFY_CACHE_POINTER_SCHEMA,
+            "xdepth": xdepth,
+            "entry_key": key,
+            "violated_at_step": step,
+        }))
+        .ok();
+        publish_cache_file(&temporary, &pointer, bytes);
     }
 }
 
@@ -2239,7 +2373,7 @@ pub(super) fn run_verify_cli_from_source(
     source: &str,
     options: &CliVerifyOptions,
 ) -> CommandResult {
-    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let dependencies = crate::invocation::DependencyScope::enter();
     let edition = match fslc_rust::migration::admit_source(
         source,
         &cache_identity_path.to_string_lossy(),
@@ -2315,6 +2449,7 @@ fn run_verify_cli_kernel_from_source(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let recorder = fslc_rust::migration::DependencyResolver::native(
         RecordingResolver::new(base),
+        crate::invocation::dependencies(),
         base,
         *parse_options(),
         &envelope,
@@ -2404,7 +2539,7 @@ fn run_verify_cli_kernel_from_source(
     // with plain `--engine explicit`/`--engine bmc` runs of the same spec.
     let is_auto = options.engine == "auto";
     let cache_keys = (!is_auto && cache_enabled(options))
-        .then(|| verify_cache_keys(path, cache_identity_path, options, &sources).ok())
+        .then(|| verify_cache_keys(cache_identity_path, options, &sources).ok())
         .flatten();
     if let Some(output) = cached_verification(options, cache_keys.as_ref()) {
         return output;
@@ -2434,7 +2569,7 @@ fn run_verify_cli_kernel_from_source(
         status,
     );
     if is_auto && cache_enabled(options) {
-        store_auto_verification(path, cache_identity_path, options, &output, &sources);
+        store_auto_verification(cache_identity_path, options, &output, &sources);
     }
     (output, status)
 }
@@ -2712,10 +2847,9 @@ fn cached_auto_verification(
     if std::env::var("FSLC_CACHE_VERIFY").as_deref() == Ok("1") {
         return None;
     }
-    let explicit_cached =
-        verify_cache_keys_for_engine(source_path, identity_path, options, "explicit", sources)
-            .ok()
-            .and_then(|(key, xdepth)| verify_cache_lookup(&key, &xdepth, options.depth));
+    let explicit_cached = verify_cache_keys_for_engine(identity_path, options, "explicit", sources)
+        .ok()
+        .and_then(|(key, xdepth)| verify_cache_lookup(&key, &xdepth, options.depth));
     if let Some(output) = &explicit_cached
         && output.get("result").and_then(Value::as_str) != Some("unknown_budget")
     {
@@ -2731,7 +2865,7 @@ fn cached_auto_verification(
         return None;
     };
     let (key, xdepth) =
-        verify_cache_keys_for_engine(source_path, identity_path, options, "bmc", sources).ok()?;
+        verify_cache_keys_for_engine(identity_path, options, "bmc", sources).ok()?;
     let mut output = verify_cache_lookup(&key, &xdepth, options.depth)?;
     annotate_auto_fallback(&mut output, &reason, kind);
     let status = cached_output_status(&output)?;
@@ -2746,7 +2880,6 @@ fn cached_auto_verification(
 /// fallback stamp itself (`cached_auto_verification`) instead of reading it
 /// back.
 fn store_auto_verification(
-    source_path: &Path,
     identity_path: &Path,
     options: &CliVerifyOptions,
     output: &Value,
@@ -2754,13 +2887,9 @@ fn store_auto_verification(
 ) {
     match output.get("engine").and_then(Value::as_str) {
         Some("explicit") => {
-            if let Ok((key, xdepth)) = verify_cache_keys_for_engine(
-                source_path,
-                identity_path,
-                options,
-                "explicit",
-                sources,
-            ) {
+            if let Ok((key, xdepth)) =
+                verify_cache_keys_for_engine(identity_path, options, "explicit", sources)
+            {
                 verify_cache_store(&key, &xdepth, output);
             }
         }
@@ -2771,7 +2900,7 @@ fn store_auto_verification(
                 envelope.remove("engine_fallback");
             }
             if let Ok((key, xdepth)) =
-                verify_cache_keys_for_engine(source_path, identity_path, options, "bmc", sources)
+                verify_cache_keys_for_engine(identity_path, options, "bmc", sources)
             {
                 verify_cache_store(&key, &xdepth, &plain);
             }
@@ -3240,6 +3369,148 @@ mod tests {
         assert_eq!(output["kind"], "internal");
     }
 
+    fn inline_model(source: &str) -> KernelModel {
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("lower inline fixture");
+        fsl_core::build_model(kernel).expect("build inline fixture")
+    }
+
+    fn rendered_explicit_result(
+        model: &KernelModel,
+        result: &fsl_runtime::ExplicitResult,
+        deadlock: DeadlockMode,
+    ) -> Value {
+        let (output, _) =
+            finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
+                envelope(),
+                model,
+                result,
+                None,
+                deadlock,
+                0.0,
+                &[],
+                &std::collections::BTreeMap::new(),
+                true,
+            ));
+        output["result"].clone()
+    }
+
+    #[test]
+    fn auto_falls_back_on_an_explicit_run_that_exhausts_its_budget() {
+        let model = inline_model(
+            r"spec AutoBudget {
+  state { n: Int }
+  init { n = 0 }
+  action step() { requires n < 9 n = n + 1 }
+  invariant NonNegative { n >= 0 }
+}",
+        );
+        let result = fsl_runtime::verify_explicit(model.clone(), 8, 2).expect("explicit run");
+        assert!(result.budget_exceeded, "{result:?}");
+        let expected = format!(
+            "explicit-state exploration reached its {}-state budget; falling back to symbolic BMC",
+            result.states_explored
+        );
+        for deadlock in [DeadlockMode::Ignore, DeadlockMode::Error] {
+            assert_eq!(
+                explicit_budget_fallback(&result, deadlock).as_deref(),
+                Some(expected.as_str())
+            );
+            assert_eq!(
+                rendered_explicit_result(&model, &result, deadlock),
+                "unknown_budget"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_keeps_an_explicit_verdict_found_before_the_budget_ran_out() {
+        let closed = inline_model(
+            r"spec AutoClosed {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  invariant Boolean { done or not done }
+}",
+        );
+        let result = fsl_runtime::verify_explicit(closed.clone(), 4, 100).expect("explicit run");
+        assert!(
+            result.closure && result.deadlock_step.is_some(),
+            "{result:?}"
+        );
+        assert_eq!(
+            explicit_budget_fallback(&result, DeadlockMode::Ignore),
+            None
+        );
+        assert_eq!(
+            rendered_explicit_result(&closed, &result, DeadlockMode::Ignore),
+            "proved"
+        );
+
+        // A deadlock decides only under `--deadlock error`.
+        let mut deadlocked = result;
+        deadlocked.budget_exceeded = true;
+        assert_eq!(
+            explicit_budget_fallback(&deadlocked, DeadlockMode::Error),
+            None
+        );
+        assert_eq!(
+            rendered_explicit_result(&closed, &deadlocked, DeadlockMode::Error),
+            "violated"
+        );
+        assert!(explicit_budget_fallback(&deadlocked, DeadlockMode::Ignore).is_some());
+        assert_eq!(
+            rendered_explicit_result(&closed, &deadlocked, DeadlockMode::Ignore),
+            "unknown_budget"
+        );
+
+        let violating = inline_model(
+            r"spec AutoViolated {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  invariant NeverDone { not done }
+}",
+        );
+        let mut violated =
+            fsl_runtime::verify_explicit(violating.clone(), 4, 100).expect("explicit run");
+        assert!(violated.violation.is_some(), "{violated:?}");
+        violated.budget_exceeded = true;
+        assert_eq!(
+            explicit_budget_fallback(&violated, DeadlockMode::Ignore),
+            None
+        );
+        assert_eq!(
+            rendered_explicit_result(&violating, &violated, DeadlockMode::Ignore),
+            "violated"
+        );
+    }
+
+    #[test]
+    fn adjudicated_lemma_entry_reports_its_verdict() {
+        let model = inline_model(
+            r"spec LemmaVerdicts {
+  state { x: Int }
+  init { x = 0 }
+  action step() { x = x + 2 }
+  invariant Small { x < 100 }
+}",
+        );
+        for (source, verdict, status, proof) in [
+            ("x >= 0", LemmaVerdict::Proved, "proved", "proved"),
+            ("x == 0", LemmaVerdict::Rejected, "rejected", "violated"),
+            ("x != 1", LemmaVerdict::Rejected, "rejected", "unknown_cti"),
+        ] {
+            let expression = fsl_syntax::parse_expr(source).expect("parse lemma");
+            let (produced, entry) =
+                adjudicate_lemma(&model, "AuxiliaryLemma1", &expression, source, 3, 1);
+            assert_eq!(produced, verdict, "{source}: {entry}");
+            assert_eq!(entry["status"], status, "{source}: {entry}");
+            assert_eq!(entry["proof"]["result"], proof, "{source}: {entry}");
+            assert_eq!(entry["used"], false, "{source}: {entry}");
+        }
+    }
+
     #[test]
     fn explicit_cache_keys_include_the_engine_and_state_budget() {
         let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
@@ -3249,11 +3520,10 @@ mod tests {
         let mut smaller_budget = explicit.clone();
         smaller_budget.explicit_budget -= 1;
 
-        let bmc_keys = verify_cache_keys(&path, &path, &bmc, &[]).expect("BMC cache keys");
-        let explicit_keys =
-            verify_cache_keys(&path, &path, &explicit, &[]).expect("explicit cache keys");
-        let smaller_keys = verify_cache_keys(&path, &path, &smaller_budget, &[])
-            .expect("budget-specific cache keys");
+        let bmc_keys = verify_cache_keys(&path, &bmc, &[]).expect("BMC cache keys");
+        let explicit_keys = verify_cache_keys(&path, &explicit, &[]).expect("explicit cache keys");
+        let smaller_keys =
+            verify_cache_keys(&path, &smaller_budget, &[]).expect("budget-specific cache keys");
 
         assert_ne!(bmc_keys, explicit_keys);
         assert_ne!(explicit_keys, smaller_keys);
@@ -3314,24 +3584,12 @@ mod tests {
         let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
         let options = CliVerifyOptions::default();
 
-        let current = verify_cache_keys_with_solver_version(
-            &path,
-            &path,
-            &options,
-            "bmc",
-            "Z3 4.16.0.0",
-            &[],
-        )
-        .expect("current solver cache keys");
-        let updated = verify_cache_keys_with_solver_version(
-            &path,
-            &path,
-            &options,
-            "bmc",
-            "Z3 4.17.0.0",
-            &[],
-        )
-        .expect("updated solver cache keys");
+        let current =
+            verify_cache_keys_with_solver_version(&path, &options, "bmc", "Z3 4.16.0.0", &[])
+                .expect("current solver cache keys");
+        let updated =
+            verify_cache_keys_with_solver_version(&path, &options, "bmc", "Z3 4.17.0.0", &[])
+                .expect("updated solver cache keys");
 
         assert_ne!(current, updated);
     }
@@ -3474,7 +3732,7 @@ mod tests {
         let options = CliVerifyOptions::default();
         let resolver = RecordingResolver::new(&alias);
         let sources = recorded_sources(&materialized, SYMLINK_ALIAS_COMPOSE_SOURCE, &resolver);
-        let before = verify_cache_keys(&materialized, &alias_document, &options, &sources)
+        let before = verify_cache_keys(&alias_document, &options, &sources)
             .expect("cache key before dependency edit");
         std::fs::write(
             alias.join("dependency.fsl"),
@@ -3483,7 +3741,7 @@ mod tests {
         .expect("edit dependency");
         let resolver = RecordingResolver::new(&alias);
         let sources = recorded_sources(&materialized, SYMLINK_ALIAS_COMPOSE_SOURCE, &resolver);
-        let after = verify_cache_keys(&materialized, &alias_document, &options, &sources)
+        let after = verify_cache_keys(&alias_document, &options, &sources)
             .expect("cache key after dependency edit");
         assert_ne!(before, after);
 
@@ -3564,7 +3822,7 @@ mod tests {
         let dep = |name: &str, body: &str| vec![(PathBuf::from(name), body.to_owned())];
 
         let key = |path: &Path, sources: &[(PathBuf, String)]| {
-            verify_cache_keys(path, path, &options, sources).expect("cache keys")
+            verify_cache_keys(path, &options, sources).expect("cache keys")
         };
         assert_eq!(key(&at_one, &[]), key(&at_two, &[]));
         assert_eq!(
@@ -3591,7 +3849,7 @@ mod tests {
         deeper.depth += 1;
         assert_ne!(
             key(&at_one, &[]).0,
-            verify_cache_keys(&at_one, &at_one, &deeper, &[])
+            verify_cache_keys(&at_one, &deeper, &[])
                 .expect("deeper keys")
                 .0
         );
@@ -3613,16 +3871,9 @@ mod tests {
 
         let (legacy_key, legacy_xdepth) =
             legacy_v3_keys(&path, &options, "bmc", solver, fingerprint);
-        let (key, xdepth) = verify_cache_keys_with_fingerprints(
-            &path,
-            &path,
-            &options,
-            "bmc",
-            solver,
-            fingerprint,
-            &[],
-        )
-        .expect("current keys");
+        let (key, xdepth) =
+            verify_cache_keys_with_fingerprints(&path, &options, "bmc", solver, fingerprint, &[])
+                .expect("current keys");
         assert_ne!(key, legacy_key);
         assert_ne!(xdepth, legacy_xdepth);
 
@@ -3655,7 +3906,6 @@ mod tests {
 
         let current = verify_cache_keys_with_fingerprints(
             &path,
-            &path,
             &options,
             "bmc",
             "Z3 4.16.0.0",
@@ -3664,7 +3914,6 @@ mod tests {
         )
         .expect("current implementation cache keys");
         let updated = verify_cache_keys_with_fingerprints(
-            &path,
             &path,
             &options,
             "bmc",
@@ -3704,10 +3953,8 @@ mod tests {
             sources.is_empty(),
             "a root document with no from/use dependency must record none: {sources:?}"
         );
-        let first = verify_cache_keys(&materialized, &document, &options, &sources)
-            .expect("first cache key");
-        let second = verify_cache_keys(&materialized, &document, &options, &sources)
-            .expect("second cache key");
+        let first = verify_cache_keys(&document, &options, &sources).expect("first cache key");
+        let second = verify_cache_keys(&document, &options, &sources).expect("second cache key");
         assert_eq!(
             first, second,
             "re-verifying the same literate document must reach the same key \

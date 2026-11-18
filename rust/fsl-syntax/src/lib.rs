@@ -63,7 +63,7 @@ pub use db::{
 pub use dispatch::{
     DIALECT_KEYWORDS, ParsedDocument, SourceFile, declaration_keyword, dialect_keyword,
     dialect_keyword_with, legacy_expression_operator_error, parse_document, parse_document_with,
-    validate_frontend_registry,
+    parse_document_with_requirement_ids, validate_frontend_registry,
 };
 pub use domain::{
     DomainAggregate, DomainAssignment, DomainAwait, DomainCommand, DomainDecide, DomainEffect,
@@ -99,7 +99,8 @@ pub use lossless::{
 };
 pub use parse_options::ParseOptions;
 pub use parser::{
-    ParseError, parse_expr, parse_surface_document, parse_surface_document_with, parse_surface_spec,
+    IdSpelling, ParseError, parse_expr, parse_surface_document, parse_surface_document_with,
+    parse_surface_spec,
 };
 pub use respell::{
     KeywordLanguage, NameForm, RESPELL_NOT_APPLICABLE, Respelling, respell_source, space_particles,
@@ -114,13 +115,13 @@ pub use surface::{
     GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, InputReading,
     InputStore, LValue, LifecycleReading, MapsClause, MeasureDeclaration, MetaTag,
     NextEditionRequirements, Param, PreservationItem, ProcessCover, ProcessField, ProcessFields,
-    ProcessItem, ProcessTransition, RefinementItem, RefinementParam, RelationDeclaration,
-    RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementBranch,
-    RequirementOwner, RequirementsItem, ResourceDeclaration, RuleGuard, RuleProperty, SpecItem,
-    StateField, Statement, SurfaceAgent, SurfaceBusiness, SurfaceCompose, SurfaceDocument,
-    SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef,
-    TimeItem, TypeExpr, VerifyItem, entity_binder, entity_field_state, entity_stage_state,
-    stage_reference,
+    ProcessItem, ProcessTransition, ProgressResponse, RefinementItem, RefinementParam,
+    RelationDeclaration, RequirementAction, RequirementActionItem, RequirementBlockItem,
+    RequirementBranch, RequirementOwner, RequirementsItem, ResourceDeclaration, RuleGuard,
+    RuleProperty, SpecItem, StateField, Statement, SurfaceAgent, SurfaceBusiness, SurfaceCompose,
+    SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec,
+    SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem, entity_binder, entity_field_state,
+    entity_stage_state, stage_reference,
 };
 pub use syntax_expr::{
     DUPLICATE_STRUCT_FIELD, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue,

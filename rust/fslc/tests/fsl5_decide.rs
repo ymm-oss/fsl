@@ -23,8 +23,10 @@
 //! - **decisions/048 J3**: past the enumeration bound the same checks are
 //!   asked of the solver.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -83,7 +85,7 @@ impl Drop for Scratch {
 
 /// `fslc <args>` in `directory`.
 fn fslc(directory: &Path, args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(directory)
         .output()

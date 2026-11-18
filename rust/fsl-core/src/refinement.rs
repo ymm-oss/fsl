@@ -269,12 +269,10 @@ fn build_refinement(
                 span,
             }),
             RefinementItem::PreserveProgress { responses, .. } => {
-                progress.extend(responses.into_iter().map(|(leads_to, actions, span)| {
-                    ProgressMap {
-                        leads_to,
-                        actions: actions.into_iter().map(ActionRef).collect(),
-                        span,
-                    }
+                progress.extend(responses.into_iter().map(|response| ProgressMap {
+                    leads_to: response.leads_to,
+                    actions: response.actions.into_iter().map(ActionRef).collect(),
+                    span: response.span,
                 }));
             }
         }
@@ -378,7 +376,7 @@ fn build_refinement(
             )?;
         } else {
             return Err(refinement_error(
-                format!("unknown abstract leadsTo '{}'", declaration.leads_to),
+                unknown_abstract_leadsto_message(abstraction, &declaration.leads_to),
                 Some(declaration.span),
             ));
         }
@@ -534,6 +532,29 @@ fn unpullable_progress_map(
         });
         found
     })
+}
+
+/// The message for a `respond` name that names no abstract leadsTo, listing
+/// the names the abstraction declares so a respelled ID shows beside them.
+#[must_use]
+pub fn unknown_abstract_leadsto_message(abstraction: &KernelModel, name: &str) -> String {
+    let declared = abstraction
+        .leadstos
+        .iter()
+        .map(|property| format!("'{}'", property.name))
+        .collect::<Vec<_>>();
+    if declared.is_empty() {
+        format!(
+            "unknown abstract leadsTo '{name}'; abstract spec '{}' declares no leadsTo",
+            abstraction.name
+        )
+    } else {
+        format!(
+            "unknown abstract leadsTo '{name}'; abstract spec '{}' declares leadsTo {}",
+            abstraction.name,
+            declared.join(", ")
+        )
+    }
 }
 
 /// Pull a progress property through state maps without changing its abstract scope.

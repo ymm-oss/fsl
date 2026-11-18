@@ -4,8 +4,11 @@
 //! validation, and repair tools still accept their intentional input domain.
 //! Kernel controls assert acceptance, not full Kernel JSON equivalence.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
@@ -64,7 +67,7 @@ impl Drop for FixtureDirectory {
 }
 
 fn run(cwd: &Path, arguments: &[&str]) -> Output {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

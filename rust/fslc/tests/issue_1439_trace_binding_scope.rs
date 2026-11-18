@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -49,7 +51,7 @@ fn check(label: &str, source: &str) -> Value {
     );
     std::fs::create_dir_all(&scratch.0).expect("create owned inline fixture directory");
     std::fs::write(scratch.0.join("trace.fsl"), source).expect("write inline fixture");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(["check", "trace.fsl"]).current_dir(&scratch.0);
     let output = command.output().expect("run native check");
     assert!(output.stderr.is_empty(), "{label}: {output:?}");

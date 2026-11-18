@@ -7,13 +7,15 @@
 //! spec violates its own type bounds within `--depth`. That is a property
 //! of the refinement *input*, not a refinement fidelity verdict.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
 fn run(args: &[String]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .output()
         .expect("run native CLI");

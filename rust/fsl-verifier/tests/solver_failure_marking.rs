@@ -29,8 +29,17 @@ fn squeeze(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+/// `OnUnknown::Fail(message)` is marked only because the scoped-query owner
+/// builds its error with `VerifyError::solver` (#1873).
+fn on_unknown_fail_is_marked() -> bool {
+    let owner = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/scoped_query.rs");
+    squeeze(&std::fs::read_to_string(owner).expect("read scoped_query.rs"))
+        .contains("Self::Fail(message)=>Err(VerifyError::solver(message))")
+}
+
 #[test]
 fn no_unknown_solver_result_is_built_as_an_unmarked_error() {
+    let fail_is_marked = on_unknown_fail_is_marked();
     for (path, text) in sources() {
         let code = squeeze(&text);
         for unmarked in [
@@ -43,12 +52,16 @@ fn no_unknown_solver_result_is_built_as_an_unmarked_error() {
             );
         }
         let literals = code.matches("\"solverreturnedunknown").count();
+        let fails = code
+            .matches("OnUnknown::Fail(\"solverreturnedunknown")
+            .count();
         let marked = code
             .matches("VerifyError::solver(\"solverreturnedunknown")
             .count()
             + code
                 .matches("VerifyError::solver(format!(\"solverreturnedunknown")
-                .count();
+                .count()
+            + if fail_is_marked { fails } else { 0 };
         assert_eq!(
             literals, marked,
             "{path}: every \"solver returned unknown\" message must be a VerifyError::solver"

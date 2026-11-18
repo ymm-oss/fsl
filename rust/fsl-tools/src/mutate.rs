@@ -49,6 +49,13 @@ impl BuiltinMutant {
         }
         mutated
     }
+
+    /// Whether this mutant edits the `init` block. A mutant of an action
+    /// named `init` has the same `action`, so `action` cannot tell them apart.
+    #[must_use]
+    pub fn edits_init(&self) -> bool {
+        matches!(self.edit, Edit::Item(SpecItem::Init { .. }))
+    }
 }
 
 #[derive(Clone)]

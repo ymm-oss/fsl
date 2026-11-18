@@ -26,6 +26,9 @@ mod scope_tests;
 #[cfg(test)]
 mod enabled_calls_tests;
 
+#[cfg(test)]
+mod explicit_search_tests;
+
 /// Work counters the structural tests of #1842 read, so a scaling
 /// regression fails without a wall-clock deadline.
 #[cfg(test)]
@@ -155,9 +158,26 @@ fn eval_observing(
     old_state: Option<&State>,
     observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
-    if matches!(expr, Expr::Is { .. })
-        || matches!(expr, Expr::Binary { op, .. } if fsl_core::pattern_binding_flows(op, false))
+    if let Expr::Binary { op, left, right } = expr
+        && is_connective(op)
     {
+        // Only an `is` on the spine can bind; without one the copy would stay
+        // equal to `bindings`.
+        let binds = connective_may_bind(expr);
+        let mut copy;
+        let bindings = if binds && fsl_core::pattern_binding_flows(op, false) {
+            copy = bindings.clone();
+            &mut copy
+        } else {
+            bindings
+        };
+        return recursion::guard(|| {
+            eval_connective(
+                op, left, right, binds, state, bindings, model, old_state, observed,
+            )
+        });
+    }
+    if matches!(expr, Expr::Is { .. }) {
         eval_with_bindings_observing(
             expr,
             state,
@@ -405,9 +425,14 @@ fn eval_inner(
             body,
         } => {
             // Nested binder-local evaluation is outside the enclosing evidence frame.
-            let candidates = binder_values(binder, state, bindings, model, old_state)?;
+            // One scope serves every candidate: `eval` and the `where` filter
+            // leave the bindings they are given as they found them (an `is`
+            // binding stays inside the `and` that made it), so rebinding the
+            // binder is all that differs between two candidates' scopes.
+            let candidates = binder_domain(binder, state, bindings, model, old_state)?;
+            let mut local = bindings.clone();
             if quantifier == "forall" {
-                for (value, mut local) in candidates {
+                for value in candidates {
                     local.insert(binder_name(binder).to_owned(), value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
@@ -418,7 +443,7 @@ fn eval_inner(
                 }
                 Ok(Value::Bool(true))
             } else {
-                for (value, mut local) in candidates {
+                for value in candidates {
                     local.insert(binder_name(binder).to_owned(), value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
@@ -450,8 +475,9 @@ fn eval_inner(
             // Aggregate sources, filters and values likewise keep their own scope.
             let mut matches = 0_i64;
             let mut sum = 0_i64;
-            for (candidate, mut local) in binder_values(binder, state, bindings, model, old_state)?
-            {
+            // One scope serves every candidate, as for `Quantified`.
+            let mut local = bindings.clone();
+            for candidate in binder_domain(binder, state, bindings, model, old_state)? {
                 local.insert(binder_name(binder).to_owned(), candidate);
                 if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                     continue;
@@ -568,6 +594,26 @@ fn eval_place(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Option<Value>, RuntimeError> {
+    if let Some(Operand::Value(value)) = borrowed_operand(expr, state, bindings, model) {
+        return Ok(Some(value.clone()));
+    }
+    eval_place_steps(expr, state, bindings, model, old_state, observed)
+}
+
+/// [`eval_place`] after [`borrowed_operand`] did not read `expr` in place.
+///
+/// An index expression that is itself a chain is read here the same way,
+/// without reading it in place first: that read already walked it as part of
+/// `expr`, and trying again at every level of a chain nested in its keys
+/// would walk the rest of the chain once per level.
+fn eval_place_steps(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
     mut observed: Option<&mut Bindings>,
 ) -> Result<Option<Value>, RuntimeError> {
     enum PlaceStep<'expr> {
@@ -608,7 +654,7 @@ fn eval_place(
     for step in steps.into_iter().rev() {
         current = match step {
             PlaceStep::Index(index) => {
-                let index = eval_observing(
+                let index = eval_place_key(
                     index,
                     state,
                     bindings,
@@ -622,6 +668,171 @@ fn eval_place(
         };
     }
     Ok(Some(current.clone()))
+}
+
+/// An index expression of [`eval_place_steps`], evaluated as [`eval`] would:
+/// a chain rooted at a `Var` continues there, under the stack guard [`eval`]
+/// would have taken for it, and anything else is evaluated the general way.
+fn eval_place_key(
+    index: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    if matches!(index, Expr::Index(..) | Expr::Field(..))
+        && let Some(value) = recursion::guard(|| {
+            eval_place_steps(
+                index,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )
+        })?
+    {
+        return Ok(value);
+    }
+    eval_observing(index, state, bindings, model, old_state, observed)
+}
+
+/// An operand read in place: a value the state, the bindings or the model
+/// already hold, or a literal.
+#[derive(Clone, Copy)]
+enum Operand<'a> {
+    Value(&'a Value),
+    Int(i64),
+    Bool(bool),
+    Enum { type_name: &'a str, member: &'a str },
+}
+
+/// `expr` read without evaluating it to an owned value, when it is a literal,
+/// a name, or an `Index`/`Field` chain over one whose keys are themselves
+/// such operands, and every lookup on the way succeeds.
+///
+/// It resolves names in [`eval_inner`]'s `Var` order and validates enum
+/// literals as [`eval_inner`] does. It has no effects, so `None` (a shape it
+/// does not read, or a step that would fail) leaves the caller to evaluate
+/// `expr` the general way, which then reports the same value or error.
+///
+/// Its `Index`/`Field` arms recurse on the spec's structure without passing
+/// through [`eval`], so they take the stack guard themselves.
+fn borrowed_operand<'a>(
+    expr: &'a Expr,
+    state: &'a State,
+    bindings: &'a Bindings,
+    model: &'a KernelModel,
+) -> Option<Operand<'a>> {
+    match expr {
+        Expr::Num(value) => Some(Operand::Int(*value)),
+        Expr::Bool(value) => Some(Operand::Bool(*value)),
+        Expr::EnumMember {
+            type_name, member, ..
+        } => match model.types.get(type_name) {
+            Some(TypeDef::Enum { members, .. }) if members.contains(member) => {
+                Some(Operand::Enum { type_name, member })
+            }
+            _ => None,
+        },
+        Expr::Var(name) => bindings
+            .get(name)
+            .or_else(|| state.get(name))
+            .or_else(|| model.consts.get(name))
+            .or_else(|| model.enum_members.get(name))
+            .map(Operand::Value),
+        Expr::Index(base, index) => recursion::guard(|| {
+            let Some(Operand::Value(base)) = borrowed_operand(base, state, bindings, model) else {
+                return None;
+            };
+            let key = borrowed_operand(index, state, bindings, model)?;
+            index_by_operand(base, key).map(Operand::Value)
+        }),
+        Expr::Field(base, field) => recursion::guard(|| {
+            let Some(Operand::Value(Value::Struct { fields, .. })) =
+                borrowed_operand(base, state, bindings, model)
+            else {
+                return None;
+            };
+            fields.get(field).map(Operand::Value)
+        }),
+        _ => None,
+    }
+}
+
+/// `left op right` for `==`/`!=` on operands read in place, or `None` when
+/// the general evaluation decides it.
+fn compare_in_place(
+    op: &str,
+    left: &Expr,
+    right: &Expr,
+    state: &State,
+    bindings: &Bindings,
+    model: &KernelModel,
+) -> Option<Value> {
+    if !matches!(op, "==" | "!=") {
+        return None;
+    }
+    let equal = operands_equal(
+        borrowed_operand(left, state, bindings, model)?,
+        borrowed_operand(right, state, bindings, model)?,
+    )?;
+    Some(Value::Bool(equal == (op == "==")))
+}
+
+/// [`index_place`] for a key read in place, or `None` where it would fail.
+fn index_by_operand<'a>(base: &'a Value, key: Operand<'_>) -> Option<&'a Value> {
+    match (base, key) {
+        (Value::Map(values), Operand::Value(key)) => values.get(key),
+        (Value::Map(values), Operand::Int(key)) => values.get(&Value::Int(key)),
+        (Value::Map(values), Operand::Bool(key)) => values.get(&Value::Bool(key)),
+        (Value::Map(values), Operand::Enum { .. }) => values
+            .iter()
+            .find(|(candidate, _)| operands_equal(Operand::Value(candidate), key) == Some(true))
+            .map(|(_, value)| value),
+        (Value::Seq(values), Operand::Int(index) | Operand::Value(&Value::Int(index))) => {
+            usize::try_from(index)
+                .ok()
+                .and_then(|index| values.get(index))
+        }
+        _ => None,
+    }
+}
+
+/// `==` on two operands read in place, or `None` when either needs the
+/// relation normalization `==` applies first.
+fn operands_equal(left: Operand<'_>, right: Operand<'_>) -> Option<bool> {
+    let needs_normalizing = |operand: Operand<'_>| {
+        matches!(operand, Operand::Value(Value::Relation(_) | Value::Some(_)))
+    };
+    if needs_normalizing(left) || needs_normalizing(right) {
+        return None;
+    }
+    Some(match (left, right) {
+        (Operand::Value(value), other) | (other, Operand::Value(value)) => match other {
+            Operand::Value(other) => value == other,
+            Operand::Int(literal) => matches!(value, Value::Int(value) if *value == literal),
+            Operand::Bool(literal) => matches!(value, Value::Bool(value) if *value == literal),
+            Operand::Enum { type_name, member } => matches!(
+                value,
+                Value::Enum { type_name: t, member: m } if t == type_name && m == member
+            ),
+        },
+        (Operand::Int(left), Operand::Int(right)) => left == right,
+        (Operand::Bool(left), Operand::Bool(right)) => left == right,
+        (
+            Operand::Enum {
+                type_name: left_type,
+                member: left_member,
+            },
+            Operand::Enum {
+                type_name: right_type,
+                member: right_member,
+            },
+        ) => left_type == right_type && left_member == right_member,
+        _ => false,
+    })
 }
 
 /// The element `base[index]` addresses, with `Expr::Index`'s errors.
@@ -816,35 +1027,14 @@ fn eval_binary(
     old_state: Option<&State>,
     mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
-    if matches!(op, "and" | "or" | "=>") {
-        let mut local = bindings.clone();
-        let left = as_bool(eval_with_bindings_observing(
-            left,
-            state,
-            &mut local,
-            model,
-            old_state,
-            observed.as_deref_mut(),
-        )?)?;
-        match (op, left) {
-            ("and", false) => {
-                // Retain reached conjunct evidence even when its RHS is skipped.
-                *bindings = local;
-                return Ok(Value::Bool(false));
-            }
-            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
-            _ => {}
-        }
-        if !fsl_core::pattern_binding_flows(op, true) {
-            local.clone_from(bindings);
-        }
-        let right = as_bool(eval_with_bindings_observing(
-            right, state, &mut local, model, old_state, observed,
-        )?)?;
-        if fsl_core::pattern_binding_flows(op, false) {
-            *bindings = local;
-        }
-        return Ok(Value::Bool(right));
+    if is_connective(op) {
+        let binds = connective_may_bind(left) || connective_may_bind(right);
+        return eval_connective(
+            op, left, right, binds, state, bindings, model, old_state, observed,
+        );
+    }
+    if let Some(value) = compare_in_place(op, left, right, state, bindings, model) {
+        return Ok(value);
     }
     let left = eval_observing(
         left,
@@ -907,6 +1097,125 @@ fn eval_binary(
     }
 }
 
+fn is_connective(op: &str) -> bool {
+    matches!(op, "and" | "or" | "=>")
+}
+
+/// `left op right` for a connective, where `binds` is whether the spine it
+/// heads may add a binding ([`connective_may_bind`]), decided once where the
+/// spine is entered.
+///
+/// A connective operand is part of the same spine, so it is evaluated here
+/// again with the same `binds` rather than deciding it anew. Where `binds` is
+/// false, both operands are evaluated on `bindings` itself, which a scope copy
+/// would leave equal to `bindings`. Where it is true, every connective on the
+/// spine scopes its operands on a copy, including one whose own operands
+/// cannot bind.
+#[allow(clippy::too_many_arguments)]
+fn eval_connective(
+    op: &str,
+    left: &Expr,
+    right: &Expr,
+    binds: bool,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    if !binds {
+        let left = as_bool(eval_spine_operand(
+            left,
+            false,
+            state,
+            bindings,
+            model,
+            old_state,
+            observed.as_deref_mut(),
+        )?)?;
+        match (op, left) {
+            ("and", false) => return Ok(Value::Bool(false)),
+            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+            _ => {}
+        }
+        return Ok(Value::Bool(as_bool(eval_spine_operand(
+            right, false, state, bindings, model, old_state, observed,
+        )?)?));
+    }
+    let mut local = bindings.clone();
+    let left = as_bool(eval_spine_operand(
+        left,
+        true,
+        state,
+        &mut local,
+        model,
+        old_state,
+        observed.as_deref_mut(),
+    )?)?;
+    match (op, left) {
+        ("and", false) => {
+            // Retain reached conjunct evidence even when its RHS is skipped.
+            *bindings = local;
+            return Ok(Value::Bool(false));
+        }
+        ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+        _ => {}
+    }
+    if !fsl_core::pattern_binding_flows(op, true) {
+        local.clone_from(bindings);
+    }
+    let right = as_bool(eval_spine_operand(
+        right, true, state, &mut local, model, old_state, observed,
+    )?)?;
+    if fsl_core::pattern_binding_flows(op, false) {
+        *bindings = local;
+    }
+    Ok(Value::Bool(right))
+}
+
+/// An operand of [`eval_connective`]: a connective continues the spine with
+/// the same `binds`, under the stack guard [`eval`] would have taken for it;
+/// anything else is evaluated as [`eval_binary`]'s operands were.
+#[allow(clippy::too_many_arguments)]
+fn eval_spine_operand(
+    expr: &Expr,
+    binds: bool,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    match expr {
+        Expr::Binary { op, left, right } if is_connective(op) => recursion::guard(|| {
+            eval_connective(
+                op, left, right, binds, state, bindings, model, old_state, observed,
+            )
+        }),
+        _ => eval_with_bindings_observing(expr, state, bindings, model, old_state, observed),
+    }
+}
+
+/// Whether evaluating `expr` in place may add to the bindings it is given.
+///
+/// Only an `is` pattern binds, and only an `is` on the `and`/`or`/`=>`
+/// spine is evaluated in place: [`eval_observing`] evaluates every other
+/// operand, and an `and` or `is` it meets, on a copy of the bindings.
+fn connective_may_bind(expr: &Expr) -> bool {
+    let mut pending = vec![expr];
+    while let Some(expr) = pending.pop() {
+        match expr {
+            Expr::Is { .. } => return true,
+            Expr::Binary { op, left, right } if is_connective(op) => {
+                pending.push(left);
+                pending.push(right);
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn binder_values(
     binder: &Binder,
     state: &State,
@@ -914,12 +1223,22 @@ fn binder_values(
     model: &KernelModel,
     old_state: Option<&State>,
 ) -> Result<Vec<(Value, Bindings)>, RuntimeError> {
-    let values = match binder {
-        Binder::Typed { type_name, .. } => {
-            let type_name = qualified_type(type_name)?;
-            let ty = model.typed_binder_type(&type_name);
-            model.domain_values(&ty)?
-        }
+    Ok(binder_domain(binder, state, bindings, model, old_state)?
+        .into_iter()
+        .map(|value| (value, bindings.clone()))
+        .collect())
+}
+
+/// The values `binder` ranges over, in enumeration order.
+fn binder_domain(
+    binder: &Binder,
+    state: &State,
+    bindings: &Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Vec<Value>, RuntimeError> {
+    Ok(match binder {
+        Binder::Typed { type_name, .. } => model.typed_binder_domain(qualified_type(type_name)?)?,
         Binder::Range { lo, hi, .. } => {
             let mut local = bindings.clone();
             let lo = as_int(eval(lo, state, &mut local, model, old_state)?)?;
@@ -934,11 +1253,7 @@ fn binder_values(
                 _ => return Err(runtime_error("collection binder requires Set or Seq")),
             }
         }
-    };
-    Ok(values
-        .into_iter()
-        .map(|value| (value, bindings.clone()))
-        .collect())
+    })
 }
 
 fn binder_where_holds(
@@ -1060,13 +1375,13 @@ fn eval_relation_unary(
     }
 }
 
-fn qualified_type(name: &fsl_core::QualifiedName) -> Result<String, RuntimeError> {
+fn qualified_type(name: &fsl_core::QualifiedName) -> Result<&str, RuntimeError> {
     if name.namespace.is_some() {
         Err(runtime_error(
             "qualified type remained after kernel lowering",
         ))
     } else {
-        Ok(name.name.clone())
+        Ok(&name.name)
     }
 }
 
@@ -1460,10 +1775,17 @@ impl Monitor {
     /// Returns [`RuntimeError`] when parameter domains cannot be enumerated
     /// or a guard fails for a reason other than a partial operation.
     pub fn candidates(&self) -> Result<Vec<ActionCandidate>, RuntimeError> {
+        self.candidates_at(&self.state)
+    }
+
+    /// [`Monitor::candidates`] at `state` instead of the monitor's own
+    /// state, so a search enumerates a state it holds without copying it
+    /// into the monitor first.
+    fn candidates_at(&self, state: &State) -> Result<Vec<ActionCandidate>, RuntimeError> {
         let mut candidates = Vec::new();
         for action in &self.model.actions {
             for params in action_parameter_bindings(action, &self.model)? {
-                match evaluate_action_guards(action, &params, &self.state, &self.model) {
+                match evaluate_action_guards(action, &params, state, &self.model) {
                     Ok(Some(bindings)) => {
                         candidates.push(ActionCandidate::Enabled(EnabledAction {
                             action: action.name.clone(),
@@ -1508,29 +1830,42 @@ impl Monitor {
     }
 
     /// [`Monitor::step_candidate`] for a candidate that [`Monitor::candidates`]
-    /// just enumerated at the current state, for the refinement searches
-    /// (issue #1247). `step_selected` re-evaluates every guard to reject a
-    /// stale instance; here the instance's `bindings` are the ones those
-    /// guards produced at this very state, so the re-evaluation could only
-    /// recompute them. Not for an instance from another state (replay, a
-    /// caller-held `EnabledAction`): those go through `step_candidate`.
+    /// just enumerated at `state`, for the searches that enumerate and step
+    /// the same state (issue #1247, #1851). `step_selected` re-evaluates
+    /// every guard to reject a stale instance; here the instance's `bindings`
+    /// are the ones those guards produced at this very state, so the
+    /// re-evaluation could only recompute them. Not for an instance from
+    /// another state (replay, a caller-held `EnabledAction`): those go
+    /// through `step_candidate`.
     ///
     /// `state` is the state the candidate was enumerated at; the monitor's
     /// own state is neither read nor updated, so a search steps every
     /// candidate of one state without re-pointing the monitor at it each
     /// time. `step` is the logical step of `state`; the monitor's own
-    /// `step` is not used either.
+    /// `step` is not used either. `checked_bounds` is
+    /// [`Monitor::step_selected`]'s selection of implicit state bounds.
+    ///
+    /// `admitted` names the successors a search already holds as having
+    /// passed the state bounds and invariants, with `checked_bounds`, after
+    /// a step: see [`Monitor::execute_from`].
     fn step_enumerated(
         &self,
         state: &State,
         step: usize,
         candidate: &ActionCandidate,
+        checked_bounds: Option<&BTreeSet<String>>,
+        admitted: &mut dyn FnMut(&State) -> bool,
     ) -> Result<StepResult, RuntimeError> {
         let mut step = step;
         match candidate {
-            ActionCandidate::Enabled(instance) => {
-                Self::execute_from(&self.model, state, &mut step, instance, None)
-            }
+            ActionCandidate::Enabled(instance) => Self::execute_from(
+                &self.model,
+                state,
+                &mut step,
+                instance,
+                checked_bounds,
+                admitted,
+            ),
             ActionCandidate::GuardPartial(instance) => {
                 Ok(guard_partial_result(instance, state.clone(), step + 1))
             }
@@ -1656,6 +1991,7 @@ impl Monitor {
             &mut self.step,
             enabled,
             checked_bounds,
+            &mut |_| false,
         )?;
         if stepped.violation.is_none() {
             self.state = stepped.state.clone();
@@ -1669,6 +2005,12 @@ impl Monitor {
     /// pre-state instead of copying it out of the monitor first, and letting
     /// a search keep its own pre-state, saves the per-step `State` copies
     /// issue #1247 measured (`old_state`, and the `self.state` round trip).
+    ///
+    /// A successor `admitted` accepts is not checked against the state bounds
+    /// and invariants again, only against the `trans` properties and
+    /// `ensures` that depend on this step: the caller vouches that it passed
+    /// the state-only checks after an earlier step, and that the invariants
+    /// do not read `old()`, so they would pass again.
     #[allow(clippy::too_many_lines)]
     fn execute_from(
         model: &KernelModel,
@@ -1676,6 +2018,7 @@ impl Monitor {
         step: &mut usize,
         enabled: &EnabledAction,
         checked_bounds: Option<&BTreeSet<String>>,
+        admitted: &mut dyn FnMut(&State) -> bool,
     ) -> Result<StepResult, RuntimeError> {
         let action = model
             .actions
@@ -1717,27 +2060,33 @@ impl Monitor {
         let mut next = old_state.clone();
         next.extend(pending);
         *step += 1;
-        let violation =
-            match check_state_selected(&next, Some(old_state), model, *step, checked_bounds) {
-                Ok(violation) => violation,
-                Err(error) if is_partial_operation_error(&error) => {
-                    return Ok(StepResult {
-                        action: enabled.action.clone(),
-                        params: enabled.params.clone(),
-                        state: old_state.clone(),
-                        attempted_state: Some(next),
-                        violation: Some(Violation {
-                            kind: "partial_op".to_owned(),
-                            name: fsl_core::SyntheticName::PartialAction {
-                                action: &action.name,
-                            }
-                            .internal(),
-                            step: *step,
-                        }),
-                    });
-                }
-                Err(error) => return Err(error),
-            };
+        let violation = match check_successor(
+            &next,
+            old_state,
+            model,
+            *step,
+            checked_bounds,
+            admitted(&next),
+        ) {
+            Ok(violation) => violation,
+            Err(error) if is_partial_operation_error(&error) => {
+                return Ok(StepResult {
+                    action: enabled.action.clone(),
+                    params: enabled.params.clone(),
+                    state: old_state.clone(),
+                    attempted_state: Some(next),
+                    violation: Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: fsl_core::SyntheticName::PartialAction {
+                            action: &action.name,
+                        }
+                        .internal(),
+                        step: *step,
+                    }),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         if let Some(violation) = violation {
             return Ok(StepResult {
                 action: enabled.action.clone(),
@@ -2006,21 +2355,19 @@ pub struct BfsResult {
 }
 
 fn terminal_holds(monitor: &Monitor) -> Result<bool, RuntimeError> {
-    let Some(terminal) = &monitor.model.terminal else {
+    terminal_holds_at(&monitor.model, &monitor.state)
+}
+
+fn terminal_holds_at(model: &KernelModel, state: &State) -> Result<bool, RuntimeError> {
+    let Some(terminal) = &model.terminal else {
         return Ok(false);
     };
-    with_total_division(|| {
-        match eval(
-            terminal,
-            &monitor.state,
-            &mut Bindings::new(),
-            &monitor.model,
-            None,
-        )? {
+    with_total_division(
+        || match eval(terminal, state, &mut Bindings::new(), model, None)? {
             Value::Bool(value) => Ok(value),
             _ => Err(runtime_error("terminal expression must be Boolean")),
-        }
-    })
+        },
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2709,7 +3056,7 @@ pub fn check_refinement_with_budget(
         for (_, state_index, candidate) in candidates {
             let (state_id, state) = (layer[state_index].0, &layer[state_index].1);
             let alpha_before = &alphas[state_index];
-            let stepped = scratch.step_enumerated(state, step, &candidate)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate, None, &mut |_| false)?;
             let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
@@ -3244,76 +3591,103 @@ pub fn find_boundary_violation(
     depth: usize,
     budget: usize,
 ) -> Result<BoundaryProbe, RuntimeError> {
+    find_boundary_violation_reaching(model, &[], depth, budget).map(|(probe, _)| probe)
+}
+
+/// [`find_boundary_violation`], also deciding
+/// [`expression_reachability`]`(model, expressions, depth, budget)` on the
+/// same walk.
+///
+/// Both searches start at the same initial state, step the same candidates
+/// in the same order, skip the same violating successors, and stop at the
+/// same budget; they differ only in that this one stops at a finding. So the
+/// reachability is `Some` exactly when no finding stopped the walk, and it
+/// is then the one [`expression_reachability`] returns.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] as [`find_boundary_violation`] does.
+pub fn find_boundary_violation_reaching(
+    model: &KernelModel,
+    expressions: &[Expr],
+    depth: usize,
+    budget: usize,
+) -> Result<(BoundaryProbe, Option<Vec<Reachability>>), RuntimeError> {
+    // `visited` and the parent links are one packed `StateStore`, and each
+    // candidate is stepped from the state it was enumerated at without
+    // evaluating its guards again (issue #1851, the #1247 path). A queue
+    // node is a store id: the queue holds most of the states the search has
+    // reached, and a popped state is decoded from the store once.
     let mut scratch = Monitor::new(model.clone())?;
-    let initial_state = scratch.state.clone();
-    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial_state.clone()]);
-    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let initial_state = std::mem::take(&mut scratch.state);
+    let (mut visited, root) = trace::StateStore::with_root(&initial_state);
 
     if !model.actions.is_empty()
         && let Some(violation) = check_state_bounds(&initial_state, model, 0, None)?
     {
-        return Ok(BoundaryProbe {
-            finding: Some((
-                violation,
-                trace::reconstruct_trace(&initial_state, &parents),
-            )),
+        let probe = BoundaryProbe {
+            finding: Some((violation, visited.trace(root))),
             exhausted: false,
             states_explored: visited.len(),
-        });
+        };
+        return Ok((probe, None));
     }
 
-    while let Some((state, step)) = queue.pop_front() {
+    drop(initial_state);
+    // Every stored state but the root passed the state checks of the step
+    // that stored it; see `Monitor::execute_from`.
+    let admits_stored = !invariants_read_old(model);
+    let mut reachability = ReachabilityProbe::new(expressions);
+    let mut queue = VecDeque::from([(root, 0_usize)]);
+    while let Some((id, step)) = queue.pop_front() {
+        if step >= depth && reachability.is_decided() {
+            continue;
+        }
+        let state = visited.state(id);
+        reachability.visit(&state, &scratch.model);
         if step >= depth {
             continue;
         }
-        scratch.state = state.clone();
-        scratch.step = step;
-        for candidate in scratch.candidates()? {
+        for candidate in scratch.candidates_at(&state)? {
             let instance = candidate.instance();
-            scratch.state = state.clone();
-            scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
+            let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                admits_stored && visited.id_of(next).is_some_and(|id| id != root)
+            })?;
             if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
-                    let mut found_trace = trace::reconstruct_trace(&state, &parents);
+                    let mut found_trace = visited.trace(id);
                     found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
-                    return Ok(BoundaryProbe {
+                    let probe = BoundaryProbe {
                         finding: Some((violation, found_trace)),
                         exhausted: false,
                         states_explored: visited.len(),
-                    });
+                    };
+                    return Ok((probe, None));
                 }
                 continue;
             }
-            let child_state = stepped.state.clone();
-            if visited.insert(child_state.clone()) {
-                parents.insert(
-                    child_state.clone(),
-                    trace::ParentLink {
-                        parent: state.clone(),
-                        action: TraceAction {
-                            name: instance.action.clone(),
-                            params: instance.params.clone(),
-                        },
-                    },
-                );
+            if let Some(child) =
+                visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
+            {
                 if visited.len() >= budget {
-                    return Ok(BoundaryProbe {
+                    reachability.exhaust();
+                    let probe = BoundaryProbe {
                         finding: None,
                         exhausted: true,
                         states_explored: visited.len(),
-                    });
+                    };
+                    return Ok((probe, Some(reachability.finish())));
                 }
-                queue.push_back((child_state, step + 1));
+                queue.push_back((child, step + 1));
             }
         }
     }
-    Ok(BoundaryProbe {
+    let probe = BoundaryProbe {
         finding: None,
         exhausted: false,
         states_explored: visited.len(),
-    })
+    };
+    Ok((probe, Some(reachability.finish())))
 }
 
 /// The outcome of [`first_self_violation`]'s bounded self-consistency
@@ -3410,7 +3784,7 @@ fn first_self_violation(
         let state = &scratch.state;
         for candidate in scratch.candidates()? {
             let instance = candidate.instance();
-            let stepped = scratch.step_enumerated(state, step, &candidate)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate, None, &mut |_| false)?;
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = visited.trace(id);
                 found_trace.push(trace_step_from_result(step + 1, state, instance, &stepped));
@@ -3512,74 +3886,132 @@ pub fn expression_reachability(
     if expressions.is_empty() {
         return Ok(Vec::new());
     }
+    // Visited states are one packed `StateStore`, and each candidate is
+    // stepped from the state it was enumerated at without evaluating its
+    // guards again (issue #1851, the #1247 path). A queue node is a store
+    // id, decoded once when it is popped, as in `find_boundary_violation`.
     let mut scratch = Monitor::new(model.clone())?;
-    let initial_state = scratch.state.clone();
-    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial_state]);
-    let mut results: Vec<Option<Reachability>> = vec![None; expressions.len()];
-    let mut pending: BTreeSet<usize> = (0..expressions.len()).collect();
+    let initial_state = std::mem::take(&mut scratch.state);
+    let (mut visited, root) = trace::StateStore::with_root(&initial_state);
+    drop(initial_state);
+    // As in `find_boundary_violation_reaching`.
+    let admits_stored = !invariants_read_old(model);
+    let mut queue = VecDeque::from([(root, 0_usize)]);
+    let mut reachability = ReachabilityProbe::new(expressions);
 
-    'walk: while let Some((state, step)) = queue.pop_front() {
-        scratch.state = state.clone();
-        scratch.step = step;
+    'walk: while let Some((id, step)) = queue.pop_front() {
+        let state = visited.state(id);
+        reachability.visit(&state, &scratch.model);
+        if reachability.is_decided() {
+            break 'walk;
+        }
+        if step >= depth {
+            continue;
+        }
+        for candidate in scratch.candidates_at(&state)? {
+            let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                admits_stored && visited.id_of(next).is_some_and(|id| id != root)
+            })?;
+            if stepped.violation.is_some() {
+                continue;
+            }
+            let instance = candidate.instance();
+            if let Some(child) =
+                visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
+            {
+                if visited.len() >= budget {
+                    reachability.exhaust();
+                    break 'walk;
+                }
+                queue.push_back((child, step + 1));
+            }
+        }
+    }
+    Ok(reachability.finish())
+}
+
+/// Whether an invariant's value can depend on the pre-state of the step
+/// that reached the state it is checked in.
+pub(crate) fn invariants_read_old(model: &KernelModel) -> bool {
+    model
+        .invariants
+        .iter()
+        .any(|property| fsl_core::expression_reads_old(&property.expr))
+}
+
+/// The per-expression verdicts of a reachability walk
+/// ([`expression_reachability`], [`find_boundary_violation_reaching`]).
+struct ReachabilityProbe<'e> {
+    expressions: &'e [Expr],
+    results: Vec<Option<Reachability>>,
+    pending: BTreeSet<usize>,
+}
+
+impl<'e> ReachabilityProbe<'e> {
+    fn new(expressions: &'e [Expr]) -> Self {
+        Self {
+            expressions,
+            results: vec![None; expressions.len()],
+            pending: (0..expressions.len()).collect(),
+        }
+    }
+
+    /// Whether every expression has its verdict.
+    fn is_decided(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// Decide every pending expression that is true, or cannot be
+    /// evaluated, in the reached `state`.
+    fn visit(&mut self, state: &State, model: &KernelModel) {
         let mut resolved = Vec::new();
-        for &index in &pending {
+        for &index in &self.pending {
             let truth = with_total_division(|| {
                 eval(
-                    &expressions[index],
-                    &scratch.state,
+                    &self.expressions[index],
+                    state,
                     &mut Bindings::new(),
-                    &scratch.model,
+                    model,
                     None,
                 )
             })
             .and_then(as_bool);
             match truth {
                 Ok(true) => {
-                    results[index] = Some(Reachability::Reachable);
+                    self.results[index] = Some(Reachability::Reachable);
                     resolved.push(index);
                 }
                 Err(_) => {
-                    // Absorbed per-candidate, not propagated: see the doc
-                    // comment above. Fail-closed, unlike the pre-#729
-                    // behavior this replaces.
-                    results[index] = Some(Reachability::Exhausted);
+                    // Absorbed per-candidate, not propagated: see
+                    // `expression_reachability`'s doc comment. Fail-closed,
+                    // unlike the pre-#729 behavior this replaces.
+                    self.results[index] = Some(Reachability::Exhausted);
                     resolved.push(index);
                 }
                 Ok(false) => {}
             }
         }
         for index in resolved {
-            pending.remove(&index);
-        }
-        if pending.is_empty() {
-            break 'walk;
-        }
-        if step >= depth {
-            continue;
-        }
-        for candidate in scratch.candidates()? {
-            scratch.state = state.clone();
-            scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
-            if stepped.violation.is_some() {
-                continue;
-            }
-            if visited.insert(stepped.state.clone()) {
-                if visited.len() >= budget {
-                    for &index in &pending {
-                        results[index] = Some(Reachability::Exhausted);
-                    }
-                    break 'walk;
-                }
-                queue.push_back((stepped.state, step + 1));
-            }
+            self.pending.remove(&index);
         }
     }
-    Ok(results
-        .into_iter()
-        .map(|result| result.unwrap_or(Reachability::Unreachable))
-        .collect())
+
+    /// The walk stopped at its budget: every pending expression is undecided.
+    fn exhaust(&mut self) {
+        for &index in &self.pending {
+            self.results[index] = Some(Reachability::Exhausted);
+        }
+        self.pending.clear();
+    }
+
+    /// The verdicts, with every expression no reached state made true
+    /// [`Reachability::Unreachable`].
+    fn finish(self) -> Vec<Reachability> {
+        self.results
+            .into_iter()
+            .map(|result| result.unwrap_or(Reachability::Unreachable))
+            .collect()
+    }
 }
 
 /// Wrap `expr` in a nested `exists` quantifier over `binders`, outermost
@@ -3678,6 +4110,32 @@ fn vacuity_reachability_warning(
     })
 }
 
+/// How [`verification_warnings`] decides its reachability vacuity lanes.
+#[derive(Clone, Copy, Debug)]
+pub enum VacuityProbe<'a> {
+    /// Walk the budgeted reachability probe.
+    Run,
+    /// Report neither lane nor its truncation (`--vacuity ignore`).
+    Skip,
+    /// The probe's verdicts for [`vacuity_probe_expressions`], already
+    /// decided by a walk of the same model, depth and budget
+    /// ([`find_boundary_violation_reaching`]).
+    Walked(&'a [Reachability]),
+}
+
+/// The expressions the reachability vacuity probe asks about, in the order
+/// [`verification_warnings`] reads their verdicts: every implication
+/// antecedent candidate, then every `leadsTo` trigger.
+#[must_use]
+pub fn vacuity_probe_expressions(model: &KernelModel) -> Vec<Expr> {
+    let mut expressions: Vec<Expr> = vacuous_implication_candidates(model)
+        .into_iter()
+        .map(|(_, expression)| expression)
+        .collect();
+    expressions.extend(vacuous_leadsto_candidates(model));
+    expressions
+}
+
 /// Build the verification warnings shared by native and browser frontends.
 ///
 /// The two reachability vacuity lanes are computed here, with one shared,
@@ -3690,15 +4148,17 @@ fn vacuity_reachability_warning(
 /// coverage) owned by one function without giving `fsl-runtime` a solver
 /// dependency.
 ///
-/// `skip_vacuity_probe` skips the whole reachability BFS (neither
+/// [`VacuityProbe::Skip`] skips the whole reachability BFS (neither
 /// `vacuous_implication`/`vacuous_leadsto` nor `vacuity_probe_truncated` is
 /// computed or emitted) rather than computing it and filtering the result.
 /// INVARIANT (issue #729): only the `verify`/`sweep` CLI option parsing for
-/// `--vacuity ignore` may pass `true` here. No-cache baseline adapters reach
+/// `--vacuity ignore` may pass `Skip` here. No-cache baseline adapters reach
 /// that owner with the default `warn` policy. Other callers -- the wasm
 /// Worker (which has no `--vacuity` option), induction's internal BMC base pass, and
-/// tests -- must pass `false` so the probe always runs and `--vacuity
-/// error` never silently loses evidence it would otherwise catch.
+/// tests -- must pass `Run` (or `Walked` verdicts) so the probe always runs
+/// and `--vacuity error` never silently loses evidence it would otherwise
+/// catch. [`VacuityProbe::Walked`] reuses the verdicts of a walk that
+/// already decided them, which BMC's boundary pre-pass does.
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn verification_warnings(
@@ -3709,17 +4169,11 @@ pub fn verification_warnings(
     deadlock_state: Option<&State>,
     action_coverage: &BTreeMap<String, bool>,
     solver_vacuity: &[JsonValue],
-    skip_vacuity_probe: bool,
+    vacuity_probe: VacuityProbe<'_>,
 ) -> Vec<JsonValue> {
     let mut warnings = model_warnings(model);
-    if !skip_vacuity_probe {
+    if !matches!(vacuity_probe, VacuityProbe::Skip) {
         let implication_candidates = vacuous_implication_candidates(model);
-        let leadsto_candidates = vacuous_leadsto_candidates(model);
-        let mut probe_expressions: Vec<Expr> = implication_candidates
-            .iter()
-            .map(|(_, expression)| expression.clone())
-            .collect();
-        probe_expressions.extend(leadsto_candidates.iter().cloned());
         // A `RuntimeError` from the state-space walk itself (see
         // `expression_reachability`'s doc comment -- distinct from a
         // per-candidate evaluation error, which resolves `Exhausted`
@@ -3741,9 +4195,16 @@ pub fn verification_warnings(
         // run before vacuity warnings are ever rendered, so this path is
         // not reachable on any spec that reaches `verification_warnings` in
         // the first place. See `docs/design/DESIGN-vacuity.md`.
-        let probe_results =
-            expression_reachability(model, &probe_expressions, depth, CONCRETE_PROBE_BUDGET)
-                .unwrap_or_default();
+        let probe_results = match vacuity_probe {
+            VacuityProbe::Walked(results) => results.to_vec(),
+            VacuityProbe::Run | VacuityProbe::Skip => expression_reachability(
+                model,
+                &vacuity_probe_expressions(model),
+                depth,
+                CONCRETE_PROBE_BUDGET,
+            )
+            .unwrap_or_default(),
+        };
         for (candidate_index, (property_index, _)) in implication_candidates.iter().enumerate() {
             let property = &model.invariants[*property_index];
             let name = model.names().public_property(&property.name).into_string();
@@ -4395,7 +4856,30 @@ fn check_state_selected(
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<Option<Violation>, RuntimeError> {
     with_total_division(|| {
-        check_state_selected_inner(state, old_state, model, step, checked_bounds)
+        check_state_selected_inner(state, old_state, model, step, checked_bounds, false)
+    })
+}
+
+/// [`check_state_selected`] for a successor reached from `old_state`, which
+/// skips the state bounds and invariants when the successor is `admitted`
+/// (see [`Monitor::execute_from`]).
+fn check_successor(
+    state: &State,
+    old_state: &State,
+    model: &KernelModel,
+    step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    admitted: bool,
+) -> Result<Option<Violation>, RuntimeError> {
+    with_total_division(|| {
+        check_state_selected_inner(
+            state,
+            Some(old_state),
+            model,
+            step,
+            checked_bounds,
+            admitted,
+        )
     })
 }
 
@@ -4433,11 +4917,13 @@ fn check_state_selected_inner(
     model: &KernelModel,
     step: usize,
     checked_bounds: Option<&BTreeSet<String>>,
+    admitted: bool,
 ) -> Result<Option<Violation>, RuntimeError> {
-    if let Some(violation) = check_state_bounds(state, model, step, checked_bounds)? {
+    if !admitted && let Some(violation) = check_state_bounds(state, model, step, checked_bounds)? {
         return Ok(Some(violation));
     }
-    for property in &model.invariants {
+    let invariants: &[fsl_core::PropertyDef] = if admitted { &[] } else { &model.invariants };
+    for property in invariants {
         let mut bindings = Bindings::new();
         let value = match eval(&property.expr, state, &mut bindings, model, old_state) {
             Ok(value) => value,

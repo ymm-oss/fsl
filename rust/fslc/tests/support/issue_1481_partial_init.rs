@@ -39,7 +39,7 @@ fn observe_refine(implementation: &str, abstraction: &str, mapping: &str) -> (Va
     let fixture = Fixture::new(implementation);
     std::fs::write(fixture.0.join("abs.fsl"), abstraction).expect("write abstraction");
     std::fs::write(fixture.0.join("mapping.fsl"), mapping).expect("write mapping");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args([
             "refine",
             "model.fsl",
@@ -49,7 +49,6 @@ fn observe_refine(implementation: &str, abstraction: &str, mapping: &str) -> (Va
             "4",
         ])
         .current_dir(&fixture.0)
-        .env_remove("FSLC_CACHE")
         .output()
         .expect("run working-tree native refine");
     let actual: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

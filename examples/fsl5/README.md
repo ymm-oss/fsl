@@ -127,8 +127,8 @@ leadsTo checked to depth 8 only". Each `refine` reports `refines`, and the same
 with the `.ja.fsl` files in place of the `.en.fsl` ones.
 
 `refine` carries safety only. The progress policies of an upper layer are not
-pulled through these mappings: `preserve progress { respond <name> by … }`
-reads an identifier, and a policy ID such as `POL-LEAVE-001` is not one. Each
+pulled through these mappings, although `preserve progress { respond <ID> by … }`
+can name one by its policy ID, such as `POL-LEAVE-001` (#1782). Each
 layer states and verifies its own progress instead. The requirements layer
 refines the To-Be through a mapping file rather than an inline `implements`, so
 that the requirements files above stay as they are.
@@ -204,7 +204,7 @@ lint(指摘なし)、深さ 8 の verify を通り、`--engine induction` は `p
 `refine` も `refines` を返し、`.en.fsl` を `.ja.fsl` に替えても同じです。
 
 `refine` が運ぶのは安全性だけです。上の層の進行の方針は、この対応付けでは引き継ぎ
-ません。`preserve progress { respond <名前> by … }` は識別子を読みますが、
-`POL-LEAVE-001` のような方針の ID は識別子ではないためです。代わりに各層が自分の
+ません。`preserve progress { respond <ID> by … }` は `POL-LEAVE-001` のような方針の
+ID で方針を名指しできます(#1782)が、ここでは使わず、代わりに各層が自分の
 進行の性質を書いて検証します。要件層は、上の要件ファイルを変えないよう、インラインの
 `implements` ではなく対応付けのファイルで To-Be を詳細化します。

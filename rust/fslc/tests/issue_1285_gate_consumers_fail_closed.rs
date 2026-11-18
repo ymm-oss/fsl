@@ -17,6 +17,9 @@
 //! whose expectation does not hold), plus `guarded()`, the first with the
 //! guard that makes its forbidden hold.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -49,7 +52,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn run(cwd: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

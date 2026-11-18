@@ -37,9 +37,11 @@
 //! `issue_515_domain_check_false_green.rs`), run alongside this file rather
 //! than duplicated into it.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fslc_rust::outcome::{classify_kernel_key, project_kernel};
 use serde_json::Value;
@@ -53,7 +55,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

@@ -251,7 +251,7 @@ fn ledger_overlay_uses_captured_root_after_disk_changes() {
         depth: 2, deadlock: "ignore".into(), engine: "bmc".into(),
     });
     let request = LedgerReportRequest {
-        path: &path, depth: 2, deadlock_mode: "ignore", engine: "bmc",
+        path: &path, options: DerivedRunOptions::ledger(2, "ignore", "bmc"),
         impl_log: None, evidence_paths: &[], output_path: None,
     };
     let (rendered, status) = generate_unapproved_ledger_report_from_source(&request, &source, None);
@@ -433,14 +433,17 @@ fn dependency_edition_standalone_and_nested_whole_reports_keep_independent_findi
         };
         for kind in ["html", "ledger"] {
             let standalone = if kind == "html" {
-                run_html_report_with_timing(&path, 2, "ignore", "bmc", None, false)
+                run_html_report_with_timing(
+                    &path,
+                    DerivedRunOptions::html(2, "ignore", "bmc"),
+                    None,
+                    false,
+                )
             } else {
                 run_ledger_report_from_source(
                     &LedgerReportRequest {
                         path: &path,
-                        depth: 2,
-                        deadlock_mode: "ignore",
-                        engine: "bmc",
+                        options: DerivedRunOptions::ledger(2, "ignore", "bmc"),
                         impl_log: None,
                         evidence_paths: &[],
                         output_path: None,
@@ -817,7 +820,7 @@ fn dependency_edition_private_adapter_executes_all_assigned_rows() {
         "fsl 99\n"
     );
     assert_eq!(
-        log.borrow().warnings,
+        log.lock().warnings,
         vec![
             json!({"code":"unsupported_edition","kind":"parse","severity":"warning","message":"unsupported syntax edition 'fsl 99'; supported editions: 4, 5 at 1:1","loc":{"file":"dep.fsl","line":1,"column":1}})
         ]

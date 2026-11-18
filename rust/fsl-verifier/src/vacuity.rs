@@ -24,10 +24,11 @@ use fsl_core::{
     ActionDef, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
     KernelStatement as Statement, PropertyDef, Span, integer_range_state_references,
 };
-use fsl_solver::{SatResult, SmtSolver};
+use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{FailureClass, eval, property_evaluation_status};
+use crate::scoped_query::{OnUnknown, PopFailure, scoped_check};
 use crate::transition::{
     ActionInstance, action_guards, action_guards_in, classified_action_guard_definedness_in,
     init_constraints, initial_state, transition_constraint,
@@ -776,18 +777,8 @@ pub(crate) async fn proven_unsat<S: SmtSolver>(
     solver: &mut S,
     terms: &[S::Term],
 ) -> Result<bool, VerifyError> {
-    solver.push();
-    for term in terms {
-        if let Err(error) = solver.assert(term) {
-            solver.pop(1)?;
-            return Err(error.into());
-        }
-    }
-    let checked = solver.check().await;
-    let popped = solver.pop(1);
-    let result = checked?;
-    popped?;
-    Ok(matches!(result, SatResult::Unsat))
+    let result = scoped_check(solver, terms, PopFailure::OverAssert).await?;
+    OnUnknown::NotProved.proves_unsat(result)
 }
 
 /// Drop `always_true_requires` findings for actions that were never enabled

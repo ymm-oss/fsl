@@ -2,9 +2,11 @@
 
 //! Named predicates must pass through kernel lowering in both counterfactual helpers.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
 use std::path::Path;
-use std::process::Command;
 
 const NAMED_GUARD: &str = r"spec C {
   type R = 0..1
@@ -29,7 +31,7 @@ fn run_explain(source: &str) -> Value {
         std::thread::current().id()
     ));
     std::fs::write(&path, source).expect("write explain fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "explain",
             path.to_str().expect("UTF-8 fixture"),

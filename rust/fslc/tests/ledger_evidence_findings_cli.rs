@@ -15,9 +15,12 @@
 //! a passing or verdict-less (gate-failure) source is not turned into a
 //! false positive.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
@@ -51,7 +54,7 @@ const SPEC: &str = r#"spec LedgerProbe {
 "#;
 
 fn run(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(cwd)
         .output()

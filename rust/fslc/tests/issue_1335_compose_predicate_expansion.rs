@@ -8,6 +8,9 @@
 //! constant expression in a range); unused invalid defs can silently pass.
 //! Glue predicates here use only compose-local state, independently of #1334.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
 

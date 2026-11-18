@@ -10,6 +10,9 @@
 //! assurance and locations. Only observed run-resource measurements are masked,
 //! with live presence/type checks on BOTH outputs; see `mask_cost`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
 #[path = "support/compose_owner_refusal.rs"]

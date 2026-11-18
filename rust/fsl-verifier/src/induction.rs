@@ -22,6 +22,7 @@ use crate::eval::{
     eval_with_bindings_in, evaluation_status, property_evaluation_status_in,
 };
 use crate::liveness::{leadsto_bindings, leadsto_condition, leadsto_condition_in};
+use crate::scoped_query::{OnUnknown, PopFailure, scoped_check, scoped_query};
 use crate::trace::{has_missing_sequence_slots, project_trace};
 use crate::transition::{
     ActionInstance, action_has_partial_operation_candidate, action_instances,
@@ -492,21 +493,14 @@ pub(crate) async fn partial_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Option<Vec<fsl_core::TraceStep>>, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(condition) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let outcome = match solver.check().await {
-        Ok(SatResult::Sat) => {
+    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+        if OnUnknown::Fail("solver returned unknown in induction").proves_unsat(result)? {
+            Ok(None)
+        } else {
             project_trace(solver, model, states, choices, instances, upto).map(Some)
         }
-        Ok(SatResult::Unsat) => Ok(None),
-        Ok(SatResult::Unknown) => Err(VerifyError::solver("solver returned unknown in induction")),
-        Err(error) => Err(error.into()),
-    };
-    solver.pop(1)?;
-    outcome
+    })
+    .await
 }
 
 fn key_domain_cti(name: String, k: usize, trace: Vec<fsl_core::TraceStep>) -> InductionCti {
@@ -1772,24 +1766,12 @@ pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
     ranked.into_iter().take(result.proofs.len()).collect()
 }
 
-async fn rank_measure_path_is_reachable<S: SmtSolver>(
+pub(crate) async fn rank_measure_path_is_reachable<S: SmtSolver>(
     solver: &mut S,
     path: &S::Term,
 ) -> Result<bool, VerifyError> {
-    solver.push();
-    let result: Result<SatResult, VerifyError> = async {
-        solver.assert(path)?;
-        Ok(solver.check().await?)
-    }
-    .await;
-    solver.pop(1)?;
-    match result? {
-        SatResult::Sat => Ok(true),
-        SatResult::Unsat => Ok(false),
-        SatResult::Unknown => Err(VerifyError::solver(
-            "solver returned unknown in ranking proof",
-        )),
-    }
+    let result = scoped_check(solver, [path], PopFailure::First).await?;
+    Ok(!OnUnknown::Fail("solver returned unknown in ranking proof").proves_unsat(result)?)
 }
 
 /// Preserve the pre-#1481 error for a reached read with no
@@ -2323,6 +2305,8 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
             )?;
             let measure0 = int_term(&measure0)?.clone();
 
+            // Keep inline: lt must be built after push and assert(pending).
+            // scoped_query takes already-built terms; moving lt changes Z3 cost.
             solver.push();
             solver.assert(&pending)?;
             solver.assert(&solver.lt(&measure0, &solver.int_value(0))?)?;
@@ -2373,20 +2357,29 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     .copied()
                     .filter(|&index| !model.actions[instances[index].action_index].fair)
                     .collect::<Vec<_>>();
-                if !nonfair.is_empty() {
-                    solver.push();
-                    solver.assert(&pending)?;
-                    match solver.check().await? {
-                        SatResult::Sat => {
+                if !nonfair.is_empty()
+                    && let Some(failure) = scoped_query(
+                        solver,
+                        [&pending],
+                        PopFailure::First,
+                        |solver, result| {
+                            if OnUnknown::Fail("solver returned unknown in ranking proof")
+                                .proves_unsat(result)?
+                            {
+                                return Ok(None);
+                            }
                             let measure_value = model_int(solver, &measure0)?;
-                            let trace =
-                                project_trace(solver, model, &[state0], &[], &instances, 0)?;
-                            solver.pop(1)?;
-                            return Ok(RankedLeadstoResult {
-                                proofs,
-                                failure: Some(RankFailure {
+                            let trace = project_trace(
+                                solver,
+                                model,
+                                std::slice::from_ref(&state0),
+                                &[],
+                                &instances,
+                                0,
+                            )?;
+                            Ok(Some(RankFailure {
                                     name: property.name.clone(),
-                                    bindings: binding.concrete,
+                                    bindings: binding.concrete.clone(),
                                     measure: measure_expr.clone(),
                                     kind: violation_kind::PROGRESS_ACTION_NOT_FAIR.to_owned(),
                                     measure_value: Some(measure_value),
@@ -2401,17 +2394,15 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                                     ),
                                     helpful: property.helpful.clone(),
                                     helpful_actions: helpful_witnesses::<S>(&nonfair, &instances),
-                                }),
-                            });
-                        }
-                        SatResult::Unsat => solver.pop(1)?,
-                        SatResult::Unknown => {
-                            solver.pop(1)?;
-                            return Err(VerifyError::solver(
-                                "solver returned unknown in ranking proof",
-                            ));
-                        }
-                    }
+                            }))
+                        },
+                    )
+                    .await?
+                    {
+                        return Ok(RankedLeadstoResult {
+                            proofs,
+                            failure: Some(failure),
+                        });
                 }
             }
 
@@ -2491,13 +2482,18 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                         solver.not(&q1)?,
                         solver.not(&enabled1)?,
                     ])?;
-                    solver.push();
-                    solver.assert(&flickers)?;
-                    match solver.check().await? {
-                        SatResult::Sat => {
+                    if let Some(failure) = scoped_query(
+                        solver,
+                        [&flickers],
+                        PopFailure::First,
+                        |solver, result| {
+                            if OnUnknown::Fail("solver returned unknown in ranking proof")
+                                .proves_unsat(result)?
+                            {
+                                return Ok(None);
+                            }
                             for state in [&state0, &state1] {
                                 if has_missing_sequence_slots(solver, state)? {
-                                    solver.pop(1)?;
                                     return Err(VerifyError::new(
                                         "model sequence length exceeds capacity",
                                     ));
@@ -2506,7 +2502,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                             let trace = project_trace(
                                 solver,
                                 model,
-                                &[state0, state1],
+                                &[state0.clone(), state1.clone()],
                                 std::slice::from_ref(&choice),
                                 &instances,
                                 1,
@@ -2515,7 +2511,6 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                                 .get(1)
                                 .and_then(|step| step.action.as_ref())
                                 .map(|action| action.name.clone());
-                            solver.pop(1)?;
                             let witnesses = helpful_witnesses::<S>(
                                 std::slice::from_ref(&sticky_index),
                                 &instances,
@@ -2523,11 +2518,9 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                             let witness_name = witnesses
                                 .first()
                                 .map_or_else(String::new, |witness| witness.action.clone());
-                            return Ok(RankedLeadstoResult {
-                                proofs,
-                                failure: Some(RankFailure {
+                            Ok(Some(RankFailure {
                                     name: property.name.clone(),
-                                    bindings: binding.concrete,
+                                    bindings: binding.concrete.clone(),
                                     measure: measure_expr.clone(),
                                     kind: violation_kind::HELPFUL_ACTION_ENABLEDNESS_NOT_STICKY
                                         .to_owned(),
@@ -2543,16 +2536,15 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                                     ),
                                     helpful: property.helpful.clone(),
                                     helpful_actions: witnesses,
-                                }),
-                            });
-                        }
-                        SatResult::Unsat => solver.pop(1)?,
-                        SatResult::Unknown => {
-                            solver.pop(1)?;
-                            return Err(VerifyError::solver(
-                                "solver returned unknown in ranking proof",
-                            ));
-                        }
+                            }))
+                        },
+                    )
+                    .await?
+                    {
+                        return Ok(RankedLeadstoResult {
+                            proofs,
+                            failure: Some(failure),
+                        });
                     }
                 }
             }
@@ -2634,6 +2626,8 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 deadlock_context.as_ref(),
             )?;
             let measure_dl = int_term(&measure_dl)?.clone();
+            // Keep inline: each not is built between assertions in the scope.
+            // Prebuilding the terms for scoped_query changes Z3's query history.
             solver.push();
             solver.assert(&p_dl)?;
             solver.assert(&solver.not(&q_dl)?)?;
@@ -2702,13 +2696,18 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     let selected = solver.equal(&choice, &solver.int_value(i64_index(index)?))?;
                     let failure =
                         solver.and(&[pending.clone(), selected, solver.not(&progresses)?])?;
-                    solver.push();
-                    solver.assert(&failure)?;
-                    match solver.check().await? {
-                        SatResult::Sat => {
+                    if let Some(failure) = scoped_query(
+                        solver,
+                        [&failure],
+                        PopFailure::First,
+                        |solver, result| {
+                            if OnUnknown::Fail("solver returned unknown in ranking proof")
+                                .proves_unsat(result)?
+                            {
+                                return Ok(None);
+                            }
                             for state in [&state0, &state1] {
                                 if has_missing_sequence_slots(solver, state)? {
-                                    solver.pop(1)?;
                                     return Err(VerifyError::new(
                                         "model sequence length exceeds capacity",
                                     ));
@@ -2719,17 +2718,14 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                             let trace = project_trace(
                                 solver,
                                 model,
-                                &[state0, state1],
+                                &[state0.clone(), state1.clone()],
                                 std::slice::from_ref(&choice),
                                 &instances,
                                 1,
                             )?;
-                            solver.pop(1)?;
-                            return Ok(RankedLeadstoResult {
-                                proofs,
-                                failure: Some(RankFailure {
+                            Ok(Some(RankFailure {
                                     name: property.name.clone(),
-                                    bindings: binding.concrete,
+                                    bindings: binding.concrete.clone(),
                                     measure: measure_expr.clone(),
                                     kind: violation_kind::NON_DECREASING_ACTION.to_owned(),
                                     measure_value: None,
@@ -2744,16 +2740,15 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                                     ),
                                     helpful: Vec::new(),
                                     helpful_actions: Vec::new(),
-                                }),
-                            });
-                        }
-                        SatResult::Unsat => solver.pop(1)?,
-                        SatResult::Unknown => {
-                            solver.pop(1)?;
-                            return Err(VerifyError::solver(
-                                "solver returned unknown in ranking proof",
-                            ));
-                        }
+                            }))
+                        },
+                    )
+                    .await?
+                    {
+                        return Ok(RankedLeadstoResult {
+                            proofs,
+                            failure: Some(failure),
+                        });
                     }
                 }
             } else {
@@ -2770,13 +2765,18 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     let selected = solver.equal(&choice, &solver.int_value(i64_index(index)?))?;
                     let failure =
                         solver.and(&[pending.clone(), selected, solver.not(&allowed)?])?;
-                    solver.push();
-                    solver.assert(&failure)?;
-                    match solver.check().await? {
-                        SatResult::Sat => {
+                    if let Some(failure) = scoped_query(
+                        solver,
+                        [&failure],
+                        PopFailure::First,
+                        |solver, result| {
+                            if OnUnknown::Fail("solver returned unknown in ranking proof")
+                                .proves_unsat(result)?
+                            {
+                                return Ok(None);
+                            }
                             for state in [&state0, &state1] {
                                 if has_missing_sequence_slots(solver, state)? {
-                                    solver.pop(1)?;
                                     return Err(VerifyError::new(
                                         "model sequence length exceeds capacity",
                                     ));
@@ -2816,17 +2816,14 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                             let trace = project_trace(
                                 solver,
                                 model,
-                                &[state0, state1],
+                                &[state0.clone(), state1.clone()],
                                 std::slice::from_ref(&choice),
                                 &instances,
                                 1,
                             )?;
-                            solver.pop(1)?;
-                            return Ok(RankedLeadstoResult {
-                                proofs,
-                                failure: Some(RankFailure {
+                            Ok(Some(RankFailure {
                                     name: property.name.clone(),
-                                    bindings: binding.concrete,
+                                    bindings: binding.concrete.clone(),
                                     measure: measure_expr.clone(),
                                     kind: kind.to_owned(),
                                     measure_value: None,
@@ -2841,16 +2838,15 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                                         &helpful_idx,
                                         &instances,
                                     ),
-                                }),
-                            });
-                        }
-                        SatResult::Unsat => solver.pop(1)?,
-                        SatResult::Unknown => {
-                            solver.pop(1)?;
-                            return Err(VerifyError::solver(
-                                "solver returned unknown in ranking proof",
-                            ));
-                        }
+                            }))
+                        },
+                    )
+                    .await?
+                    {
+                        return Ok(RankedLeadstoResult {
+                            proofs,
+                            failure: Some(failure),
+                        });
                     }
                 }
             }

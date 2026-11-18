@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Intended recursive semantics, not preservation of unsupported-engine errors.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[allow(dead_code)]
 #[path = "support/collection_replay.rs"]
 mod support;

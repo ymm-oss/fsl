@@ -17,8 +17,10 @@
 //! Every detector names the mutation it kills; the main one is restoring the
 //! pre-#1218 skip of the whole replay under overrides (`origin/main`).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,7 +48,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn run_with_env(arguments: &[&str], env: &[(&str, &Path)]) -> (Value, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(arguments).current_dir(repository_root());
     for (key, value) in env {
         command.env(key, value);

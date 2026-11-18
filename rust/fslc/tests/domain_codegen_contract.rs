@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
@@ -59,7 +61,7 @@ fn portable_relative_path(path: &Path) -> String {
 fn generated_digest(target: &str) -> String {
     let root = root();
     let directory = scratch_dir(&format!("target-{target}"));
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "domain",
             "generate",
@@ -98,7 +100,7 @@ fn assert_generation_succeeds(spec: &str, target: &str) {
         .expect("fixture stem")
         .to_string_lossy();
     let directory = scratch_dir(&format!("corpus-{stem}-{target}"));
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["domain", "generate", spec, "--target", target, "-o"])
         .arg(directory)
         .current_dir(root)
@@ -121,7 +123,7 @@ fn domain_testgen_digest_with(extra: &[&str]) -> String {
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).expect("create domain testgen directory");
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "domain",
             "testgen",
@@ -225,7 +227,7 @@ fn every_valid_domain_corpus_entry_generates_all_five_targets() {
 /// command; a domain scaffold must name the one that regenerates it.
 #[test]
 fn domain_testgen_unwired_guidance_names_domain_testgen() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "domain",
             "testgen",

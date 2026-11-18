@@ -25,8 +25,11 @@
 //! `__`. Detector notes below that name `a__b` describe the fixture as it was
 //! when the defect was found.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -57,7 +60,7 @@ fn scratch_dir(name: &str) -> PathBuf {
 }
 
 fn fslc(arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(root())
         .output()

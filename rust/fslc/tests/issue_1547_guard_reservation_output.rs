@@ -2,13 +2,15 @@
 
 //! Accepted compose output pins the source-separated binding names from #1573.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 fn assert_approved_explain(file: &str, expected: &str) {
     let directory =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/issue_1547_guard_reservations");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["explain", file])
         .current_dir(&directory)
         .output()

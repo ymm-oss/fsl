@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// Every file this CLI process read as a command input, by file identity rather
-// than spelling, so `./s.fsl`, a hard link or a symlink to `s.fsl` all match.
-// `None` until `record_inputs`: in-process unit tests that run several commands
-// in one process would otherwise see each other's inputs.
-static INPUTS: Mutex<Option<BTreeSet<FileIdentity>>> = Mutex::new(None);
-
+// A command input is recorded by file identity rather than spelling, so
+// `./s.fsl`, a hard link or a symlink to `s.fsl` all match.
 #[cfg(unix)]
-type FileIdentity = (u64, u64);
+pub(crate) type FileIdentity = (u64, u64);
 
 #[cfg(not(unix))]
-type FileIdentity = PathBuf;
+pub(crate) type FileIdentity = PathBuf;
 
 // Follows symlinks: an input is read through them, and an output named by one
 // would replace what it names if the final-component refusal were removed.
@@ -36,19 +30,14 @@ fn file_identity(path: &Path) -> io::Result<FileIdentity> {
     fs::canonicalize(path)
 }
 
-/// Start recording inputs for this process's one command invocation.
-pub(super) fn record_inputs() {
-    *INPUTS.lock().unwrap_or_else(PoisonError::into_inner) = Some(BTreeSet::new());
-}
-
-/// Record a file that was read as an input, after the read succeeded.
+/// Record a file that was read as an input of this invocation, after the read
+/// succeeded.
 pub(super) fn note_input(path: &Path) {
-    let mut inputs = INPUTS.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(inputs) = inputs.as_mut()
-        && let Ok(identity) = file_identity(path)
-    {
-        inputs.insert(identity);
-    }
+    crate::invocation::with_inputs(|inputs| {
+        if let Ok(identity) = file_identity(path) {
+            inputs.insert(identity);
+        }
+    });
 }
 
 /// Refuse an output target that is the same file as a recorded input, so a
@@ -59,12 +48,7 @@ pub(super) fn refuse_input_target(path: &Path) -> io::Result<()> {
     let Ok(identity) = file_identity(path) else {
         return Ok(());
     };
-    if INPUTS
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-        .is_some_and(|inputs| inputs.contains(&identity))
-    {
+    if crate::invocation::with_inputs(|inputs| inputs.contains(&identity)).unwrap_or(false) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "output target is an input of this command",

@@ -130,6 +130,7 @@ pub use refinement::{
     parse_refinement, parse_refinement_with_options, pull_refinement_leadsto,
     requirements_implements, requirements_implements_with_bounds,
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
+    unknown_abstract_leadsto_message,
 };
 pub use resolve_aliases::lower_requirements;
 pub use rule_guards::{GuardConflict, RULE_CONFLICT_UNSATISFIABLE_GUARD};
@@ -2007,6 +2008,21 @@ pub(crate) fn visit_expr_children(
         Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {}
     }
     Ok(())
+}
+
+/// Whether `expr` reads a pre-state: an `old(...)` anywhere in it, binder
+/// bounds and filters included.
+#[must_use]
+pub fn expression_reads_old(expr: &Expr) -> bool {
+    if matches!(expr, Expr::UnaryNamed { name, .. } if name == "old") {
+        return true;
+    }
+    let mut found = false;
+    let _ = visit_expr_children(expr, &mut |child| {
+        found = found || expression_reads_old(child);
+        Ok(())
+    });
+    found
 }
 
 /// Return the first source span of a named expression call, including nested calls.

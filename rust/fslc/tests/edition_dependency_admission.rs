@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_dependency_cases.rs"]
 mod cases;
 #[path = "support/edition_cases.rs"]
@@ -30,7 +33,7 @@ fn dependency_edition_cli_compose_and_implements_refusals_and_mixed_controls() {
             } else {
                 cases::expected_verify(&row, &fixture, &fixture.child)
             };
-            let output = common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args);
+            let output = common::command(fslc_cli::command(), &scratch.0, args);
             let _ = cases::versioned_native_value(common::value(&output));
             let label = format!("{}/{cmd}", row.id);
             results.output(

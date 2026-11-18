@@ -16,8 +16,10 @@
 //! transition`). That makes the fixture's compensation actually reachable,
 //! so control 2 below is non-vacuous, not merely "never fires either way".
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fsl_core::{FsResolver, build_model, domain_kernel_source, lower_domain, parse_kernel_source};
 use fsl_runtime::{Monitor, bfs, verification_warnings};
@@ -185,7 +187,7 @@ fn rendered_kernel_source_carries_both_requires_and_calibration_detects_their_ab
 }
 
 fn run_cli(args: &[&str]) -> (i32, Value) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .current_dir(repo_root())
         .args(args)
         .output()
@@ -303,7 +305,7 @@ fn compensation_never_enabled_detector_changes_when_trigger_guard_is_removed() {
         None,
         &result.action_coverage,
         &[],
-        false,
+        fsl_runtime::VacuityProbe::Run,
     );
     assert!(
         !warnings.iter().any(|warning| {

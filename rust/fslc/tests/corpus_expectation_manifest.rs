@@ -39,8 +39,10 @@
 //!   skip the directory: every file there names its own `inject`/
 //!   `expect-detector` header.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -379,7 +381,7 @@ fn every_injected_fixture_declares_its_detector_premise() {
 }
 
 fn run_fslc(args: &[String]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

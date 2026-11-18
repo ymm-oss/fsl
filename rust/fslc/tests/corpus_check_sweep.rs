@@ -51,6 +51,9 @@
 //! must satisfy. Their class definition is production code
 //! (`fslc_rust::outcome::outcome_class`), not a list in this file.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
@@ -98,7 +101,7 @@ const GOVERNANCE_FIXTURE_EXCLUSIONS: &[(&str, &str)] = &[
 /// `result`/exit conservation law in
 /// `check_result_and_exit_status_never_contradict`.
 fn run_check(path: &Path) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["check", path.to_str().expect("utf8 path")])
         .current_dir(root())
         .output()
@@ -123,7 +126,7 @@ fn run_check(path: &Path) -> (Value, i32) {
 /// conservation law. These arguments also match the verify side of the
 /// ledger comparison below.
 fn run_verify(path: &Path) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             path.to_str().expect("utf8 path"),
@@ -251,9 +254,9 @@ const GALLERY_FAILURE_FIXTURE: &str = "error/adversarial gallery fixture: its su
      `check`/`verify` failure whose documented output and tests pin these IDs";
 const LINT_UNREADABLE_DIALECT: &str = "`lint` cannot read this dialect yet (#609)";
 const POLICY_NAMED_BY_PRESERVE_PROGRESS: &str = "the policy IDs are the names the \
-     requirements->business refinement's `preserve progress { respond <name> by ... }` targets, \
-     and `respond` takes an identifier (#1782), so a canonical hyphenated POL ID would drop \
-     that liveness check";
+     requirements->business refinement's `preserve progress { respond <name> by ... }` targets; \
+     `respond` reads a canonical hyphenated POL ID since #1782, but renaming them changes the \
+     business spec, the refinement and their README together, which is a separate change";
 const GOVERNANCE_SATISFIED_BY_SCOPE_RESCAN: &str = "lint false positive (#1788): on a \
      `CTRL-EXPENSE-001 is satisfied_by policy ...` line the canonical control ID is accepted, \
      but its scope segment is rescanned as a second control ID `EXPENSE-001`";
@@ -883,7 +886,7 @@ fn production_verdict_table_matches_the_public_exit_contract() {
 /// prints rendered Markdown (not JSON) to stdout when `-o` is omitted, so
 /// unlike `run_check` there is no envelope here to parse.
 fn run_exit_status(args: &[&str]) -> i32 {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

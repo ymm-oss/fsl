@@ -20,6 +20,9 @@
 //! ever opening the FIFO path at all) reproduced directly, proving cleanup
 //! still terminates.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[cfg(unix)]
 #[path = "support/fifo_snapshot.rs"]
 mod fifo_snapshot;
@@ -135,7 +138,7 @@ fn release_writer_completes_when_cli_never_opens_the_path() {
     );
     let path = fixture.fifo.to_string_lossy().into_owned();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["mutate", &path, "--this-option-does-not-exist"])
         .current_dir(fifo_snapshot::root())
         .output()

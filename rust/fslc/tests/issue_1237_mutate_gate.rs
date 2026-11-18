@@ -10,8 +10,10 @@
 //! catalog: `killed.jsonl` has three mutants the net of checks kills, and
 //! `mixed.jsonl` adds one survivor (kill rate exactly 0.75).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -29,7 +31,7 @@ fn workspace_root() -> &'static Path {
 }
 
 fn run_raw(args: &[&str]) -> (Vec<u8>, String, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(workspace_root())
         .output()

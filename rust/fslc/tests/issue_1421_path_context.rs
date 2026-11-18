@@ -6,6 +6,9 @@
 //! before v5/v6 exist. Legacy signature compatibility and old-binary rejection are
 //! separate controls, not simulated by this test.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,7 +35,7 @@ fn repository_file(relative: &str) -> PathBuf {
 }
 
 fn run(cwd: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

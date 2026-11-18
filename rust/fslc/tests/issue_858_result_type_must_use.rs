@@ -24,14 +24,15 @@ use std::path::{Path, PathBuf};
 #[path = "support/outcome_census_rule.rs"]
 mod outcome_census_rule;
 
-/// The 31 public type names this change annotates: #858's enumeration minus
+/// The 33 public type names this change annotates: #858's enumeration minus
 /// the exclusions below, plus `BoundedLivenessViolation` and
 /// `LeadsToViolation`, which the extended `*Violation` rule found and #858's
 /// curated table missed, `RefinementVerdict` (#1245), `Verdict` (#901),
-/// `TraceGate` (#1285), and `ProcessFormOutcome` (the migration's process-form
-/// rewrite or refusal). Each must carry `#[must_use]` on the TYPE, because on
-/// the function it is redundant against `Result` and closes nothing.
-const ANNOTATED: [&str; 31] = [
+/// `TraceGate` (#1285), `ProcessFormOutcome` (the migration's process-form
+/// rewrite or refusal), and `RefineOutcome` and `RefineFailure` (#1870). Each
+/// must carry `#[must_use]` on the TYPE, because on the function it is
+/// redundant against `Result` and closes nothing.
+const ANNOTATED: [&str; 33] = [
     // fsl-runtime
     "Violation",
     "StepResult",
@@ -68,12 +69,14 @@ const ANNOTATED: [&str; 31] = [
     "Verdict",
     "TraceGate",
     "ProcessFormOutcome",
+    "RefineOutcome",
+    "RefineFailure",
 ];
 
-/// `ANNOTATED` holds 31 distinct names but 32 declarations: `ReachableWitness`
+/// `ANNOTATED` holds 33 distinct names but 34 declarations: `ReachableWitness`
 /// is declared once in `fsl-runtime` and once in `fsl-verifier`, and both must
 /// carry the attribute.
-const ANNOTATED_DECLARATIONS: usize = 32;
+const ANNOTATED_DECLARATIONS: usize = 34;
 
 /// Types deliberately left un-annotated, each with the reason. A type moved
 /// off this list must gain the attribute; a type added to it must state why.
@@ -109,9 +112,9 @@ fn read_source(path: &Path) -> String {
 
 /// What the rule below actually matches today. #858 reports 33 types from a
 /// hand-curated table; this rule -- #858's, extended with the `*Violation`
-/// suffix -- selects 19, all of which are in `ANNOTATED`. Both numbers are pinned so
+/// suffix -- selects 20, all of which are in `ANNOTATED`. Both numbers are pinned so
 /// neither the curated decision nor the detector can drift unnoticed.
-const DISCOVERED: [&str; 19] = [
+const DISCOVERED: [&str; 20] = [
     "BfsResult",
     "BmcResult",
     "BmcViolation",
@@ -125,6 +128,7 @@ const DISCOVERED: [&str; 19] = [
     "ProcessFormOutcome",
     "ProgressCheck",
     "RankedLeadstoResult",
+    "RefineOutcome",
     "RefinementVerdict",
     "SatResult",
     "StepResult",

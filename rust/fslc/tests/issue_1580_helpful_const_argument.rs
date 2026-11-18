@@ -3,6 +3,9 @@
 
 //! #1580: helpful arguments resolve constants and bare enum members, not state.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 #[allow(dead_code)]
 mod compose_scratch;

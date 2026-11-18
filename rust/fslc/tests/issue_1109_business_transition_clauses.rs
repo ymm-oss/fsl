@@ -13,8 +13,10 @@
 //! `verify` then answered for that other model. The contract is fail closed
 //! --- a positioned error naming the clause --- not a silent drop.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -29,7 +31,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn run(command: &str, fixture: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg(command)
         .arg(format!("{FIXTURE_DIR}/{fixture}"))
         .current_dir(repository_root())
@@ -92,7 +94,7 @@ fn business_process_without_the_clauses_is_unchanged() {
     assert_eq!(code, 0, "control check: envelope={envelope}");
     assert_eq!(envelope["result"], "ok", "control check: {envelope}");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["verify", &format!("{FIXTURE_DIR}/control.fsl")])
         .args(["--depth", "3", "--deadlock", "ignore"])
         .current_dir(repository_root())

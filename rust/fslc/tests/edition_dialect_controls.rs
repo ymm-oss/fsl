@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_cases.rs"]
 pub(crate) mod cases;
 #[path = "support/edition_dependency_cases.rs"]
@@ -10,7 +13,7 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
 
 fn run(scratch: &Scratch, template: &str) -> std::process::Output {
-    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, template)
+    cases::command(fslc_cli::command(), &scratch.0, template)
 }
 
 fn git(scratch: &Scratch, args: &[&str]) -> String {
@@ -102,7 +105,7 @@ pub(crate) fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
                 .replace("false } }", "false } } }"),
         );
         for command in &commands {
-            let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), command, &scratch.0);
+            let output = cases::invoke(fslc_cli::command(), command, &scratch.0);
             let actual = value(&output);
             results.check(
                 &format!("preserved/dialect/{repeat}/{}", command.join(" ")),
@@ -185,7 +188,7 @@ pub(crate) fn approval_records_and_git_roots_refuse_before_output_writes() {
     }
     scratch.write("spec.fsl", &rejected);
     let oracle = cases::refusal(
-        env!("CARGO_BIN_EXE_fslc"),
+        fslc_cli::command(),
         &scratch.0,
         std::path::Path::new("spec.fsl"),
     );

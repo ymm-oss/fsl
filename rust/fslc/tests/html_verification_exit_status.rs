@@ -9,8 +9,10 @@
 //! the report is still rendered, and the process exit follows
 //! `outcome::exit_status` on the verification envelope.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -44,7 +46,7 @@ fn scratch_dir(label: &str) -> PathBuf {
 }
 
 fn run_html_to_file(spec: &str, output_path: &Path) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "html",
             spec,
@@ -105,7 +107,7 @@ fn html_exits_zero_on_a_verifying_baseline() {
 /// preservation control: parse errors keep the ordinary spec-error exit.
 #[test]
 fn html_parse_errors_keep_the_spec_error_exit() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["html", PARSE_FIXTURE])
         .current_dir(workspace_root())
         .output()
@@ -123,4 +125,63 @@ fn html_parse_errors_keep_the_spec_error_exit() {
         Some(2),
         "parse errors exit 2 per issue #484 matrix: {envelope}"
     );
+}
+
+fn embedded_json(html: &str, label: &str) -> Value {
+    let marker = format!("<details><summary>{label}</summary><div><div class=\"code-block\"><pre>");
+    let escaped = html
+        .split_once(&marker)
+        .expect("named raw JSON section")
+        .1
+        .split_once("</pre>")
+        .expect("raw JSON closing pre")
+        .0;
+    let json = escaped
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    serde_json::from_str(&json).expect("embedded JSON")
+}
+
+/// Detector (#1871): HTML witnesses always use warn, while verification follows
+/// the request. Following ignore would omit the deadlock witness; following
+/// error would stop witness generation on the violated baseline.
+fn assert_html_deadlock_witness(mode: &str, status: i32, result: &str) {
+    let output = fslc_cli::command()
+        .args([
+            "html",
+            "examples/gallery/errors/violated_deadlock_terminal.fsl",
+            "--depth",
+            "3",
+            "--deadlock",
+            mode,
+        ])
+        .current_dir(workspace_root())
+        .output()
+        .expect("run native fslc html");
+    assert_eq!(output.status.code(), Some(status), "{mode}: {output:?}");
+    let html = std::str::from_utf8(&output.stdout).expect("UTF-8 HTML");
+    let explained = embedded_json(html, "explain JSON");
+    assert!(
+        explained["witnesses"]
+            .as_array()
+            .expect("witnesses")
+            .iter()
+            .any(|scenario| scenario["name"] == "deadlock_terminal"),
+        "{mode} must still build the deadlock_terminal witness: {explained}"
+    );
+    let verification = embedded_json(html, "verify JSON");
+    assert_eq!(verification["result"], result, "{mode}: {verification}");
+}
+
+#[test]
+fn html_deadlock_ignore_still_builds_warn_witnesses() {
+    assert_html_deadlock_witness("ignore", 0, "verified");
+}
+
+#[test]
+fn html_deadlock_error_still_builds_warn_witnesses() {
+    assert_html_deadlock_witness("error", 1, "violated");
 }

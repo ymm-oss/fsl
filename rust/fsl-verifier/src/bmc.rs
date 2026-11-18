@@ -8,8 +8,8 @@ use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
 use crate::eval::{
-    FailureClass, IntegerRangeDraft, classified_evaluation_status_in, eval, eval_in,
-    evaluation_status, integer_range_draft, integer_range_draft_in, integer_range_error,
+    EvaluationStatus, FailureClass, IntegerRangeDraft, classified_evaluation_status_in, eval,
+    eval_in, evaluation_status, integer_range_draft, integer_range_draft_in, integer_range_error,
     integer_range_plan, materialize_integer_range, prepared_quantified_status,
     prepared_quantified_status_in, prepared_quantified_value, prepared_quantified_value_in,
     property_evaluation_status, property_evaluation_status_in, property_range_source_status,
@@ -18,10 +18,14 @@ use crate::eval::{
 use crate::induction::{InductionCti, partial_witness};
 use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
+use crate::scoped_query::{
+    OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_query,
+};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
-    ActionInstance, action_guards_in, action_has_partial_operation_candidate, action_instances,
+    ActionGuardDefinedness, ActionInstance, action_guards_in,
+    action_has_partial_operation_candidate, action_instances,
     classified_action_guard_definedness_in, classified_action_statements_evaluation_status_in,
     init_constraints, init_evaluation_status, initial_state as symbolic_initial_state,
     transition_constraint_in,
@@ -218,19 +222,12 @@ async fn terms_are_unsat<S: SmtSolver>(
     active: &[usize],
     target: &S::Term,
 ) -> Result<bool, VerifyError> {
-    solver.push();
-    let outcome = async {
-        for index in active {
-            solver.assert(&constraints[*index].term)?;
-        }
-        solver.assert(target)?;
-        solver.check().await.map_err(VerifyError::from)
-    }
-    .await;
-    let pop = solver.pop(1).map_err(VerifyError::from);
-    let result = outcome?;
-    pop?;
-    Ok(result == SatResult::Unsat)
+    let terms = active
+        .iter()
+        .map(|index| &constraints[*index].term)
+        .chain([target]);
+    let result = scoped_check(solver, terms, PopFailure::Last).await?;
+    OnUnknown::NotProved.proves_unsat(result)
 }
 
 /// Explore all symbolic executions up to `depth` using a backend-neutral SMT solver.
@@ -1965,65 +1962,24 @@ async fn check_typed_action_partial_operations<S: SmtSolver>(
             )?
             .has_partial_operation;
         }
-        if !guard_evaluation.has_partial_operation
-            && !body_status.has_partial_operation
-            && !ensures_have_partial_operation
+        let has_candidate = guard_evaluation.has_partial_operation
+            || body_status.has_partial_operation
+            || ensures_have_partial_operation;
+        if let Some(violation) = probe_instance_definedness(
+            solver,
+            model,
+            instance,
+            guard_evaluation,
+            body_status,
+            InstanceProbes::Search { has_candidate },
+            states,
+            choices,
+            instances,
+            step,
+        )
+        .await?
         {
-            continue;
-        }
-        let guard_failure = guard_evaluation.first_partial;
-        solver.set_query_context("partial_op", &action.name);
-        if probe(solver, &guard_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
-                    solver,
-                    model,
-                    action,
-                    instance,
-                    &guard_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
-                )
-                .await?,
-            ));
-        }
-        let guard_undefined = solver.not(&guard_evaluation.defined)?;
-        if probe(solver, &guard_undefined).await? {
-            return Err(VerifyError::new(format!(
-                "action '{}' guard evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
-        }
-
-        let body_failure =
-            solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
-        if probe(solver, &body_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
-                    solver,
-                    model,
-                    action,
-                    instance,
-                    &body_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
-                )
-                .await?,
-            ));
-        }
-        let body_undefined = solver.and(&[
-            guard_evaluation.enabled.clone(),
-            solver.not(&body_status.fully_defined)?,
-        ])?;
-        if probe(solver, &body_undefined).await? {
-            return Err(VerifyError::new(format!(
-                "action '{}' body evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
+            return Ok(Some(violation));
         }
     }
     Ok(None)
@@ -2092,60 +2048,179 @@ async fn check_action_partial_operations<S: SmtSolver>(
     let failure = with_lemmas(solver, range_lemmas, solver.or(&undefined)?)?;
     let any_undefined = probe(solver, &failure).await?;
     for (instance, guard_evaluation, body_status, guard_undefined, body_undefined) in evaluations {
-        let action = &model.actions[instance.action_index];
-        let guard_failure = guard_evaluation.first_partial;
-        solver.set_query_context("partial_op", &action.name);
-        if guard_evaluation.has_partial_operation && probe(solver, &guard_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
-                    solver,
-                    model,
-                    action,
-                    instance,
-                    &guard_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
-                )
-                .await?,
-            ));
-        }
-        if any_undefined
-            && probe(solver, &with_lemmas(solver, range_lemmas, guard_undefined)?).await?
+        if let Some(violation) = probe_instance_definedness(
+            solver,
+            model,
+            instance,
+            guard_evaluation,
+            body_status,
+            InstanceProbes::DefinednessPass {
+                any_undefined,
+                range_lemmas,
+                guard_undefined,
+                body_undefined,
+            },
+            states,
+            choices,
+            instances,
+            step,
+        )
+        .await?
         {
-            return Err(VerifyError::new(format!(
-                "action '{}' guard evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
+            return Ok(Some(violation));
         }
+    }
+    Ok(None)
+}
 
-        let body_failure =
-            solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
-        if body_status.has_partial_operation && probe(solver, &body_failure).await? {
-            return Ok(Some(
-                make_action_partial_operation_violation(
+/// Which of an instance's definedness probes a caller asks. The two filters
+/// stay different: the definedness pass exists for soundness (#1240, #1258),
+/// and each filter keeps its caller's query sequence, and so its evidence.
+enum InstanceProbes<'a, T> {
+    /// [`check_typed_action_partial_operations`]: an instance with no typed
+    /// partial-operation candidate (guard, body or `ensures`) asks nothing;
+    /// any other asks all four probes, each term built when it is asked.
+    Search { has_candidate: bool },
+    /// [`check_action_partial_operations`]: a partial probe is asked only when
+    /// its evaluation has a partial operation, and the prebuilt non-partial
+    /// probes, with the range lemmas conjoined, only when the disjunctive
+    /// probe answered `sat`.
+    DefinednessPass {
+        any_undefined: bool,
+        range_lemmas: &'a [T],
+        guard_undefined: T,
+        body_undefined: T,
+    },
+}
+
+/// One action instance's guard and enabled-body definedness at `step`, in
+/// the order the errors are reported: guard partial, guard non-partial, body
+/// partial, body non-partial. `probes` decides which are asked.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn probe_instance_definedness<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    instance: &ActionInstance<S::Term>,
+    guard_evaluation: ActionGuardDefinedness<S::Term>,
+    body_status: EvaluationStatus<S::Term>,
+    probes: InstanceProbes<'_, S::Term>,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+) -> Result<Option<BmcViolation>, VerifyError> {
+    if let InstanceProbes::Search {
+        has_candidate: false,
+    } = probes
+    {
+        return Ok(None);
+    }
+    let asks_partial = |has_partial_operation: bool| match probes {
+        InstanceProbes::Search { .. } => true,
+        InstanceProbes::DefinednessPass { .. } => has_partial_operation,
+    };
+    let asks_guard_partial = asks_partial(guard_evaluation.has_partial_operation);
+    let asks_body_partial = asks_partial(body_status.has_partial_operation);
+    let is_search = matches!(probes, InstanceProbes::Search { .. });
+    let (any_undefined, range_lemmas, pass_guard_undefined, pass_body_undefined) = match probes {
+        InstanceProbes::Search { .. } => (false, &[][..], None, None),
+        InstanceProbes::DefinednessPass {
+            any_undefined,
+            range_lemmas,
+            guard_undefined,
+            body_undefined,
+        } => (
+            any_undefined,
+            range_lemmas,
+            Some(guard_undefined),
+            Some(body_undefined),
+        ),
+    };
+    let action = &model.actions[instance.action_index];
+    let guard_failure = guard_evaluation.first_partial;
+    solver.set_query_context("partial_op", &action.name);
+    if asks_guard_partial && probe(solver, &guard_failure).await? {
+        return Ok(Some(
+            make_action_partial_operation_violation(
+                solver,
+                model,
+                action,
+                instance,
+                &guard_failure,
+                states,
+                choices,
+                instances,
+                step,
+            )
+            .await?,
+        ));
+    }
+    // Keep the search terms alive through the body probes, as in the original
+    // search loop. Z3 AST owner lifetimes can affect witness selection. The
+    // definedness pass instead keeps its lemma conjunctions statement-local.
+    let (_guard_undefined, guard_is_undefined) = if is_search {
+        let term = solver.not(&guard_evaluation.defined)?;
+        let answer = probe(solver, &term).await?;
+        (Some(term), answer)
+    } else {
+        (
+            None,
+            any_undefined
+                && probe(
                     solver,
-                    model,
-                    action,
-                    instance,
-                    &body_failure,
-                    states,
-                    choices,
-                    instances,
-                    step,
+                    &with_lemmas(solver, range_lemmas, pass_guard_undefined.unwrap())?,
                 )
                 .await?,
-            ));
-        }
-        if any_undefined
-            && probe(solver, &with_lemmas(solver, range_lemmas, body_undefined)?).await?
-        {
-            return Err(VerifyError::new(format!(
-                "action '{}' body evaluation has a non-partial failure",
-                model.action_display_name(&action.name)
-            )));
-        }
+        )
+    };
+    if guard_is_undefined {
+        return Err(VerifyError::new(format!(
+            "action '{}' guard evaluation has a non-partial failure",
+            model.action_display_name(&action.name)
+        )));
+    }
+
+    let body_failure =
+        solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
+    if asks_body_partial && probe(solver, &body_failure).await? {
+        return Ok(Some(
+            make_action_partial_operation_violation(
+                solver,
+                model,
+                action,
+                instance,
+                &body_failure,
+                states,
+                choices,
+                instances,
+                step,
+            )
+            .await?,
+        ));
+    }
+    let (_body_undefined, body_is_undefined) = if is_search {
+        let term = solver.and(&[
+            guard_evaluation.enabled.clone(),
+            solver.not(&body_status.fully_defined)?,
+        ])?;
+        let answer = probe(solver, &term).await?;
+        (Some(term), answer)
+    } else {
+        (
+            None,
+            any_undefined
+                && probe(
+                    solver,
+                    &with_lemmas(solver, range_lemmas, pass_body_undefined.unwrap())?,
+                )
+                .await?,
+        )
+    };
+    if body_is_undefined {
+        return Err(VerifyError::new(format!(
+            "action '{}' body evaluation has a non-partial failure",
+            model.action_display_name(&action.name)
+        )));
     }
     Ok(None)
 }
@@ -2320,21 +2395,14 @@ async fn build_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Vec<TraceStep>, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(condition) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let checked = solver.check().await;
-    let projected = match checked {
-        Ok(SatResult::Sat) => project_trace(solver, model, states, choices, instances, upto),
-        Ok(SatResult::Unsat) => Err(VerifyError::new("witness condition became unsatisfiable")),
-        Ok(SatResult::Unknown) => Err(VerifyError::solver("solver returned unknown for witness")),
-        Err(error) => Err(error.into()),
-    };
-    let popped = solver.pop(1);
-    popped?;
-    projected
+    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+        if OnUnknown::Fail("solver returned unknown for witness").proves_unsat(result)? {
+            Err(VerifyError::new("witness condition became unsatisfiable"))
+        } else {
+            project_trace(solver, model, states, choices, instances, upto)
+        }
+    })
+    .await
 }
 
 fn states_equal<S: SmtSolver>(
@@ -2507,6 +2575,66 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
     Ok(None)
 }
 
+/// Whether one query proves that no probe of `check_leadstos`'s lasso
+/// enumeration for `binding` can answer `sat` (#1888). The query is the
+/// disjunction, over every (loop start, loop end) pair, of that pair's
+/// probes, which share the loop equality, canonical constraint, and fairness
+/// condition and differ only in the pending step. `unknown` proves nothing.
+#[allow(clippy::too_many_arguments)]
+async fn leadsto_lasso_ruled_out<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &LeadsToDef,
+    binding: &LeadstoBinding<S::Term>,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    canonical: &[S::Term],
+    depth: usize,
+) -> Result<bool, VerifyError> {
+    let mut lassos = Vec::new();
+    for loop_start in 0..depth {
+        for loop_end in (loop_start + 1)..=depth {
+            let loop_equal = states_equal(solver, model, &states[loop_start], &states[loop_end])?;
+            let fair = fairness_condition(
+                solver, model, states, choices, instances, loop_start, loop_end,
+            )?;
+            let pendings = (0..loop_end)
+                .map(|pending| {
+                    let mut terms = vec![leadsto_condition(
+                        solver,
+                        model,
+                        &property.before,
+                        &states[pending],
+                        &binding.symbolic,
+                    )?];
+                    for state in states.iter().take(loop_end).skip(loop_start.min(pending)) {
+                        terms.push(solver.not(&leadsto_condition(
+                            solver,
+                            model,
+                            &property.after,
+                            state,
+                            &binding.symbolic,
+                        )?)?);
+                    }
+                    Ok(solver.and(&terms)?)
+                })
+                .collect::<Result<Vec<_>, VerifyError>>()?;
+            lassos.push(solver.and(&[
+                loop_equal,
+                canonical[loop_start].clone(),
+                fair,
+                solver.or(&pendings)?,
+            ])?);
+        }
+    }
+    if lassos.is_empty() {
+        return Ok(true);
+    }
+    let combined = solver.or(&lassos)?;
+    proven_unsat(solver, &[combined]).await
+}
+
 /// Check whether a `within` deadline expires unmet at `states[step]`.
 ///
 /// At step `t`, the only window whose deadline lands on `t` starts at
@@ -2610,6 +2738,19 @@ async fn check_leadstos<S: SmtSolver>(
         }
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
+            // `sat` and `unknown` run the enumeration below unchanged, so a
+            // reported lasso, `pending_since`, and witness are the ones it
+            // chooses. Later bindings/properties can still project models;
+            // scoped queries restore assertions, not solver search history.
+            // Full-output differential checks must guard witness stability;
+            // only solver-work/timing statistics under `cost` may change.
+            if leadsto_lasso_ruled_out(
+                solver, model, property, &binding, states, choices, instances, &canonical, depth,
+            )
+            .await?
+            {
+                continue;
+            }
             for loop_start in 0..depth {
                 for loop_end in (loop_start + 1)..=depth {
                     let loop_equal =
@@ -2793,33 +2934,18 @@ async fn extend_range_lemmas<S: SmtSolver>(
 /// `true` only when the conjunction is proved unsatisfiable; `unknown` keeps
 /// the lemma out instead of failing the run.
 async fn entailed<S: SmtSolver>(solver: &mut S, query: &[S::Term]) -> Result<bool, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(&solver.and(query)?) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let checked = solver.check().await;
-    let popped = solver.pop(1);
-    let result = checked?;
-    popped?;
-    Ok(result == SatResult::Unsat)
+    let result = scoped_check_conjunction(solver, query, PopFailure::OverAssert).await?;
+    OnUnknown::NotProved.proves_unsat(result)
 }
 
 async fn probe_not<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {
     probe(solver, &solver.not(condition)?).await
 }
 
+/// The classification stays in this body: the P2 mutation scope
+/// (`p2.bmc.probe-classification`) examines it here.
 async fn probe<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(condition) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let checked = solver.check().await;
-    let popped = solver.pop(1);
-    let result = checked?;
-    popped?;
-    match result {
+    match scoped_check(solver, [condition], PopFailure::OverAssert).await? {
         SatResult::Sat => Ok(true),
         SatResult::Unsat => Ok(false),
         SatResult::Unknown => Err(VerifyError::solver("solver returned unknown")),
@@ -2892,3 +3018,5 @@ mod tests {
 }
 #[cfg(test)]
 mod integer_range_tests;
+#[cfg(test)]
+mod scoped_query_tests;

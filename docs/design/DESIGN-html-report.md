@@ -23,16 +23,20 @@ evaluator, or verifier.
   `deadline`-derived invariant, the time-block-generated `tick` action) are
   tagged `"generated"` in the skeleton; the report routes them into the
   auto-checks table instead of the human Actions/Properties tables.
+  By decision #1871, the witness section is always built as if `--deadlock warn`,
+  regardless of the requested `--deadlock`: a detected `deadlock_terminal` witness
+  appears even with `ignore`, and witnesses are still built with `error`.
 - `run_verify(file, depth, deadlock)` supplies the current verification result:
   status, warnings, action coverage, reachable witnesses, counterexample traces,
-  and boundedness metadata.
+  and boundedness metadata. This verification section follows the requested
+  `--deadlock` policy, independently of the witness section.
 - The original source text is included with escaped line-numbered rendering so
   review comments can refer back to the `.fsl` file.
 
 ## CLI contract
 
 ```
-fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
+fslc html spec.fsl --depth 8 [-o report.html] [--deadlock warn|error|ignore] [--engine bmc|induction] [--no-timing]
 ```
 
 - With `-o`, writes the HTML file and prints the standard JSON envelope with

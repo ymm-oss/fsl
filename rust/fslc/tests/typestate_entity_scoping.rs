@@ -6,8 +6,10 @@
 //! other's transitions — `--ts` then emitted a method against the wrong
 //! host type.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -15,7 +17,7 @@ fn run_typestate_json(source: &str) -> Value {
     let dir = tempfile_dir();
     let path = dir.join("spec.fsl");
     std::fs::write(&path, source).expect("write fixture spec");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("typestate")
         .arg(&path)
         .output()

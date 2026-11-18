@@ -11,10 +11,10 @@ use fsl_core::{
     state_references,
 };
 
-use super::trace::{ParentLink, reconstruct_trace, state_changes};
+use super::trace::{Admission, StateStore, state_changes};
 use super::{
-    Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, runtime_error_at,
-    terminal_holds, with_total_division,
+    Bindings, Monitor, RuntimeError, State, Violation, check_state_selected, eval, runtime_error,
+    runtime_error_at, terminal_holds_at, with_total_division,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -152,11 +152,17 @@ pub fn verify_explicit_selected(
     // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
     // clone per child, on top of a `BTreeMap<State, Monitor>` frontier
     // holding one whole `KernelModel` per live state, duplicated the model
-    // at both layers (issue #730). `scratch` is re-pointed at each state
-    // instead; `parents` (already used for trace reconstruction) is the
-    // only per-state bookkeeping kept.
+    // at both layers (issue #730). `scratch` only lends its model: every
+    // state is read and stepped where the frontier holds it.
+    //
+    // The visited set and the parent links are one packed `StateStore`
+    // (issue #1851, as #1247 did for the refinement searches): each reached
+    // state is held once, as bytes, and a frontier entry carries its id.
+    // A frontier is kept in ascending `State` order, the order a
+    // `BTreeSet<State>` frontier was visited in, because that order picks
+    // the reported violation, deadlock and witness traces.
     let mut scratch = Monitor::new(model)?;
-    let initial_state = scratch.state.clone();
+    let initial_state = std::mem::take(&mut scratch.state);
     let mut result = ExplicitResult {
         spec: scratch.model.name.clone(),
         depth,
@@ -196,41 +202,45 @@ pub fn verify_explicit_selected(
             })
             .collect(),
     };
-    let mut frontier = BTreeSet::from([initial_state.clone()]);
-    let mut seen = BTreeSet::from([initial_state]);
-    let mut parents = BTreeMap::<State, ParentLink>::new();
+    let (mut seen, root) = StateStore::with_root(&initial_state);
+    let mut frontier = vec![(initial_state, root)];
+    // Every stored state but the root passed the state bounds and invariants
+    // of the step that stored it, under the same selection; unless an
+    // invariant reads `old()`, they would pass again (`Monitor::execute_from`).
+    let admits_stored = !super::invariants_read_old(&scratch.model);
 
     for level in 0..=depth {
         result.depth_reached = level;
         result.max_frontier_width = result.max_frontier_width.max(frontier.len());
 
-        for state in &frontier {
-            scratch.state = state.clone();
-            scratch.step = level;
-            if let Some(violation) = scratch.current_violation_selected(checked_bounds)? {
+        for (state, id) in &frontier {
+            if (*id == root || !admits_stored)
+                && let Some(violation) =
+                    check_state_selected(state, None, &scratch.model, level, checked_bounds)?
+            {
                 result.violation = Some(ExplicitViolation {
-                    trace: reconstruct_trace(state, &parents),
+                    trace: seen.trace(*id),
                     violation,
                 });
                 return Ok(result);
             }
-            if let Some(violation) = record_reachables(&scratch, level, &parents, &mut result)? {
+            if let Some(violation) =
+                record_reachables(&scratch.model, state, *id, level, &seen, &mut result)?
+            {
                 result.violation = Some(ExplicitViolation {
-                    trace: reconstruct_trace(state, &parents),
+                    trace: seen.trace(*id),
                     violation,
                 });
                 return Ok(result);
             }
         }
 
-        let mut enabled_by_state = BTreeMap::new();
-        for state in &frontier {
-            scratch.state = state.clone();
-            scratch.step = level;
+        let mut enabled_by_state = Vec::with_capacity(frontier.len());
+        for (state, id) in &frontier {
             // A guard that reaches a partial operation is neither enabled nor
             // disabled: it is stepped below into that action's `partial_op`
             // (#1191), and it keeps this state from being a deadlock.
-            let candidates = scratch.candidates()?;
+            let candidates = scratch.candidates_at(state)?;
             let enabled = candidates
                 .iter()
                 .filter_map(super::ActionCandidate::enabled)
@@ -252,11 +262,11 @@ pub fn verify_explicit_selected(
                     .enabled += 1;
             }
             if candidates.is_empty() && result.deadlock_step.is_none() {
-                let terminal = match terminal_holds(&scratch) {
+                let terminal = match terminal_holds_at(&scratch.model, state) {
                     Ok(value) => value,
                     Err(error) if super::is_partial_operation_error(&error) => {
                         result.violation = Some(ExplicitViolation {
-                            trace: reconstruct_trace(state, &parents),
+                            trace: seen.trace(*id),
                             violation: Violation {
                                 kind: "partial_op".to_owned(),
                                 name: fsl_core::SyntheticName::PartialTerminal.internal(),
@@ -269,23 +279,27 @@ pub fn verify_explicit_selected(
                 };
                 if !terminal {
                     result.deadlock_step = Some(level);
-                    result.deadlock_trace = Some(reconstruct_trace(state, &parents));
+                    result.deadlock_trace = Some(seen.trace(*id));
                 }
             }
-            enabled_by_state.insert(state.clone(), candidates);
+            enabled_by_state.push(candidates);
         }
 
         if level == depth {
             break;
         }
 
-        let mut next = BTreeSet::new();
-        for state in &frontier {
-            for candidate in &enabled_by_state[state] {
+        let mut next = Vec::new();
+        for ((state, id), candidates) in frontier.iter().zip(&enabled_by_state) {
+            for candidate in candidates {
                 let instance = candidate.instance();
-                scratch.state = state.clone();
-                scratch.step = level;
-                let stepped = scratch.step_candidate(candidate, checked_bounds)?;
+                let stepped = scratch.step_enumerated(
+                    state,
+                    level,
+                    candidate,
+                    checked_bounds,
+                    &mut |next| admits_stored && seen.id_of(next).is_some_and(|id| id != root),
+                )?;
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.
                 let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
@@ -304,13 +318,13 @@ pub fn verify_explicit_selected(
                     // The Monitor rolls back on violation (`state` is the pre-step
                     // state); the trace must show the attempted post-state.
                     let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
-                    let mut trace = reconstruct_trace(state, &parents);
+                    let mut trace = seen.trace(*id);
                     trace.push(edge_trace_step(level + 1, state, instance, after));
                     result.depth_reached = level + 1;
                     result.violation = Some(ExplicitViolation { violation, trace });
                     return Ok(result);
                 }
-                let child_state = scratch.state.clone();
+                let child_state = stepped.state;
                 // A frontier state is unique and `Monitor::enabled` enumerates
                 // each action instance once, so this is exactly one unique
                 // `(state, action instance)` edge. Record it before child
@@ -323,26 +337,21 @@ pub fn verify_explicit_selected(
                 if child_state == *state {
                     stats.no_op += 1;
                 }
-                if seen.contains(&child_state) {
-                    continue;
+                match seen.insert_child_within(
+                    &child_state,
+                    *id,
+                    &instance.action,
+                    &instance.params,
+                    max_states,
+                ) {
+                    Admission::Stored => {}
+                    Admission::Full => {
+                        result.states_explored = seen.len();
+                        result.budget_exceeded = true;
+                        return Ok(result);
+                    }
+                    Admission::New(child) => next.push((child_state, child)),
                 }
-                if seen.len() >= max_states {
-                    result.states_explored = seen.len();
-                    result.budget_exceeded = true;
-                    return Ok(result);
-                }
-                seen.insert(child_state.clone());
-                parents.insert(
-                    child_state.clone(),
-                    ParentLink {
-                        parent: state.clone(),
-                        action: TraceAction {
-                            name: instance.action.clone(),
-                            params: instance.params.clone(),
-                        },
-                    },
-                );
-                next.insert(child_state);
             }
         }
         result.states_explored = seen.len();
@@ -350,6 +359,7 @@ pub fn verify_explicit_selected(
             result.closure = true;
             return Ok(result);
         }
+        next.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         frontier = next;
     }
 
@@ -358,23 +368,19 @@ pub fn verify_explicit_selected(
 }
 
 fn record_reachables(
-    monitor: &Monitor,
+    model: &KernelModel,
+    state: &State,
+    id: usize,
     level: usize,
-    parents: &BTreeMap<State, ParentLink>,
+    seen: &StateStore,
     result: &mut ExplicitResult,
 ) -> Result<Option<Violation>, RuntimeError> {
     with_total_division(|| {
-        for property in &monitor.model.reachables {
+        for property in &model.reachables {
             if result.reachables[&property.name].is_some() {
                 continue;
             }
-            let value = match eval(
-                &property.expr,
-                &monitor.state,
-                &mut Bindings::new(),
-                &monitor.model,
-                None,
-            ) {
+            let value = match eval(&property.expr, state, &mut Bindings::new(), model, None) {
                 Ok(value) => value,
                 Err(error) if super::is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
@@ -394,7 +400,7 @@ fn record_reachables(
                         property.name.clone(),
                         Some(ExplicitReachableWitness {
                             step: level,
-                            trace: reconstruct_trace(&monitor.state, parents),
+                            trace: seen.trace(id),
                         }),
                     );
                 }
@@ -706,11 +712,9 @@ fn compute_binder_values(
             type_name,
             where_expr: None,
             ..
-        } => {
-            let type_name = super::qualified_type(type_name)?;
-            let ty = model.typed_binder_type(&type_name);
-            Ok(Some(model.domain_values(&ty)?))
-        }
+        } => Ok(Some(
+            model.typed_binder_domain(super::qualified_type(type_name)?)?,
+        )),
         Binder::Range {
             lo,
             hi,

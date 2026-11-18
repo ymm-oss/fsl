@@ -9,8 +9,11 @@
 //! including the payoff of the `skip_claim_text`/`skip_residue_text` split
 //! in `fsl_tools::document_check`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,7 +31,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -108,7 +111,7 @@ impl NormalEvidenceFixture {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             .args(args)
             .current_dir(&self.0)
             .output()
