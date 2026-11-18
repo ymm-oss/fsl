@@ -1201,19 +1201,71 @@ fn eval_spine_operand(
 /// Only an `is` pattern binds, and only an `is` on the `and`/`or`/`=>`
 /// spine is evaluated in place: [`eval_observing`] evaluates every other
 /// operand, and an `and` or `is` it meets, on a copy of the bindings.
+///
+/// The walk continues into a connective operand directly and sets the other
+/// operand aside only when it is a connective as well, so a spine nested to
+/// one side sets nothing aside. Up to eight operands set aside are held on
+/// the stack and the rest on the heap. Kept out of line so the buffer does
+/// not grow the frames of the recursive evaluator that calls it.
+#[inline(never)]
 fn connective_may_bind(expr: &Expr) -> bool {
-    let mut pending = vec![expr];
-    while let Some(expr) = pending.pop() {
-        match expr {
-            Expr::Is { .. } => return true,
-            Expr::Binary { op, left, right } if is_connective(op) => {
-                pending.push(left);
-                pending.push(right);
+    let (mut left, mut right) = match spine_node(expr) {
+        SpineNode::Binds => return true,
+        SpineNode::Connective(left, right) => (left, right),
+        SpineNode::Leaf => return false,
+    };
+    let mut inline = [(expr, expr); 8];
+    let mut len = 0;
+    let mut spill = Vec::new();
+    loop {
+        match (spine_node(left), spine_node(right)) {
+            (SpineNode::Binds, _) | (_, SpineNode::Binds) => return true,
+            (SpineNode::Connective(next_left, next_right), SpineNode::Leaf)
+            | (SpineNode::Leaf, SpineNode::Connective(next_left, next_right)) => {
+                (left, right) = (next_left, next_right);
             }
-            _ => {}
+            (
+                SpineNode::Connective(next_left, next_right),
+                SpineNode::Connective(aside_left, aside_right),
+            ) => {
+                if spill.is_empty() && len < inline.len() {
+                    inline[len] = (aside_left, aside_right);
+                    len += 1;
+                } else {
+                    spill.push((aside_left, aside_right));
+                }
+                (left, right) = (next_left, next_right);
+            }
+            (SpineNode::Leaf, SpineNode::Leaf) => {
+                (left, right) = if let Some(operands) = spill.pop() {
+                    operands
+                } else if len > 0 {
+                    len -= 1;
+                    inline[len]
+                } else {
+                    return false;
+                };
+            }
         }
     }
-    false
+}
+
+/// What [`connective_may_bind`] finds at one node of a spine.
+enum SpineNode<'a> {
+    /// An `is` pattern, which binds.
+    Binds,
+    /// An `and`/`or`/`=>` and its two operands, which continue the spine.
+    Connective(&'a Expr, &'a Expr),
+    /// Anything else, which ends the spine.
+    Leaf,
+}
+
+fn spine_node(expr: &Expr) -> SpineNode<'_> {
+    match expr {
+        Expr::Is { .. } => SpineNode::Binds,
+        Expr::Binary { op, left, right } if is_connective(op) => SpineNode::Connective(left, right),
+        _ => SpineNode::Leaf,
+    }
 }
 
 fn binder_values(
