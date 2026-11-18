@@ -364,12 +364,18 @@ fn explore(
         for ((state, id), candidates) in frontier.iter().zip(&enabled_by_state) {
             for candidate in candidates {
                 let instance = candidate.instance();
+                // Whether `seen` was asked about the successor, which then
+                // stays encoded for its insertion below.
+                let mut queried = false;
                 let stepped = scratch.step_enumerated(
                     state,
                     level,
                     candidate,
                     checked_bounds,
-                    &mut |next| admits_stored && seen.id_of(next).is_some_and(|id| id != root),
+                    &mut |next| {
+                        queried = admits_stored;
+                        admits_stored && seen.id_of(next).is_some_and(|id| id != root)
+                    },
                 )?;
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.
@@ -408,13 +414,24 @@ fn explore(
                 if child_state == *state {
                     stats.no_op += 1;
                 }
-                match seen.insert_child_within(
-                    &child_state,
-                    *id,
-                    &instance.action,
-                    &instance.params,
-                    max_states,
-                ) {
+                let admission = if queried {
+                    seen.insert_queried_child_within(
+                        &child_state,
+                        *id,
+                        &instance.action,
+                        &instance.params,
+                        max_states,
+                    )
+                } else {
+                    seen.insert_child_within(
+                        &child_state,
+                        *id,
+                        &instance.action,
+                        &instance.params,
+                        max_states,
+                    )
+                };
+                match admission {
                     Admission::Stored => {}
                     Admission::Full => {
                         result.states_explored = seen.len();

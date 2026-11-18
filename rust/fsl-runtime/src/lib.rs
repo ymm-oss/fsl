@@ -3761,7 +3761,10 @@ pub fn find_boundary_violation_reaching(
         }
         for candidate in scratch.candidates_at(&state)? {
             let instance = candidate.instance();
+            // As in the explicit walk (`explicit::explore`).
+            let mut queried = false;
             let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                queried = admits_stored;
                 admits_stored && visited.id_of(next).is_some_and(|id| id != root)
             })?;
             if let Some(violation) = stepped.violation.clone() {
@@ -3777,9 +3780,12 @@ pub fn find_boundary_violation_reaching(
                 }
                 continue;
             }
-            if let Some(child) =
+            let child = if queried {
+                visited.insert_queried_child(&stepped.state, id, &instance.action, &instance.params)
+            } else {
                 visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
-            {
+            };
+            if let Some(child) = child {
                 if visited.len() >= budget {
                     reachability.exhaust();
                     let probe = BoundaryProbe {
@@ -4020,16 +4026,22 @@ pub fn expression_reachability(
             continue;
         }
         for candidate in scratch.candidates_at(&state)? {
+            // As in the explicit walk (`explicit::explore`).
+            let mut queried = false;
             let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                queried = admits_stored;
                 admits_stored && visited.id_of(next).is_some_and(|id| id != root)
             })?;
             if stepped.violation.is_some() {
                 continue;
             }
             let instance = candidate.instance();
-            if let Some(child) =
+            let child = if queried {
+                visited.insert_queried_child(&stepped.state, id, &instance.action, &instance.params)
+            } else {
                 visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
-            {
+            };
+            if let Some(child) = child {
                 if visited.len() >= budget {
                     reachability.exhaust();
                     break 'walk;

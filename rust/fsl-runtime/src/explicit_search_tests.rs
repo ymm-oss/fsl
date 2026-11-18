@@ -144,3 +144,44 @@ fn explicit_search_checks_trans_on_an_edge_into_a_stored_state() {
         .map(|action| action.name.clone());
     assert_eq!(action.as_deref(), Some("back"));
 }
+
+/// [`COUNTER`] with an invariant that reads `old()` (the explicit engine also
+/// checks it without one, so its first operand always holds). No search asks
+/// its store whether a successor is already stored, so each encodes the
+/// successor when it stores it.
+const COUNTER_READING_OLD: &str = "spec Counter {
+  type Slot = 0..3
+  state { n: 0..4 }
+  init { n = 0 }
+  action inc(s: Slot) {
+    requires s == 0 and n < 4
+    n = n + 1
+  }
+  action reset() {
+    requires n == 4
+    n = 0
+  }
+  invariant Bounded { n >= 0 or old(n) >= 0 }
+}";
+
+#[test]
+fn searches_store_each_successor_when_an_invariant_reads_old() {
+    let counter = model(COUNTER_READING_OLD);
+    assert!(invariants_read_old(&counter));
+    let result = verify_explicit(counter.clone(), 10, 1_000).expect("explicit");
+    assert!(result.closure, "{result:?}");
+    assert_eq!(result.states_explored, STATES);
+    let probe = find_boundary_violation(&counter, 10, CONCRETE_PROBE_BUDGET).expect("probe");
+    assert_eq!(probe.finding, None);
+    assert_eq!(probe.states_explored, STATES);
+    // `n == 4` is reached only after four distinct successors are stored.
+    let four = Expr::Binary {
+        op: "==".to_owned(),
+        left: Box::new(Expr::Var("n".to_owned())),
+        right: Box::new(Expr::Num(4)),
+    };
+    assert_eq!(
+        expression_reachability(&counter, &[four], 10, CONCRETE_PROBE_BUDGET).expect("walk"),
+        [Reachability::Reachable]
+    );
+}
