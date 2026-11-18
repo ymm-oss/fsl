@@ -994,13 +994,15 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         request.selection.property,
         request.selection.excluded,
     );
-    let result = match fsl_runtime::verify_explicit_selected(
+    let (result, vacuity_reachability) = match fsl_runtime::verify_explicit_reaching(
         model.clone(),
         request.depth,
         request.budget,
         checked_bounds.as_ref(),
+        &explicit_probe_expressions(&model, request.skip_vacuity_probe),
+        fsl_runtime::CONCRETE_PROBE_BUDGET,
     ) {
-        Ok(result) => result,
+        Ok(ran) => ran,
         Err(error) => {
             return (
                 fslc_rust::verification_output::render_runtime_error(envelope(), &error),
@@ -1023,7 +1025,18 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         &vacuity,
         &reachable_diagnostics,
         request.skip_vacuity_probe,
+        vacuity_reachability.as_deref(),
     ))
+}
+
+/// The vacuity probe's expressions for the explicit walk to decide: none
+/// when the probe is skipped, so the walk does not evaluate them.
+fn explicit_probe_expressions(model: &KernelModel, skip_vacuity_probe: bool) -> Vec<KernelExpr> {
+    if skip_vacuity_probe {
+        Vec::new()
+    } else {
+        fsl_runtime::vacuity_probe_expressions(model)
+    }
 }
 
 /// Composite engine: try explicit-state exploration first and fall back to
@@ -1055,16 +1068,17 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         request.selection.property,
         request.selection.excluded,
     );
-    let result = match explicit_first(
+    let (result, vacuity_reachability) = match explicit_first(
         &model,
         request.depth,
         request.budget,
         checked_bounds.as_ref(),
+        &explicit_probe_expressions(&model, request.skip_vacuity_probe),
     ) {
         ExplicitFirst::Unsupported(reason) => {
             return auto_fallback_to_bmc(request, &reason, "unsupported");
         }
-        ExplicitFirst::Ran(Ok(result)) => result,
+        ExplicitFirst::Ran(Ok(ran)) => ran,
         ExplicitFirst::Ran(Err(error)) => {
             return (
                 fslc_rust::verification_output::render_runtime_error(envelope(), &error),
@@ -1088,6 +1102,7 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         &vacuity,
         &reachable_diagnostics,
         request.skip_vacuity_probe,
+        vacuity_reachability.as_deref(),
     );
     // Rendering replays the explicit witnesses; a replay failure is an
     // internal error, never a fallback.
@@ -1113,8 +1128,15 @@ fn explicit_budget_fallback(
 #[allow(clippy::large_enum_variant)]
 pub(super) enum ExplicitFirst {
     Unsupported(String),
-    Ran(Result<fsl_runtime::ExplicitResult, fsl_runtime::RuntimeError>),
+    Ran(Result<ExplicitRun, fsl_runtime::RuntimeError>),
 }
+
+/// An explicit result, with the vacuity probe's verdicts when its walk
+/// decided them (`fsl_runtime::verify_explicit_reaching`).
+pub(super) type ExplicitRun = (
+    fsl_runtime::ExplicitResult,
+    Option<Vec<fsl_runtime::Reachability>>,
+);
 
 /// Shared raw decision; callers retain their own verdict/fallback policy.
 pub(super) fn explicit_first(
@@ -1122,15 +1144,18 @@ pub(super) fn explicit_first(
     depth: usize,
     budget: usize,
     checked_bounds: Option<&std::collections::BTreeSet<String>>,
+    expressions: &[KernelExpr],
 ) -> ExplicitFirst {
     if let Some(reason) = fsl_runtime::explicit_unsupported_reason(model) {
         return ExplicitFirst::Unsupported(reason);
     }
-    ExplicitFirst::Ran(fsl_runtime::verify_explicit_selected(
+    ExplicitFirst::Ran(fsl_runtime::verify_explicit_reaching(
         model.clone(),
         depth,
         budget,
         checked_bounds,
+        expressions,
+        fsl_runtime::CONCRETE_PROBE_BUDGET,
     ))
 }
 
@@ -3362,6 +3387,7 @@ mod tests {
             &[],
             &std::collections::BTreeMap::new(),
             false,
+            None,
         );
         let (output, status) = finish_explicit_output(rendered);
         assert_eq!(status, 3);
@@ -3391,6 +3417,7 @@ mod tests {
                 &[],
                 &std::collections::BTreeMap::new(),
                 true,
+                None,
             ));
         output["result"].clone()
     }

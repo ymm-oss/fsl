@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0
+// The corner (199, 249) is never reached: 49,999 reachable states, one under
+// the vacuity probe's budget.
+spec ProbeBudgetUnder {
+  state {
+    a: 0..199,
+    b: 0..249
+  }
+  init {
+    a = 0
+    b = 0
+  }
+  action incA() {
+    requires a < 199
+    requires not (a == 198 and b == 249)
+    a = a + 1
+  }
+  action incB() {
+    requires b < 249
+    requires not (a == 199 and b == 248)
+    b = b + 1
+  }
+  invariant NeverPastTheCorner { a + b > 448 => a == 0 }
+}

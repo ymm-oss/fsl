@@ -47,7 +47,7 @@ mod evaluation_counts {
 pub use explicit::{
     ActionStats, ExplicitReachableWitness, ExplicitResult, ExplicitViolation,
     check_init_write_ownership, deterministic_initial_state, explicit_unsupported_reason,
-    verify_explicit, verify_explicit_selected,
+    verify_explicit, verify_explicit_reaching, verify_explicit_selected,
 };
 
 pub type State = BTreeMap<String, Value>;
@@ -4171,7 +4171,8 @@ pub enum VacuityProbe<'a> {
     Skip,
     /// The probe's verdicts for [`vacuity_probe_expressions`], already
     /// decided by a walk of the same model, depth and budget
-    /// ([`find_boundary_violation_reaching`]).
+    /// ([`find_boundary_violation_reaching`]), or by the explicit walk of the
+    /// same model and depth under its own budget ([`verify_explicit_reaching`]).
     Walked(&'a [Reachability]),
 }
 
@@ -4210,7 +4211,8 @@ pub fn vacuity_probe_expressions(model: &KernelModel) -> Vec<Expr> {
 /// tests -- must pass `Run` (or `Walked` verdicts) so the probe always runs
 /// and `--vacuity error` never silently loses evidence it would otherwise
 /// catch. [`VacuityProbe::Walked`] reuses the verdicts of a walk that
-/// already decided them, which BMC's boundary pre-pass does.
+/// already decided them, which BMC's boundary pre-pass and the explicit
+/// engine do.
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn verification_warnings(

@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// `inc` leaves `x`'s declared range from x == 2. Selecting `PastTheRange`
+// alone leaves `x`'s bound unchecked, so the explicit engine reaches x == 3;
+// the vacuity probe checks every bound and skips that successor, so for it
+// the antecedent stays unreachable.
+spec ExcludedBound {
+  state {
+    x: 0..2
+  }
+  init {
+    x = 0
+  }
+  action inc() {
+    x = x + 1
+  }
+  invariant PastTheRange { x > 2 => x >= 3 }
+}

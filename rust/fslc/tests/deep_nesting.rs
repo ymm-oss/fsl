@@ -818,6 +818,69 @@ fn eval_decides_a_deeply_nested_conjunction_instead_of_overflowing_the_stack() {
     }
 }
 
+/// [`constant_map_model`]'s spec with the invariant `m[0] == 0 => m[0] == 0`,
+/// whose antecedent is its one vacuity probe candidate.
+fn implication_model() -> fsl_core::KernelModel {
+    let source = "spec Implication {\n  type K = 0..1\n  state { m: Map<K, K> }\n  \
+                  init { forall k: K { m[k] = 0 } }\n  action stay() { m = m }\n  \
+                  invariant Holds { m[0] == 0 => m[0] == 0 }\n}\n";
+    let document = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+        .expect("parse implication model");
+    fsl_core::build_model(document).expect("build implication model")
+}
+
+/// The explicit walk decides the vacuity probe itself, evaluating each
+/// expression it is given in the states it visits until the expression has
+/// its verdict. Here that is an implication antecedent `c and c and ... and
+/// c` of [`true_term`]s, nested to the left or to the right, which holds in
+/// the initial state, so the walk decides it reachable rather than leaving it
+/// to the probe's own walk.
+///
+/// The model's own invariant stays shallow: the walk takes the model by
+/// value, walks its invariants before the first state, and drops it on the
+/// small stack, so the deep chain is built here and lent to the walk only as
+/// the probe expression.
+#[test]
+fn explicit_decides_the_probe_on_a_deeply_nested_antecedent_instead_of_overflowing_the_stack() {
+    let model = implication_model();
+    assert_eq!(fsl_runtime::vacuity_probe_expressions(&model).len(), 1);
+    for left_nested in [true, false] {
+        let expressions = vec![conjunction(EVALUATED_DEPTH, left_nested)];
+        let (result, reachability) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(EVALUATOR_STACK)
+                .spawn_scoped(scope, || {
+                    fsl_runtime::verify_explicit_reaching(
+                        model.clone(),
+                        2,
+                        100,
+                        None,
+                        &expressions,
+                        fsl_runtime::CONCRETE_PROBE_BUDGET,
+                    )
+                })
+                .expect("spawn explicit walk thread")
+                .join()
+                .expect("explicit walk thread")
+        })
+        .expect("explicit walk");
+        assert_eq!(result.violation, None, "left-nested: {left_nested}");
+        assert_eq!(
+            (result.states_explored, result.closure),
+            (1, true),
+            "left-nested: {left_nested}"
+        );
+        assert_eq!(
+            reachability,
+            Some(vec![fsl_runtime::Reachability::Reachable]),
+            "left-nested: {left_nested}"
+        );
+        for expression in expressions {
+            drop_conjunction(expression);
+        }
+    }
+}
+
 /// A model whose state `o` is `some(1)`, and the operand of its invariant
 /// that binds `v` from it: `o is some(v)`.
 fn bound_option_model() -> (

@@ -2496,6 +2496,7 @@ pub fn render_explicit_output(
     vacuity: &[VacuityFinding],
     reachable_diagnostics: &std::collections::BTreeMap<String, fsl_verifier::ReachableDiagnosis>,
     skip_vacuity_probe: bool,
+    vacuity_reachability: Option<&[fsl_runtime::Reachability]>,
 ) -> Result<(Value, i32), String> {
     let compatible = explicit_as_bmc(result, vacuity, reachable_diagnostics);
     replay_bmc_witnesses_with_bounds(model, &compatible, None, checked_bounds)?;
@@ -2596,6 +2597,7 @@ pub fn render_explicit_output(
         elapsed_s,
         &statistics,
         skip_vacuity_probe,
+        vacuity_reachability,
     ))
 }
 
@@ -2718,6 +2720,7 @@ fn render_explicit_success(
     elapsed_s: f64,
     statistics: &VerificationStatistics,
     skip_vacuity_probe: bool,
+    vacuity_reachability: Option<&[fsl_runtime::Reachability]>,
 ) -> (Value, i32) {
     if !result.closure {
         let options = BmcOutputOptions {
@@ -2727,7 +2730,7 @@ fn render_explicit_success(
             elapsed_s,
             statistics,
             skip_vacuity_probe,
-            vacuity_reachability: None,
+            vacuity_reachability,
         };
         let (mut output, status) = render_success(output, model, compatible, &options);
         add_explicit_metadata(&mut output, model, result);
@@ -2743,7 +2746,7 @@ fn render_explicit_success(
         elapsed_s,
         statistics,
         skip_vacuity_probe,
-        vacuity_reachability: None,
+        vacuity_reachability,
     };
     add_common(&mut output, model, compatible, &options);
     output.insert("depth".to_owned(), json!(result.depth));
@@ -3922,6 +3925,7 @@ mod tests {
             &[],
             &std::collections::BTreeMap::new(),
             false,
+            None,
         );
         assert!(rendered.is_err());
     }
@@ -4142,6 +4146,7 @@ mod tests {
             &[],
             &std::collections::BTreeMap::new(),
             false,
+            None,
         )
         .expect("explicit evidence replays");
         assert_eq!(

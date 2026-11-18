@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// 200 * 250 = 50,000 reachable states: exactly the vacuity probe's budget.
+spec ProbeBudgetFull {
+  state {
+    a: 0..199,
+    b: 0..249
+  }
+  init {
+    a = 0
+    b = 0
+  }
+  action incA() {
+    requires a < 199
+    a = a + 1
+  }
+  action incB() {
+    requires b < 249
+    b = b + 1
+  }
+  invariant NeverPastTheCorner { a + b > 448 => a == 0 }
+}

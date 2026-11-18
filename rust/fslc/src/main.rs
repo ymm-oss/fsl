@@ -11275,8 +11275,8 @@ fn mutation_oracle_for_model(
     }
     if let Some(budget) = explicit_budget
         && matches!(probe, Ok(ref probe) if !probe.exhausted)
-        && let verification::ExplicitFirst::Ran(Ok(result)) =
-            verification::explicit_first(&model, depth, budget, None)
+        && let verification::ExplicitFirst::Ran(Ok((result, _))) =
+            verification::explicit_first(&model, depth, budget, None, &[])
         && !result.budget_exceeded
         && result.violation.is_none()
         && result.reachables.values().all(Option::is_some)
