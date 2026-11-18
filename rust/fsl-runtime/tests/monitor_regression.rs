@@ -579,3 +579,31 @@ fn enabled_where_filters_instances_but_keeps_every_guard_error() {
         .expect_err("a(0) divides by zero");
     assert_eq!(filtered.to_string(), listed.to_string());
 }
+
+/// `a()` writes `x` and then divides by zero: the step stops on a
+/// `partial_op` and returns its pre-state, not a copy with `x` written.
+#[test]
+fn a_body_stopped_by_a_partial_operation_returns_its_pre_state() {
+    let model = model(include_str!(
+        "../../fslc/tests/fixtures/issue_1851_partial_body.fsl"
+    ));
+    let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+    let action = monitor.enabled().expect("enabled actions")[0].clone();
+    let stepped = monitor.step(&action).expect("step monitor");
+    let pre_state = BTreeMap::from([
+        ("x".to_owned(), FslValue::Int(0)),
+        ("y".to_owned(), FslValue::Int(0)),
+        ("z".to_owned(), FslValue::Int(0)),
+    ]);
+    assert_eq!(
+        stepped.violation,
+        Some(fsl_runtime::Violation {
+            kind: "partial_op".to_owned(),
+            name: "_partial_a".to_owned(),
+            step: 1,
+        })
+    );
+    assert_eq!(stepped.state, pre_state);
+    assert_eq!(stepped.attempted_state, None);
+    assert_eq!(monitor.state, pre_state);
+}

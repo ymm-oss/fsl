@@ -2025,14 +2025,16 @@ impl Monitor {
             .iter()
             .find(|action| action.name == enabled.action)
             .ok_or_else(|| runtime_error(format!("unknown action '{}'", enabled.action)))?;
-        let mut pending = State::new();
+        // The writes land in a copy of `old_state`, in place; every read
+        // still sees `old_state`. A body that stops part way drops the copy.
+        let mut next = old_state.clone();
         let mut writes = BTreeSet::new();
         let mut bindings = enabled.bindings.clone();
         for statement in &action.statements {
             if let Err(error) = compute_statement_update(
                 statement,
                 old_state,
-                &mut pending,
+                &mut next,
                 &mut writes,
                 &mut bindings,
                 model,
@@ -2057,8 +2059,6 @@ impl Monitor {
                 return Err(error);
             }
         }
-        let mut next = old_state.clone();
-        next.extend(pending);
         *step += 1;
         let violation = match check_successor(
             &next,
@@ -5553,7 +5553,7 @@ fn execute_init_statement_inner(
 fn compute_statement_update(
     statement: &Statement,
     old_state: &State,
-    pending: &mut State,
+    next: &mut State,
     writes: &mut BTreeSet<String>,
     bindings: &mut Bindings,
     model: &KernelModel,
@@ -5567,7 +5567,7 @@ fn compute_statement_update(
                     "double assignment to '{write_key}' on the same execution path"
                 )));
             }
-            assign(target, value, old_state, pending, bindings, model)?;
+            assign(target, value, old_state, next, bindings, model)?;
         }
         Statement::If {
             condition,
@@ -5581,7 +5581,7 @@ fn compute_statement_update(
                 else_statements
             };
             for statement in branch {
-                compute_statement_update(statement, old_state, pending, writes, bindings, model)?;
+                compute_statement_update(statement, old_state, next, writes, bindings, model)?;
             }
         }
         Statement::ForAll {
@@ -5594,7 +5594,7 @@ fn compute_statement_update(
                 }
                 for statement in statements {
                     compute_statement_update(
-                        statement, old_state, pending, writes, &mut local, model,
+                        statement, old_state, next, writes, &mut local, model,
                     )?;
                 }
             }

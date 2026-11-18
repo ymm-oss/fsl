@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+spec PartialBody {
+  state {
+    x: 0..1,
+    z: 0..1,
+    y: 0..1
+  }
+  init {
+    x = 0
+    z = 0
+    y = 0
+  }
+  action a() {
+    x = 1
+    y = 1 / z
+  }
+}
