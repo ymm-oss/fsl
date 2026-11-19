@@ -1003,10 +1003,13 @@ pub(crate) struct CheckedStateCarriers<'f, T> {
 
 impl<'f, T> CheckedStateCarriers<'f, T> {
     /// Record names whose bounds the caller has established for this exact frame.
-    /// This constructor proves nothing: the address key names the borrowed read
-    /// frame, not an equal map of symbolic values. Bounds belong to that frame's
-    /// evaluation scope, so callers must not certify a clone and use it for the
-    /// original (or reuse a certificate after its premises leave scope).
+    /// This constructor proves nothing, so soundness rests on two caller rules:
+    /// `names` holds only states whose bounds are asserted or proved for
+    /// `read_state`, and the certificate is not used after the solver scope that
+    /// holds those bounds is popped. The address key names the borrowed read
+    /// frame, not an equal map of symbolic values, so a certificate issued for a
+    /// clone does not match the original: [`Self::contains`] answers `false` and
+    /// the carrier counts as unchecked (fail-closed).
     pub(crate) fn new(read_state: &'f SymbolicState<T>, names: BTreeSet<String>) -> Self {
         Self {
             read_state,
