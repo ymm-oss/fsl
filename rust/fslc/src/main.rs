@@ -5783,8 +5783,8 @@ fn run_scenarios_mode_from_source(
     )
 }
 
-/// One bounded verifier run of the witness or counterfactual phase of
-/// `explain` (shared with `scenarios`). Tests count these runs and the
+/// One bounded verifier run of the witness phase of `explain` (shared with
+/// `scenarios`). Tests count these runs, the counterfactual runs and the
 /// concrete counterfactual searches (#1838, #1839).
 fn explain_bounded_run(
     model: &KernelModel,
@@ -5793,7 +5793,33 @@ fn explain_bounded_run(
 ) -> Result<fsl_verifier::BmcResult, fsl_verifier::VerifyError> {
     #[cfg(test)]
     explain_run_observer::record_bounded_run();
-    block_on_native(fsl_verifier::verify_bounded(model, solver, depth))
+    let result = block_on_native(fsl_verifier::verify_bounded(model, solver, depth));
+    #[cfg(test)]
+    explain_run_observer::record_query_kinds(false, solver);
+    result
+}
+
+/// One bounded verifier run of a weakened model in the invariant or reachable
+/// counterfactual phase of `explain`. The counterfactual code reads the run's
+/// verdicts (`violation`, the reachables, `leadsTo` through
+/// [`unreached_after`]) and, from a [`CounterfactualTraces::Printed`] run, the
+/// violation's trace; never its `action_coverage`, `vacuity` or deadlock
+/// trace. So the run asks no `action_coverage` or vacuity probe (#1868). A
+/// printed trace does not change with that: it is re-solved from the
+/// assertions, which those scoped probes leave as they were (#1940).
+fn counterfactual_bounded_run(
+    model: &KernelModel,
+    solver: &mut fsl_solver_z3::Z3Solver,
+    depth: usize,
+) -> Result<fsl_verifier::BmcResult, fsl_verifier::VerifyError> {
+    #[cfg(test)]
+    explain_run_observer::record_bounded_run();
+    let result = block_on_native(fsl_verifier::verify_bounded_without_coverage(
+        model, solver, depth,
+    ));
+    #[cfg(test)]
+    explain_run_observer::record_query_kinds(true, solver);
+    result
 }
 
 #[cfg(test)]
@@ -5804,6 +5830,28 @@ mod explain_run_observer {
         static RUNS: Cell<usize> = const { Cell::new(0) };
         static SEARCHES: Cell<usize> = const { Cell::new(0) };
         static UNSHARED: Cell<bool> = const { Cell::new(false) };
+        static QUERY_KINDS: std::cell::RefCell<[std::collections::BTreeSet<String>; 2]> =
+            std::cell::RefCell::default();
+    }
+
+    /// Keep the query kinds `solver` asked, under the counterfactual runs'
+    /// set when `counterfactual`, else under the witness runs'.
+    pub(crate) fn record_query_kinds(counterfactual: bool, solver: &impl fsl_solver::SmtSolver) {
+        QUERY_KINDS.with(|kinds| {
+            kinds.borrow_mut()[usize::from(counterfactual)].extend(
+                solver
+                    .statistics()
+                    .properties
+                    .into_iter()
+                    .map(|property| property.kind),
+            );
+        });
+    }
+
+    /// The query kinds the (witness, counterfactual) runs asked on this
+    /// thread since the last call.
+    pub(crate) fn query_kinds() -> [std::collections::BTreeSet<String>; 2] {
+        QUERY_KINDS.with(std::cell::RefCell::take)
     }
 
     /// Make every per-invariant counterfactual run, in order, on this
@@ -9611,7 +9659,10 @@ fn unreached_reachables(
     }
     // Only the verdicts are read: no model is re-solved for output (#1940).
     let mut solver = fsl_solver_z3::Z3Solver::new().ok()?.verdicts_only();
-    unreached_after(model, &explain_bounded_run(model, &mut solver, depth))
+    unreached_after(
+        model,
+        &counterfactual_bounded_run(model, &mut solver, depth),
+    )
 }
 
 fn reachable_counterfactuals_from_source(
@@ -10211,7 +10262,7 @@ fn invariants_without_bounded_violation(
         else {
             break;
         };
-        let result = explain_bounded_run(&screened, &mut solver, depth);
+        let result = counterfactual_bounded_run(&screened, &mut solver, depth);
         if screened.invariants.len() == model.invariants.len() {
             runs.record(model, &result);
         }
@@ -10276,7 +10327,7 @@ fn target_invariant_outcome(
     let Ok(mut solver) = solver else {
         return outcome;
     };
-    let result = explain_bounded_run(&model, &mut solver, depth);
+    let result = counterfactual_bounded_run(&model, &mut solver, depth);
     if model.invariants.len() == all_invariants {
         runs.record(&model, &result);
     }
@@ -20023,6 +20074,35 @@ spec InitTraceability {
         for (label, survived) in outputs_survive_extra_queries(false) {
             assert!(!survived, "{label}: the extra queries changed nothing");
         }
+    }
+
+    /// The counterfactual runs ask no `action_coverage` or vacuity probe; the
+    /// witness run, which is not a counterfactual run, still asks both
+    /// (#1868).
+    #[test]
+    fn counterfactual_runs_ask_no_coverage_or_vacuity_probe() {
+        let fixture = SnapshotFixture::new("explain-run-probes", EXPLAIN_RUN_COUNT_SPEC);
+        explain_run_observer::query_kinds();
+        let (explained, status) = run_explain_from_source(
+            &fixture.path,
+            EXPLAIN_RUN_COUNT_SPEC,
+            4,
+            EXPLAIN_WITNESS_DEADLOCK_MODE,
+            false,
+        );
+        assert_eq!(status, 0, "{explained:#}");
+        let [witness, counterfactual] = explain_run_observer::query_kinds();
+        for kind in ["action_coverage", "vacuity"] {
+            assert!(witness.contains(kind), "witness run kinds {witness:?}");
+            assert!(
+                !counterfactual.contains(kind),
+                "counterfactual run kinds {counterfactual:?}"
+            );
+        }
+        assert!(
+            counterfactual.contains("invariant"),
+            "counterfactual run kinds {counterfactual:?}"
+        );
     }
 
     /// Screening, sharing and replay print what making every per-invariant
