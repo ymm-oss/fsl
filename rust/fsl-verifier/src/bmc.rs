@@ -21,7 +21,6 @@ use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::scoped_query::{
     OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_query,
 };
-use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
     ActionGuardDefinedness, ActionInstance, action_guards_in,
@@ -2503,14 +2502,12 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
     enabled: &[S::Term],
 ) -> Result<Option<BmcViolation>, VerifyError> {
     let deadlock = solver.not(&solver.or(enabled)?)?;
-    let canonical = canonical_constraint(solver, model, &states[step])?;
     for property in &model.leadstos {
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
             for pending in 0..=step {
                 let mut terms = vec![
                     deadlock.clone(),
-                    canonical.clone(),
                     leadsto_condition(
                         solver,
                         model,
@@ -2565,8 +2562,8 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
 /// Whether one query proves that no probe of `check_leadstos`'s lasso
 /// enumeration for `binding` can answer `sat` (#1888). The query is the
 /// disjunction, over every (loop start, loop end) pair, of that pair's
-/// probes, which share the loop equality, canonical constraint, and fairness
-/// condition and differ only in the pending step. `unknown` proves nothing.
+/// probes, which share the loop equality and fairness condition and differ
+/// only in the pending step. `unknown` proves nothing.
 #[allow(clippy::too_many_arguments)]
 async fn leadsto_lasso_ruled_out<S: SmtSolver>(
     solver: &mut S,
@@ -2576,7 +2573,6 @@ async fn leadsto_lasso_ruled_out<S: SmtSolver>(
     states: &[SymbolicState<S::Term>],
     choices: &[S::Term],
     instances: &[ActionInstance<S::Term>],
-    canonical: &[S::Term],
     depth: usize,
 ) -> Result<bool, VerifyError> {
     let mut lassos = Vec::new();
@@ -2607,12 +2603,7 @@ async fn leadsto_lasso_ruled_out<S: SmtSolver>(
                     Ok(solver.and(&terms)?)
                 })
                 .collect::<Result<Vec<_>, VerifyError>>()?;
-            lassos.push(solver.and(&[
-                loop_equal,
-                canonical[loop_start].clone(),
-                fair,
-                solver.or(&pendings)?,
-            ])?);
+            lassos.push(solver.and(&[loop_equal, fair, solver.or(&pendings)?])?);
         }
     }
     if lassos.is_empty() {
@@ -2710,11 +2701,6 @@ async fn check_leadstos<S: SmtSolver>(
     depth: usize,
     lasso_discharged: &BTreeSet<usize>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
-    let canonical = states
-        .iter()
-        .take(depth + 1)
-        .map(|state| canonical_constraint(solver, model, state))
-        .collect::<Result<Vec<_>, _>>()?;
     for (index, property) in model.leadstos.iter().enumerate() {
         // A ranking proof already showed every fair lasso below is `unsat`
         // for this property (#1149); asking the solver again changes nothing
@@ -2732,7 +2718,7 @@ async fn check_leadstos<S: SmtSolver>(
             // Full-output differential checks must guard witness stability;
             // only solver-work/timing statistics under `cost` may change.
             if leadsto_lasso_ruled_out(
-                solver, model, property, &binding, states, choices, instances, &canonical, depth,
+                solver, model, property, &binding, states, choices, instances, depth,
             )
             .await?
             {
@@ -2748,7 +2734,6 @@ async fn check_leadstos<S: SmtSolver>(
                     for pending in 0..loop_end {
                         let mut terms = vec![
                             loop_equal.clone(),
-                            canonical[loop_start].clone(),
                             fair.clone(),
                             leadsto_condition(
                                 solver,
