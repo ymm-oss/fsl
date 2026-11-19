@@ -342,8 +342,8 @@ pub(crate) fn parse_param_value(
                         return Err(format!("unknown enum member '{member}'"));
                     }
                     Ok(FslValue::Enum {
-                        type_name: type_name.clone(),
-                        member: member.to_owned(),
+                        type_name: type_name.as_str().into(),
+                        member: member.into(),
                     })
                 }
                 Some(TypeDef::Struct { .. }) | None => {

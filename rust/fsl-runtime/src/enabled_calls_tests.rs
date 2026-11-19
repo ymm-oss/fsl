@@ -213,8 +213,8 @@ fn a_state_the_guards_cannot_read_keeps_every_instance_and_its_error() {
     let submit = params(&[("l", Value::Int(5)), ("d", Value::Int(1))]);
     let staff = params(&[("l", Value::Int(5))]);
     let approved = Value::Enum {
-        type_name: "Stage".to_owned(),
-        member: "Approved".to_owned(),
+        type_name: "Stage".into(),
+        member: "Approved".into(),
     };
     let mut missing_key = initial.clone();
     let Some(Value::Map(stage)) = missing_key.get_mut("stage") else {
@@ -243,8 +243,8 @@ fn a_state_the_guards_cannot_read_keeps_every_instance_and_its_error() {
     stage.insert(
         Value::Int(9),
         Value::Enum {
-            type_name: "Stage".to_owned(),
-            member: "Submitted".to_owned(),
+            type_name: "Stage".into(),
+            member: "Submitted".into(),
         },
     );
     let Some(Value::Map(staffed)) = not_boolean.get_mut("staffed") else {

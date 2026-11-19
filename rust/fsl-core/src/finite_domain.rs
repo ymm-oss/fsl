@@ -37,7 +37,7 @@ pub(crate) fn display(value: &FslValue) -> String {
     match value {
         FslValue::Int(value) => value.to_string(),
         FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
+        FslValue::Enum { member, .. } => member.to_string(),
         other => format!("{other:?}"),
     }
 }
@@ -240,8 +240,8 @@ pub(crate) fn evaluate(
         Expr::EnumMember {
             type_name, member, ..
         } => FslValue::Enum {
-            type_name: type_name.clone(),
-            member: member.clone(),
+            type_name: type_name.as_str().into(),
+            member: member.as_str().into(),
         },
         Expr::Var(name) => assignment
             .get(name)

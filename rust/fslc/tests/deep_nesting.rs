@@ -817,3 +817,269 @@ fn eval_decides_a_deeply_nested_conjunction_instead_of_overflowing_the_stack() {
         drop_conjunction(chain);
     }
 }
+
+/// [`constant_map_model`]'s spec with the invariant `m[0] == 0 => m[0] == 0`,
+/// whose antecedent is its one vacuity probe candidate.
+fn implication_model() -> fsl_core::KernelModel {
+    let source = "spec Implication {\n  type K = 0..1\n  state { m: Map<K, K> }\n  \
+                  init { forall k: K { m[k] = 0 } }\n  action stay() { m = m }\n  \
+                  invariant Holds { m[0] == 0 => m[0] == 0 }\n}\n";
+    let document = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+        .expect("parse implication model");
+    fsl_core::build_model(document).expect("build implication model")
+}
+
+/// The explicit walk decides the vacuity probe itself, evaluating each
+/// expression it is given in the states it visits until the expression has
+/// its verdict. Here that is an implication antecedent `c and c and ... and
+/// c` of [`true_term`]s, nested to the left or to the right, which holds in
+/// the initial state, so the walk decides it reachable rather than leaving it
+/// to the probe's own walk.
+///
+/// The model's own invariant stays shallow: the walk takes the model by
+/// value, walks its invariants before the first state, and drops it on the
+/// small stack, so the deep chain is built here and lent to the walk only as
+/// the probe expression.
+#[test]
+fn explicit_decides_the_probe_on_a_deeply_nested_antecedent_instead_of_overflowing_the_stack() {
+    let model = implication_model();
+    assert_eq!(fsl_runtime::vacuity_probe_expressions(&model).len(), 1);
+    for left_nested in [true, false] {
+        let expressions = vec![conjunction(EVALUATED_DEPTH, left_nested)];
+        let (result, reachability) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(EVALUATOR_STACK)
+                .spawn_scoped(scope, || {
+                    fsl_runtime::verify_explicit_reaching(
+                        model.clone(),
+                        2,
+                        100,
+                        None,
+                        &expressions,
+                        fsl_runtime::CONCRETE_PROBE_BUDGET,
+                    )
+                })
+                .expect("spawn explicit walk thread")
+                .join()
+                .expect("explicit walk thread")
+        })
+        .expect("explicit walk");
+        assert_eq!(result.violation, None, "left-nested: {left_nested}");
+        assert_eq!(
+            (result.states_explored, result.closure),
+            (1, true),
+            "left-nested: {left_nested}"
+        );
+        assert_eq!(
+            reachability,
+            Some(vec![fsl_runtime::Reachability::Reachable]),
+            "left-nested: {left_nested}"
+        );
+        for expression in expressions {
+            drop_conjunction(expression);
+        }
+    }
+}
+
+/// A model whose state `o` is `some(1)`, and the operand of its invariant
+/// that binds `v` from it: `o is some(v)`.
+fn bound_option_model() -> (
+    fsl_core::KernelModel,
+    fsl_runtime::State,
+    fsl_core::KernelExpr,
+) {
+    let source = "spec BoundOption {\n  type K = 0..1\n  state { m: Map<K, K>, o: Option<K> }\n  \
+                  init {\n    forall k: K { m[k] = 0 }\n    o = some(1)\n  }\n  \
+                  action stay() { m = m }\n  invariant Bound { o is some(v) and v == 1 }\n}\n";
+    let document = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+        .expect("parse bound option model");
+    let model = fsl_core::build_model(document).expect("build bound option model");
+    let state = fsl_runtime::Monitor::new(model.clone())
+        .expect("initialize bound option model")
+        .state;
+    let fsl_core::KernelExpr::Binary { left, .. } = model.invariants[0].expr.clone() else {
+        unreachable!("the invariant is a conjunction");
+    };
+    (model, state, *left)
+}
+
+/// `v == value`.
+fn v_equals(value: i64) -> fsl_core::KernelExpr {
+    fsl_core::KernelExpr::Binary {
+        op: "==".to_owned(),
+        left: Box::new(fsl_core::KernelExpr::Var("v".to_owned())),
+        right: Box::new(fsl_core::KernelExpr::Num(value)),
+    }
+}
+
+/// `(c and c and ... and o is some(v) ... and v == 0) or v == 1`, with
+/// `terms` conjuncts before `v == 0` and the `is` deepest, the conjunction
+/// nested to the left or to the right. The `is` binds `v` to 1 inside the
+/// left operand of `or` only, so `v == 1` reads the caller's `v`.
+fn spine_binding_at_the_far_end(
+    is_term: &fsl_core::KernelExpr,
+    terms: usize,
+    left_nested: bool,
+) -> fsl_core::KernelExpr {
+    let binary = |op: &str, left, right| fsl_core::KernelExpr::Binary {
+        op: op.to_owned(),
+        left: Box::new(left),
+        right: Box::new(right),
+    };
+    let mut conjunction = is_term.clone();
+    for _ in 1..terms {
+        conjunction = if left_nested {
+            binary("and", conjunction, true_term())
+        } else {
+            binary("and", true_term(), conjunction)
+        };
+    }
+    binary("or", binary("and", conjunction, v_equals(0)), v_equals(1))
+}
+
+/// Takes a [`spine_binding_at_the_far_end`] apart one level at a time.
+fn drop_spine_binding(expr: fsl_core::KernelExpr) {
+    let fsl_core::KernelExpr::Binary { left, .. } = expr else {
+        return;
+    };
+    let fsl_core::KernelExpr::Binary { left, .. } = *left else {
+        return;
+    };
+    drop_conjunction(*left);
+}
+
+/// Whether an `and`/`or`/`=>` spine can bind is decided by a walk that
+/// continues into a connective operand and sets nothing aside when the other
+/// operand ends the spine, so the `is` at the far end of a spine nested to one
+/// side is reached at every length. The binding it makes stays out of the
+/// right operand of `or`, which reads the caller's `v == 0` and is false.
+#[test]
+fn eval_keeps_a_binding_from_the_far_end_of_a_long_spine_in_its_scope() {
+    let (model, state, is_term) = bound_option_model();
+    for terms in [1, 7, 8, 9, 10, 17, EVALUATED_DEPTH] {
+        for left_nested in [true, false] {
+            let spine = spine_binding_at_the_far_end(&is_term, terms, left_nested);
+            let value = std::thread::scope(|scope| {
+                std::thread::Builder::new()
+                    .stack_size(EVALUATOR_STACK)
+                    .spawn_scoped(scope, || {
+                        let mut bindings = std::collections::BTreeMap::from([(
+                            "v".to_owned(),
+                            fsl_core::FslValue::Int(0),
+                        )]);
+                        fsl_runtime::eval(&spine, &state, &mut bindings, &model, None)
+                    })
+                    .expect("spawn evaluator thread")
+                    .join()
+                    .expect("evaluator thread")
+            });
+            assert_eq!(
+                value.expect("evaluate the spine"),
+                fsl_core::FslValue::Bool(false),
+                "terms: {terms}, left-nested: {left_nested}"
+            );
+            drop_spine_binding(spine);
+        }
+    }
+}
+
+/// `(c and c and ... and v == 0) or v == 1` with `terms` conjuncts `c`, each
+/// itself `true_term() and true_term()` and nested to the left, so the walk
+/// sets one conjunct aside per level below the first. The `is` replaces the
+/// left operand of the outermost conjunct, which is set aside first and taken
+/// back last, or of the innermost one set aside, which is set aside last and
+/// taken back first.
+fn spine_binding_set_aside(
+    is_term: &fsl_core::KernelExpr,
+    terms: usize,
+    in_outermost: bool,
+) -> fsl_core::KernelExpr {
+    let binary = |op: &str, left, right| fsl_core::KernelExpr::Binary {
+        op: op.to_owned(),
+        left: Box::new(left),
+        right: Box::new(right),
+    };
+    let binding_level = if in_outermost { terms - 1 } else { 1 };
+    let mut conjunction = binary("and", true_term(), true_term());
+    for level in 1..terms {
+        let first = if level == binding_level {
+            is_term.clone()
+        } else {
+            true_term()
+        };
+        conjunction = binary("and", conjunction, binary("and", first, true_term()));
+    }
+    binary("or", binary("and", conjunction, v_equals(0)), v_equals(1))
+}
+
+/// The walk holds eight operands set aside on the stack and the rest on the
+/// heap. With more than eight set aside, the `is` set aside last is taken
+/// back from the heap and the one set aside first from the stack. Either way
+/// the spine is found to bind, so its binding stays out of the right operand
+/// of `or` as above.
+#[test]
+fn eval_keeps_a_binding_set_aside_by_the_spine_walk_in_its_scope() {
+    let (model, state, is_term) = bound_option_model();
+    for terms in [2, 8, 9, 10, 17] {
+        for in_outermost in [true, false] {
+            let spine = spine_binding_set_aside(&is_term, terms, in_outermost);
+            let mut bindings =
+                std::collections::BTreeMap::from([("v".to_owned(), fsl_core::FslValue::Int(0))]);
+            let value = fsl_runtime::eval(&spine, &state, &mut bindings, &model, None);
+            assert_eq!(
+                value.expect("evaluate the spine"),
+                fsl_core::FslValue::Bool(false),
+                "terms: {terms}, in the outermost operand: {in_outermost}"
+            );
+        }
+    }
+}
+
+/// A `requires` that is `o is some(v) or m[0] == 0` is an `or` whose left
+/// operand is the `is` itself. Its binding stays in that operand, so a later
+/// `requires v == 1` cannot read it.
+#[test]
+fn a_requires_disjunct_that_binds_does_not_bind_for_a_later_guard() {
+    let (mut model, state, is_term) = bound_option_model();
+    let requires = fsl_core::KernelExpr::Binary {
+        op: "or".to_owned(),
+        left: Box::new(is_term),
+        right: Box::new(true_term()),
+    };
+    model.actions[0].guards = vec![
+        fsl_core::ActionGuard::Requires(requires),
+        fsl_core::ActionGuard::Requires(v_equals(1)),
+    ];
+    let error = fsl_runtime::Monitor::from_state(model, state)
+        .enabled()
+        .expect_err("the later guard reads an unbound name");
+    assert!(error.message.contains("'v'"), "{error:?}");
+}
+
+/// `(m[0] == 1 or o is some(v)) and v == 1`, with the caller's `v` at 0. The
+/// spine binds, and the `or` nested in it scopes the binding of its `is` to
+/// its own operand, so `v == 1` reads the caller's `v` and is false.
+#[test]
+fn eval_keeps_a_binding_in_a_disjunction_nested_in_a_binding_spine() {
+    let (model, state, is_term) = bound_option_model();
+    let binary = |op: &str, left, right| fsl_core::KernelExpr::Binary {
+        op: op.to_owned(),
+        left: Box::new(left),
+        right: Box::new(right),
+    };
+    let false_term = binary(
+        "==",
+        fsl_core::KernelExpr::Index(
+            Box::new(fsl_core::KernelExpr::Var("m".to_owned())),
+            Box::new(fsl_core::KernelExpr::Num(0)),
+        ),
+        fsl_core::KernelExpr::Num(1),
+    );
+    let spine = binary("and", binary("or", false_term, is_term), v_equals(1));
+    let mut bindings =
+        std::collections::BTreeMap::from([("v".to_owned(), fsl_core::FslValue::Int(0))]);
+    assert_eq!(
+        fsl_runtime::eval(&spine, &state, &mut bindings, &model, None).expect("evaluate the spine"),
+        fsl_core::FslValue::Bool(false)
+    );
+}

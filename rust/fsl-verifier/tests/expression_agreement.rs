@@ -221,17 +221,17 @@ fn enum_abstraction_agrees_symbolically_and_rejects_a_wrong_target() {
     let state = BTreeMap::from([(
         "stage".to_owned(),
         Value::Enum {
-            type_name: "ImplStage".to_owned(),
-            member: "C".to_owned(),
+            type_name: "ImplStage".into(),
+            member: "C".into(),
         },
     )]);
     let correct = Value::Enum {
-        type_name: "AbsStage".to_owned(),
-        member: "Y".to_owned(),
+        type_name: "AbsStage".into(),
+        member: "Y".into(),
     };
     let wrong = Value::Enum {
-        type_name: "AbsStage".to_owned(),
-        member: "X".to_owned(),
+        type_name: "AbsStage".into(),
+        member: "X".into(),
     };
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
     assert!(

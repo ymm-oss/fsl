@@ -29,6 +29,9 @@ mod enabled_calls_tests;
 #[cfg(test)]
 mod explicit_search_tests;
 
+#[cfg(test)]
+mod double_assignment_tests;
+
 /// Work counters the structural tests of #1842 read, so a scaling
 /// regression fails without a wall-clock deadline.
 #[cfg(test)]
@@ -47,7 +50,7 @@ mod evaluation_counts {
 pub use explicit::{
     ActionStats, ExplicitReachableWitness, ExplicitResult, ExplicitViolation,
     check_init_write_ownership, deterministic_initial_state, explicit_unsupported_reason,
-    verify_explicit, verify_explicit_selected,
+    verify_explicit, verify_explicit_reaching, verify_explicit_selected,
 };
 
 pub type State = BTreeMap<String, Value>;
@@ -175,7 +178,9 @@ fn eval_observing(
             eval_connective(
                 op, left, right, binds, state, bindings, model, old_state, observed,
             )
-        });
+        })
+        .map(Value::Bool)
+        .map_err(|error| *error);
     }
     if matches!(expr, Expr::Is { .. }) {
         eval_with_bindings_observing(
@@ -260,7 +265,7 @@ fn eval_inner(
                 .collect::<Result<_, _>>()?,
         )),
         Expr::Struct { name, fields } => Ok(Value::Struct {
-            type_name: name.clone(),
+            type_name: name.as_str().into(),
             fields: fields
                 .iter()
                 .map(|(field, expr)| {
@@ -297,8 +302,8 @@ fn eval_inner(
                 )));
             }
             Ok(Value::Enum {
-                type_name: type_name.clone(),
-                member: member.clone(),
+                type_name: type_name.as_str().into(),
+                member: member.as_str().into(),
             })
         }
         Expr::Call { name, .. } => {
@@ -431,9 +436,10 @@ fn eval_inner(
             // binder is all that differs between two candidates' scopes.
             let candidates = binder_domain(binder, state, bindings, model, old_state)?;
             let mut local = bindings.clone();
+            let name = binder_name(binder);
             if quantifier == "forall" {
                 for value in candidates {
-                    local.insert(binder_name(binder).to_owned(), value);
+                    rebind(&mut local, name, value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
                     }
@@ -444,7 +450,7 @@ fn eval_inner(
                 Ok(Value::Bool(true))
             } else {
                 for value in candidates {
-                    local.insert(binder_name(binder).to_owned(), value);
+                    rebind(&mut local, name, value);
                     if !binder_where_holds(binder, state, &mut local, model, old_state)? {
                         continue;
                     }
@@ -816,7 +822,7 @@ fn operands_equal(left: Operand<'_>, right: Operand<'_>) -> Option<bool> {
             Operand::Bool(literal) => matches!(value, Value::Bool(value) if *value == literal),
             Operand::Enum { type_name, member } => matches!(
                 value,
-                Value::Enum { type_name: t, member: m } if t == type_name && m == member
+                Value::Enum { type_name: t, member: m } if **t == *type_name && **m == *member
             ),
         },
         (Operand::Int(left), Operand::Int(right)) => left == right,
@@ -1031,7 +1037,9 @@ fn eval_binary(
         let binds = connective_may_bind(left) || connective_may_bind(right);
         return eval_connective(
             op, left, right, binds, state, bindings, model, old_state, observed,
-        );
+        )
+        .map(Value::Bool)
+        .map_err(|error| *error);
     }
     if let Some(value) = compare_in_place(op, left, right, state, bindings, model) {
         return Ok(value);
@@ -1111,6 +1119,10 @@ fn is_connective(op: &str) -> bool {
 /// would leave equal to `bindings`. Where it is true, every connective on the
 /// spine scopes its operands on a copy, including one whose own operands
 /// cannot bind.
+///
+/// A long spine recurses once per connective and every frame on it holds the
+/// slot its operand's result is returned in, so the result is a Boolean and
+/// the rare error is boxed rather than a [`Value`] beside a [`RuntimeError`].
 #[allow(clippy::too_many_arguments)]
 fn eval_connective(
     op: &str,
@@ -1122,28 +1134,46 @@ fn eval_connective(
     model: &KernelModel,
     old_state: Option<&State>,
     mut observed: Option<&mut Bindings>,
-) -> Result<Value, RuntimeError> {
-    if !binds {
-        let left = as_bool(eval_spine_operand(
-            left,
-            false,
-            state,
-            bindings,
-            model,
-            old_state,
-            observed.as_deref_mut(),
-        )?)?;
-        match (op, left) {
-            ("and", false) => return Ok(Value::Bool(false)),
-            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
-            _ => {}
-        }
-        return Ok(Value::Bool(as_bool(eval_spine_operand(
-            right, false, state, bindings, model, old_state, observed,
-        )?)?));
+) -> Result<bool, Box<RuntimeError>> {
+    if binds {
+        return eval_binding_connective(
+            op, left, right, state, bindings, model, old_state, observed,
+        );
     }
+    let left = eval_spine_operand(
+        left,
+        false,
+        state,
+        bindings,
+        model,
+        old_state,
+        observed.as_deref_mut(),
+    )?;
+    match (op, left) {
+        ("and", false) => return Ok(false),
+        ("or", true) | ("=>", false) => return Ok(true),
+        _ => {}
+    }
+    eval_spine_operand(right, false, state, bindings, model, old_state, observed)
+}
+
+/// [`eval_connective`] where `binds` is true. A long spine recurses through
+/// one of the two once per connective, so this half is kept out of line and
+/// the frame of the half that cannot bind stays small.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn eval_binding_connective(
+    op: &str,
+    left: &Expr,
+    right: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
+) -> Result<bool, Box<RuntimeError>> {
     let mut local = bindings.clone();
-    let left = as_bool(eval_spine_operand(
+    let left = eval_spine_operand(
         left,
         true,
         state,
@@ -1151,26 +1181,24 @@ fn eval_connective(
         model,
         old_state,
         observed.as_deref_mut(),
-    )?)?;
+    )?;
     match (op, left) {
         ("and", false) => {
             // Retain reached conjunct evidence even when its RHS is skipped.
             *bindings = local;
-            return Ok(Value::Bool(false));
+            return Ok(false);
         }
-        ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+        ("or", true) | ("=>", false) => return Ok(true),
         _ => {}
     }
     if !fsl_core::pattern_binding_flows(op, true) {
         local.clone_from(bindings);
     }
-    let right = as_bool(eval_spine_operand(
-        right, true, state, &mut local, model, old_state, observed,
-    )?)?;
+    let right = eval_spine_operand(right, true, state, &mut local, model, old_state, observed)?;
     if fsl_core::pattern_binding_flows(op, false) {
         *bindings = local;
     }
-    Ok(Value::Bool(right))
+    Ok(right)
 }
 
 /// An operand of [`eval_connective`]: a connective continues the spine with
@@ -1185,14 +1213,45 @@ fn eval_spine_operand(
     model: &KernelModel,
     old_state: Option<&State>,
     observed: Option<&mut Bindings>,
-) -> Result<Value, RuntimeError> {
+) -> Result<bool, Box<RuntimeError>> {
     match expr {
         Expr::Binary { op, left, right } if is_connective(op) => recursion::guard(|| {
-            eval_connective(
-                op, left, right, binds, state, bindings, model, old_state, observed,
-            )
+            if binds {
+                eval_binding_connective(
+                    op, left, right, state, bindings, model, old_state, observed,
+                )
+            } else {
+                eval_connective(
+                    op, left, right, false, state, bindings, model, old_state, observed,
+                )
+            }
         }),
-        _ => eval_with_bindings_observing(expr, state, bindings, model, old_state, observed),
+        _ => eval_spine_leaf(expr, state, bindings, model, old_state, observed),
+    }
+}
+
+/// An operand of [`eval_connective`] that is not itself a connective. Kept out
+/// of line so its [`Value`] stays out of the frames of the spine's recursion.
+#[inline(never)]
+fn eval_spine_leaf(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<bool, Box<RuntimeError>> {
+    eval_with_bindings_observing(expr, state, bindings, model, old_state, observed)
+        .and_then(as_bool)
+        .map_err(Box::new)
+}
+
+/// Bind `name` to `value` in `bindings`, reusing the key once it is there.
+fn rebind(bindings: &mut Bindings, name: &str, value: Value) {
+    if let Some(slot) = bindings.get_mut(name) {
+        *slot = value;
+    } else {
+        bindings.insert(name.to_owned(), value);
     }
 }
 
@@ -1201,19 +1260,71 @@ fn eval_spine_operand(
 /// Only an `is` pattern binds, and only an `is` on the `and`/`or`/`=>`
 /// spine is evaluated in place: [`eval_observing`] evaluates every other
 /// operand, and an `and` or `is` it meets, on a copy of the bindings.
+///
+/// The walk continues into a connective operand directly and sets the other
+/// operand aside only when it is a connective as well, so a spine nested to
+/// one side sets nothing aside. Up to eight operands set aside are held on
+/// the stack and the rest on the heap. Kept out of line so the buffer does
+/// not grow the frames of the recursive evaluator that calls it.
+#[inline(never)]
 fn connective_may_bind(expr: &Expr) -> bool {
-    let mut pending = vec![expr];
-    while let Some(expr) = pending.pop() {
-        match expr {
-            Expr::Is { .. } => return true,
-            Expr::Binary { op, left, right } if is_connective(op) => {
-                pending.push(left);
-                pending.push(right);
+    let (mut left, mut right) = match spine_node(expr) {
+        SpineNode::Binds => return true,
+        SpineNode::Connective(left, right) => (left, right),
+        SpineNode::Leaf => return false,
+    };
+    let mut inline = [(expr, expr); 8];
+    let mut len = 0;
+    let mut spill = Vec::new();
+    loop {
+        match (spine_node(left), spine_node(right)) {
+            (SpineNode::Binds, _) | (_, SpineNode::Binds) => return true,
+            (SpineNode::Connective(next_left, next_right), SpineNode::Leaf)
+            | (SpineNode::Leaf, SpineNode::Connective(next_left, next_right)) => {
+                (left, right) = (next_left, next_right);
             }
-            _ => {}
+            (
+                SpineNode::Connective(next_left, next_right),
+                SpineNode::Connective(aside_left, aside_right),
+            ) => {
+                if spill.is_empty() && len < inline.len() {
+                    inline[len] = (aside_left, aside_right);
+                    len += 1;
+                } else {
+                    spill.push((aside_left, aside_right));
+                }
+                (left, right) = (next_left, next_right);
+            }
+            (SpineNode::Leaf, SpineNode::Leaf) => {
+                (left, right) = if let Some(operands) = spill.pop() {
+                    operands
+                } else if len > 0 {
+                    len -= 1;
+                    inline[len]
+                } else {
+                    return false;
+                };
+            }
         }
     }
-    false
+}
+
+/// What [`connective_may_bind`] finds at one node of a spine.
+enum SpineNode<'a> {
+    /// An `is` pattern, which binds.
+    Binds,
+    /// An `and`/`or`/`=>` and its two operands, which continue the spine.
+    Connective(&'a Expr, &'a Expr),
+    /// Anything else, which ends the spine.
+    Leaf,
+}
+
+fn spine_node(expr: &Expr) -> SpineNode<'_> {
+    match expr {
+        Expr::Is { .. } => SpineNode::Binds,
+        Expr::Binary { op, left, right } if is_connective(op) => SpineNode::Connective(left, right),
+        _ => SpineNode::Leaf,
+    }
 }
 
 fn binder_values(
@@ -1407,7 +1518,12 @@ fn checked_binary(
 #[allow(clippy::needless_pass_by_value)]
 fn as_bool(value: Value) -> Result<bool, RuntimeError> {
     match value {
-        Value::Bool(value) => Ok(value),
+        Value::Bool(truth) => {
+            // A Boolean owns nothing. Forgetting it skips the call to the
+            // out-of-line drop of `Value`, which would only find that out.
+            std::mem::forget(value);
+            Ok(truth)
+        }
         _ => Err(runtime_error("expected Boolean value")),
     }
 }
@@ -2025,14 +2141,16 @@ impl Monitor {
             .iter()
             .find(|action| action.name == enabled.action)
             .ok_or_else(|| runtime_error(format!("unknown action '{}'", enabled.action)))?;
-        let mut pending = State::new();
+        // The writes land in a copy of `old_state`, in place; every read
+        // still sees `old_state`. A body that stops part way drops the copy.
+        let mut next = old_state.clone();
         let mut writes = BTreeSet::new();
         let mut bindings = enabled.bindings.clone();
         for statement in &action.statements {
             if let Err(error) = compute_statement_update(
                 statement,
                 old_state,
-                &mut pending,
+                &mut next,
                 &mut writes,
                 &mut bindings,
                 model,
@@ -2057,8 +2175,6 @@ impl Monitor {
                 return Err(error);
             }
         }
-        let mut next = old_state.clone();
-        next.extend(pending);
         *step += 1;
         let violation = match check_successor(
             &next,
@@ -3650,7 +3766,10 @@ pub fn find_boundary_violation_reaching(
         }
         for candidate in scratch.candidates_at(&state)? {
             let instance = candidate.instance();
+            // As in the explicit walk (`explicit::explore`).
+            let mut queried = false;
             let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                queried = admits_stored;
                 admits_stored && visited.id_of(next).is_some_and(|id| id != root)
             })?;
             if let Some(violation) = stepped.violation.clone() {
@@ -3666,9 +3785,12 @@ pub fn find_boundary_violation_reaching(
                 }
                 continue;
             }
-            if let Some(child) =
+            let child = if queried {
+                visited.insert_queried_child(&stepped.state, id, &instance.action, &instance.params)
+            } else {
                 visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
-            {
+            };
+            if let Some(child) = child {
                 if visited.len() >= budget {
                     reachability.exhaust();
                     let probe = BoundaryProbe {
@@ -3909,16 +4031,22 @@ pub fn expression_reachability(
             continue;
         }
         for candidate in scratch.candidates_at(&state)? {
+            // As in the explicit walk (`explicit::explore`).
+            let mut queried = false;
             let stepped = scratch.step_enumerated(&state, step, &candidate, None, &mut |next| {
+                queried = admits_stored;
                 admits_stored && visited.id_of(next).is_some_and(|id| id != root)
             })?;
             if stepped.violation.is_some() {
                 continue;
             }
             let instance = candidate.instance();
-            if let Some(child) =
+            let child = if queried {
+                visited.insert_queried_child(&stepped.state, id, &instance.action, &instance.params)
+            } else {
                 visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
-            {
+            };
+            if let Some(child) = child {
                 if visited.len() >= budget {
                     reachability.exhaust();
                     break 'walk;
@@ -4119,7 +4247,8 @@ pub enum VacuityProbe<'a> {
     Skip,
     /// The probe's verdicts for [`vacuity_probe_expressions`], already
     /// decided by a walk of the same model, depth and budget
-    /// ([`find_boundary_violation_reaching`]).
+    /// ([`find_boundary_violation_reaching`]), or by the explicit walk of the
+    /// same model and depth under its own budget ([`verify_explicit_reaching`]).
     Walked(&'a [Reachability]),
 }
 
@@ -4158,7 +4287,8 @@ pub fn vacuity_probe_expressions(model: &KernelModel) -> Vec<Expr> {
 /// tests -- must pass `Run` (or `Walked` verdicts) so the probe always runs
 /// and `--vacuity error` never silently loses evidence it would otherwise
 /// catch. [`VacuityProbe::Walked`] reuses the verdicts of a walk that
-/// already decided them, which BMC's boundary pre-pass does.
+/// already decided them, which BMC's boundary pre-pass and the explicit
+/// engine do.
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn verification_warnings(
@@ -5550,24 +5680,24 @@ fn execute_init_statement_inner(
     Ok(())
 }
 
-fn compute_statement_update(
-    statement: &Statement,
+fn compute_statement_update<'statement>(
+    statement: &'statement Statement,
     old_state: &State,
-    pending: &mut State,
-    writes: &mut BTreeSet<String>,
+    next: &mut State,
+    writes: &mut BTreeSet<WriteKey<'statement>>,
     bindings: &mut Bindings,
     model: &KernelModel,
 ) -> Result<(), RuntimeError> {
     match statement {
         Statement::Assign { target, value, .. } => {
             let value = eval(value, old_state, bindings, model, None)?;
-            let write_key = lvalue_key(target, old_state, bindings, model)?;
-            if !writes.insert(write_key.clone()) {
+            let place = assign_place(target, old_state, bindings, model)?;
+            if let Some(write_key) = writes.replace(WriteKey::of(&place)) {
                 return Err(runtime_error(format!(
                     "double assignment to '{write_key}' on the same execution path"
                 )));
             }
-            assign(target, value, old_state, pending, bindings, model)?;
+            write_place(place, value, next, Some(old_state), model)?;
         }
         Statement::If {
             condition,
@@ -5581,7 +5711,7 @@ fn compute_statement_update(
                 else_statements
             };
             for statement in branch {
-                compute_statement_update(statement, old_state, pending, writes, bindings, model)?;
+                compute_statement_update(statement, old_state, next, writes, bindings, model)?;
             }
         }
         Statement::ForAll {
@@ -5594,7 +5724,7 @@ fn compute_statement_update(
                 }
                 for statement in statements {
                     compute_statement_update(
-                        statement, old_state, pending, writes, &mut local, model,
+                        statement, old_state, next, writes, &mut local, model,
                     )?;
                 }
             }
@@ -5603,16 +5733,41 @@ fn compute_statement_update(
     Ok(())
 }
 
-fn assign(
-    target: &LValue,
-    value: Value,
-    read_state: &State,
-    target_state: &mut State,
-    bindings: &mut Bindings,
-    model: &KernelModel,
-) -> Result<(), RuntimeError> {
-    let place = assign_place(target, read_state, bindings, model)?;
-    write_place(place, value, target_state, Some(read_state), model)
+/// The part of the state an action's assignment writes, as
+/// [`compute_statement_update`] tells a second write to it on one path.
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct WriteKey<'target> {
+    root: &'target str,
+    index: Option<Value>,
+    field: Option<&'target str>,
+}
+
+impl<'target> WriteKey<'target> {
+    fn of(place: &AssignPlace<'target>) -> Self {
+        let (root, index, field) = match place {
+            AssignPlace::Var(root) => (*root, None, None),
+            AssignPlace::Part(root, PartPlace::Index(index)) => (*root, Some(index.clone()), None),
+            AssignPlace::Part(root, PartPlace::Field(field)) => (*root, None, Some(*field)),
+            AssignPlace::Part(root, PartPlace::IndexField(index, field)) => {
+                (*root, Some(index.clone()), Some(*field))
+            }
+        };
+        Self { root, index, field }
+    }
+}
+
+/// The text [`lvalue_key`] gives the same target.
+impl fmt::Display for WriteKey<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.root)?;
+        if let Some(index) = &self.index {
+            write!(formatter, "[{index:?}]")?;
+        }
+        if let Some(field) = self.field {
+            write!(formatter, ".{field}")?;
+        }
+        Ok(())
+    }
 }
 
 /// An assignment target with its index expression evaluated.
@@ -5628,8 +5783,8 @@ enum PartPlace<'target> {
     IndexField(Value, &'target str),
 }
 
-/// Resolve `target` against `read_state`: the first half of [`assign`],
-/// which evaluates the index expression before it looks up the root.
+/// Resolve `target` against `read_state`, evaluating its index expression
+/// before [`write_place`] looks up the root.
 fn assign_place<'target>(
     target: &'target LValue,
     read_state: &State,
@@ -5648,19 +5803,14 @@ fn assign_place<'target>(
                 name,
                 PartPlace::IndexField(eval(index_expr, read_state, bindings, model, None)?, field),
             ),
-            LValue::Field(_, _) => {
-                return Err(runtime_error(
-                    "nested field lvalue is not supported by grammar",
-                ));
-            }
+            LValue::Field(_, _) => return Err(runtime_error("nested field lvalue")),
         },
     })
 }
 
-/// Write `value` at `place` in `target_state`: the second half of
-/// [`assign`]. A root `target_state` does not hold yet is taken from
-/// `read_state`. Every check runs before the write, so a failed write leaves
-/// `target_state` unchanged.
+/// Write `value` at `place` in `target_state`. A root `target_state` does
+/// not hold yet is taken from `read_state`. Every check runs before the
+/// write, so a failed write leaves `target_state` unchanged.
 fn write_place(
     place: AssignPlace<'_>,
     value: Value,
@@ -5809,13 +5959,13 @@ pub fn value_conforms(
             Some(fsl_core::TypeDef::Enum { members, .. }) => matches!(
                 value,
                 Value::Enum { type_name, member }
-                    if type_name == name && members.contains(member)
+                    if **type_name == **name && members.iter().any(|known| **known == **member)
             ),
             Some(fsl_core::TypeDef::Struct { fields: expected }) => {
                 let Value::Struct { type_name, fields } = value else {
                     return Ok(false);
                 };
-                type_name == name
+                **type_name == **name
                     && expected.iter().all(|(field, ty)| {
                         fields
                             .get(field)

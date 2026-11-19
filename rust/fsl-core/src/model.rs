@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 use fsl_syntax::{
     ActionItem, Annotation, AnnotationRegistry, Annotations, Binder, Expr, HelpfulAction, LValue,
@@ -169,13 +170,13 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     Enum {
-        type_name: String,
-        member: String,
+        type_name: Arc<str>,
+        member: Arc<str>,
     },
     None,
     Some(Box<Self>),
     Struct {
-        type_name: String,
+        type_name: Arc<str>,
         fields: BTreeMap<String, Self>,
     },
     Map(BTreeMap<Self, Self>),
@@ -350,8 +351,8 @@ impl KernelModel {
                     return Ok(members
                         .iter()
                         .map(|member| Value::Enum {
-                            type_name: type_name.to_owned(),
-                            member: member.clone(),
+                            type_name: type_name.into(),
+                            member: member.as_str().into(),
                         })
                         .collect());
                 }
@@ -558,8 +559,8 @@ impl KernelModel {
                 Some(TypeDef::Enum { members, .. }) => Ok(members
                     .iter()
                     .map(|member| Value::Enum {
-                        type_name: name.clone(),
-                        member: member.clone(),
+                        type_name: name.as_str().into(),
+                        member: member.as_str().into(),
                     })
                     .collect()),
                 _ => Err(model_error(format!(
@@ -589,7 +590,7 @@ impl KernelModel {
                 Some(TypeDef::Enum { members, .. }) => Ok(matches!(
                     value,
                     Value::Enum { type_name, member }
-                        if type_name == name && members.contains(member)
+                        if **type_name == **name && members.iter().any(|known| **known == **member)
                 )),
                 // Not a finite scalar: `domain_values`' own error.
                 _ => self.domain_values(ty).map(|_| false),
@@ -637,12 +638,12 @@ impl KernelModel {
                 Some(TypeDef::Enum { members, .. }) => members
                     .first()
                     .map(|member| Value::Enum {
-                        type_name: name.clone(),
-                        member: member.clone(),
+                        type_name: name.as_str().into(),
+                        member: member.as_str().into(),
                     })
                     .ok_or_else(|| model_error(format!("enum '{}' has no members", shown(name)))),
                 Some(TypeDef::Struct { fields }) => Ok(Value::Struct {
-                    type_name: name.clone(),
+                    type_name: name.as_str().into(),
                     fields: fields
                         .iter()
                         .map(|(field, ty)| Ok((field.clone(), self.default_value(ty)?)))
@@ -1918,8 +1919,8 @@ impl ModelBuilder {
                         self.enum_members.insert(
                             member.clone(),
                             Value::Enum {
-                                type_name: name.clone(),
-                                member: member.clone(),
+                                type_name: name.as_str().into(),
+                                member: member.as_str().into(),
                             },
                         );
                     }
@@ -2695,8 +2696,8 @@ fn static_index_identity(expr: &Expr, constants: &BTreeMap<String, Value>) -> Op
         Expr::EnumMember {
             type_name, member, ..
         } => Some(Value::Enum {
-            type_name: type_name.clone(),
-            member: member.clone(),
+            type_name: type_name.as_str().into(),
+            member: member.as_str().into(),
         }),
         Expr::Var(name) => match constants.get(name) {
             Some(value @ Value::Enum { .. }) => Some(value.clone()),

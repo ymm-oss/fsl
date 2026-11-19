@@ -128,8 +128,8 @@ fn parse_typed_param(
                     return Err(format!("unknown enum member '{member}'"));
                 }
                 Ok(FslValue::Enum {
-                    type_name: type_name.clone(),
-                    member: member.to_owned(),
+                    type_name: type_name.as_str().into(),
+                    member: member.into(),
                 })
             }
             Some(TypeDef::Struct { .. }) | None => {
@@ -153,7 +153,7 @@ fn fsl_value_json(value: &FslValue) -> Value {
     match value {
         FslValue::Int(value) => json!(value),
         FslValue::Bool(value) => json!(value),
-        FslValue::Enum { member, .. } => json!(member),
+        FslValue::Enum { member, .. } => json!(**member),
         FslValue::None => Value::Null,
         FslValue::Some(value) => fsl_value_json(value),
         FslValue::Struct { fields, .. } => Value::Object(
@@ -183,7 +183,7 @@ fn map_key(value: &FslValue) -> String {
     match value {
         FslValue::Int(value) => value.to_string(),
         FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
+        FslValue::Enum { member, .. } => member.to_string(),
         _ => format!("{value:?}"),
     }
 }

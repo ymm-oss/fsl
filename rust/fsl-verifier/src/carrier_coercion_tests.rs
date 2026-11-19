@@ -77,11 +77,11 @@ fn sample(ty: &TypeRef, model: &KernelModel) -> FslValue {
         ),
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Enum { .. }) => FslValue::Enum {
-                type_name: name.clone(),
-                member: "e1".to_owned(),
+                type_name: name.as_str().into(),
+                member: "e1".into(),
             },
             Some(TypeDef::Struct { fields }) => FslValue::Struct {
-                type_name: name.clone(),
+                type_name: name.as_str().into(),
                 fields: fields
                     .iter()
                     .map(|(field, ty)| (field.clone(), sample(ty, model)))

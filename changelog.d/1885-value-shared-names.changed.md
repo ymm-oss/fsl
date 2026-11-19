@@ -1,0 +1,1 @@
+Changed (#1885, breaking): Rust API: `fsl_core::Value::Enum`'s `type_name` and `member` and `Value::Struct`'s `type_name` are `Arc<str>` instead of `String`, so cloning a value no longer copies its names.

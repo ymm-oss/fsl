@@ -247,11 +247,20 @@ impl StateStore {
         params: &BTreeMap<String, Value>,
     ) -> Option<usize> {
         encode_state(state, &mut self.scratch);
-        if self.ids.contains_key(self.scratch.as_slice()) {
-            return None;
-        }
-        let action = self.action_id(action, params);
-        Some(self.insert_encoded(Some((parent, action))))
+        self.insert_scratch_child(parent, action, params)
+    }
+
+    /// [`StateStore::insert_child`] for the state the last
+    /// [`StateStore::id_of`] was asked about, without encoding it again.
+    pub(crate) fn insert_queried_child(
+        &mut self,
+        state: &State,
+        parent: usize,
+        action: &str,
+        params: &BTreeMap<String, Value>,
+    ) -> Option<usize> {
+        self.debug_assert_encodes(state);
+        self.insert_scratch_child(parent, action, params)
     }
 
     /// [`StateStore::insert_child`] under a state budget: a state already
@@ -266,6 +275,47 @@ impl StateStore {
         budget: usize,
     ) -> Admission {
         encode_state(state, &mut self.scratch);
+        self.insert_scratch_child_within(parent, action, params, budget)
+    }
+
+    /// [`StateStore::insert_child_within`] for the state the last
+    /// [`StateStore::id_of`] was asked about, without encoding it again.
+    pub(crate) fn insert_queried_child_within(
+        &mut self,
+        state: &State,
+        parent: usize,
+        action: &str,
+        params: &BTreeMap<String, Value>,
+        budget: usize,
+    ) -> Admission {
+        self.debug_assert_encodes(state);
+        self.insert_scratch_child_within(parent, action, params, budget)
+    }
+
+    /// [`StateStore::insert_child`] for the state `scratch` holds the
+    /// encoding of.
+    fn insert_scratch_child(
+        &mut self,
+        parent: usize,
+        action: &str,
+        params: &BTreeMap<String, Value>,
+    ) -> Option<usize> {
+        if self.ids.contains_key(self.scratch.as_slice()) {
+            return None;
+        }
+        let action = self.action_id(action, params);
+        Some(self.insert_encoded(Some((parent, action))))
+    }
+
+    /// [`StateStore::insert_child_within`] for the state `scratch` holds the
+    /// encoding of.
+    fn insert_scratch_child_within(
+        &mut self,
+        parent: usize,
+        action: &str,
+        params: &BTreeMap<String, Value>,
+        budget: usize,
+    ) -> Admission {
         if self.ids.contains_key(self.scratch.as_slice()) {
             return Admission::Stored;
         }
@@ -274,6 +324,17 @@ impl StateStore {
         }
         let action = self.action_id(action, params);
         Admission::New(self.insert_encoded(Some((parent, action))))
+    }
+
+    fn debug_assert_encodes(&self, state: &State) {
+        debug_assert!(
+            {
+                let mut encoded = Vec::new();
+                encode_state(state, &mut encoded);
+                encoded == self.scratch
+            },
+            "the scratch encoding is not the state being inserted"
+        );
     }
 
     /// The id `state` is stored under, if it is stored.
@@ -504,8 +565,8 @@ impl Decoder<'_> {
             }
             TAG_BOOL => Value::Bool(self.byte() != 0),
             TAG_ENUM => Value::Enum {
-                type_name: self.string(),
-                member: self.string(),
+                type_name: self.string().into(),
+                member: self.string().into(),
             },
             TAG_NONE => Value::None,
             TAG_SOME => Value::Some(Box::new(self.value())),
@@ -513,7 +574,10 @@ impl Decoder<'_> {
                 let type_name = self.string();
                 let len = self.len();
                 let fields = (0..len).map(|_| (self.string(), self.value())).collect();
-                Value::Struct { type_name, fields }
+                Value::Struct {
+                    type_name: type_name.into(),
+                    fields,
+                }
             }
             TAG_MAP => {
                 let len = self.len();
@@ -552,14 +616,14 @@ mod tests {
 
     fn sample() -> State {
         let claim = |st: &str, amount| Value::Struct {
-            type_name: "DesignClaim".to_owned(),
+            type_name: "DesignClaim".into(),
             fields: BTreeMap::from([
                 ("amount".to_owned(), Value::Int(amount)),
                 (
                     "st".to_owned(),
                     Value::Enum {
-                        type_name: "DesignSt".to_owned(),
-                        member: st.to_owned(),
+                        type_name: "DesignSt".into(),
+                        member: st.into(),
                     },
                 ),
             ]),
@@ -614,8 +678,8 @@ mod tests {
             State::from([(
                 left.to_owned(),
                 Value::Enum {
-                    type_name: right.to_owned(),
-                    member: String::new(),
+                    type_name: right.into(),
+                    member: "".into(),
                 },
             )])
         };

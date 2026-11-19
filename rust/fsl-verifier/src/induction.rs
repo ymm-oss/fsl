@@ -1583,8 +1583,8 @@ fn eval_state_independent_inner(
         KernelExpr::EnumMember {
             type_name, member, ..
         } => Ok(FslValue::Enum {
-            type_name: type_name.clone(),
-            member: member.clone(),
+            type_name: type_name.as_str().into(),
+            member: member.as_str().into(),
         }),
         KernelExpr::Var(name) => binder_env
             .get(name)

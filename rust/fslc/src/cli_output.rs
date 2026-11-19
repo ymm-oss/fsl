@@ -23,7 +23,7 @@ pub(crate) fn display_binding(value: &fsl_core::FslValue) -> String {
     match value {
         fsl_core::FslValue::Int(value) => value.to_string(),
         fsl_core::FslValue::Bool(value) => value.to_string(),
-        fsl_core::FslValue::Enum { member, .. } => member.clone(),
+        fsl_core::FslValue::Enum { member, .. } => member.to_string(),
         _ => "value".to_owned(),
     }
 }

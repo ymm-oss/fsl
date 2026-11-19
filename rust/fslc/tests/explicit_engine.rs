@@ -667,3 +667,25 @@ fn explicit_property_narrowing_matches_bmc() {
     assert_eq!(bmc["result"], "verified");
     assert_eq!(bmc["invariants_checked"], json!(["AlwaysBoolean"]));
 }
+
+/// A body that writes `x` and then divides by zero stops on a `partial_op`;
+/// the trace shows the step's pre-state and no changes.
+#[test]
+fn explicit_trace_of_a_body_partial_op_keeps_the_pre_state() {
+    let (output, status) = verify(
+        &fixture_path("issue_1851_partial_body.fsl"),
+        "explicit",
+        3,
+        &[],
+    );
+    assert_eq!(status, 1, "{output}");
+    assert_eq!(output["result"], "violated");
+    assert_eq!(output["violation_kind"], "partial_op");
+    let state = json!({"x": 0, "y": 0, "z": 0});
+    let trace = output["trace"].as_array().expect("trace");
+    assert_eq!(trace.len(), 2, "{output}");
+    assert_eq!(trace[0]["state"], state);
+    assert_eq!(trace[1]["state"], state);
+    assert_eq!(trace[1]["action"]["name"], "a");
+    assert_eq!(trace[1]["changes"], json!({}));
+}

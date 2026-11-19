@@ -497,8 +497,8 @@ pub(crate) fn snapshot_value(
                     ));
                 }
                 Ok(FslValue::Enum {
-                    type_name: name.clone(),
-                    member: member.to_owned(),
+                    type_name: name.as_str().into(),
+                    member: member.into(),
                 })
             }
             Some(TypeDef::Struct { fields }) => {
@@ -526,7 +526,7 @@ pub(crate) fn snapshot_value(
                     })
                     .collect::<Result<_, String>>()?;
                 Ok(FslValue::Struct {
-                    type_name: name.clone(),
+                    type_name: name.as_str().into(),
                     fields: parsed,
                 })
             }
@@ -571,7 +571,7 @@ pub(crate) fn snapshot_value(
                 let rendered = match &key {
                     FslValue::Int(value) => value.to_string(),
                     FslValue::Bool(value) => value.to_string(),
-                    FslValue::Enum { member, .. } => member.clone(),
+                    FslValue::Enum { member, .. } => member.to_string(),
                     _ => return Err(format!("{path} has a non-scalar map key")),
                 };
                 let entry = object

@@ -13,8 +13,9 @@ use fsl_core::{
 
 use super::trace::{Admission, StateStore, state_changes};
 use super::{
-    Bindings, Monitor, RuntimeError, State, Violation, check_state_selected, eval, runtime_error,
-    runtime_error_at, terminal_holds_at, with_total_division,
+    Bindings, Monitor, Reachability, ReachabilityProbe, RuntimeError, State, Violation,
+    check_state_selected, eval, runtime_error, runtime_error_at, terminal_holds_at,
+    with_total_division,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -135,12 +136,79 @@ pub fn deterministic_initial_state(model: &KernelModel) -> Result<State, Runtime
 /// function was handed, so either would mean the Monitor and the model had
 /// disagreed about which actions exist — a state the profile counters cannot be
 /// attributed under, and one no input can reach through the public API.
-#[allow(clippy::too_many_lines)]
 pub fn verify_explicit_selected(
     model: KernelModel,
     depth: usize,
     max_states: usize,
     checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<ExplicitResult, RuntimeError> {
+    explore(model, depth, max_states, checked_bounds, None)
+}
+
+/// [`verify_explicit_selected`], also returning the verdicts
+/// [`expression_reachability`](super::expression_reachability)`(model,
+/// expressions, depth, probe_budget)` returns, decided from the states this
+/// walk checks, as
+/// [`find_boundary_violation_reaching`](super::find_boundary_violation_reaching)
+/// does for BMC's pre-pass.
+///
+/// The verdicts are `Some` only when this walk visited every state the
+/// probe's own walk can visit:
+/// - every state bound is checked (`checked_bounds` is `None`), so a
+///   successor outside its declared range is a violation here, as it is a
+///   skipped successor there;
+/// - no violation stopped the walk, so no successor was skipped there
+///   either;
+/// - the state budget did not stop it;
+/// - it stored fewer than `probe_budget` states, so the probe's walk would
+///   not have stopped at its budget.
+///
+/// This walk then visits every state within `depth` (or up to closure). The
+/// probe's own walk visits those states in a different order within a level,
+/// and stops once every expression has its verdict, so the two walks are not
+/// the same. Neither difference changes a verdict for
+/// [`vacuity_probe_expressions`](super::vacuity_probe_expressions)`(model)`:
+/// a verdict, once decided, does not change, and the order decides one only
+/// when an expression fails to evaluate in some state. Each of those
+/// expressions is the antecedent of an invariant that this walk evaluated
+/// without error in every state it visited (the explicit engine rejects
+/// `leadsTo`, so there is no trigger among them).
+///
+/// # Errors
+///
+/// Returns the same errors as [`verify_explicit`].
+///
+/// # Panics
+///
+/// As [`verify_explicit_selected`].
+pub fn verify_explicit_reaching(
+    model: KernelModel,
+    depth: usize,
+    max_states: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    expressions: &[Expr],
+    probe_budget: usize,
+) -> Result<(ExplicitResult, Option<Vec<Reachability>>), RuntimeError> {
+    let mut probe = checked_bounds
+        .is_none()
+        .then(|| (ReachabilityProbe::new(expressions), probe_budget));
+    let result = explore(model, depth, max_states, checked_bounds, probe.as_mut())?;
+    let reachability = probe
+        .filter(|_| result.violation.is_none() && !result.budget_exceeded)
+        .filter(|_| result.states_explored < probe_budget)
+        .map(|(probe, _)| probe.finish());
+    Ok((result, reachability))
+}
+
+/// The walk of [`verify_explicit_selected`]. `probe` visits every state the
+/// walk checks, until the walk has stored its budget of states.
+#[allow(clippy::too_many_lines)]
+fn explore(
+    model: KernelModel,
+    depth: usize,
+    max_states: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    mut probe: Option<&mut (ReachabilityProbe<'_>, usize)>,
 ) -> Result<ExplicitResult, RuntimeError> {
     if max_states == 0 {
         return Err(runtime_error("explicit state budget must be at least 1"));
@@ -233,6 +301,9 @@ pub fn verify_explicit_selected(
                 });
                 return Ok(result);
             }
+            if let Some((probe, _)) = probe.as_deref_mut() {
+                probe.visit(state, &scratch.model);
+            }
         }
 
         let mut enabled_by_state = Vec::with_capacity(frontier.len());
@@ -293,12 +364,18 @@ pub fn verify_explicit_selected(
         for ((state, id), candidates) in frontier.iter().zip(&enabled_by_state) {
             for candidate in candidates {
                 let instance = candidate.instance();
+                // Whether `seen` was asked about the successor, which then
+                // stays encoded for its insertion below.
+                let mut queried = false;
                 let stepped = scratch.step_enumerated(
                     state,
                     level,
                     candidate,
                     checked_bounds,
-                    &mut |next| admits_stored && seen.id_of(next).is_some_and(|id| id != root),
+                    &mut |next| {
+                        queried = admits_stored;
+                        admits_stored && seen.id_of(next).is_some_and(|id| id != root)
+                    },
                 )?;
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.
@@ -337,13 +414,24 @@ pub fn verify_explicit_selected(
                 if child_state == *state {
                     stats.no_op += 1;
                 }
-                match seen.insert_child_within(
-                    &child_state,
-                    *id,
-                    &instance.action,
-                    &instance.params,
-                    max_states,
-                ) {
+                let admission = if queried {
+                    seen.insert_queried_child_within(
+                        &child_state,
+                        *id,
+                        &instance.action,
+                        &instance.params,
+                        max_states,
+                    )
+                } else {
+                    seen.insert_child_within(
+                        &child_state,
+                        *id,
+                        &instance.action,
+                        &instance.params,
+                        max_states,
+                    )
+                };
+                match admission {
                     Admission::Stored => {}
                     Admission::Full => {
                         result.states_explored = seen.len();
@@ -355,6 +443,13 @@ pub fn verify_explicit_selected(
             }
         }
         result.states_explored = seen.len();
+        if probe
+            .as_deref()
+            .is_some_and(|(_, budget)| seen.len() >= *budget)
+        {
+            // The probe's own walk would stop here; its verdicts come from it.
+            probe = None;
+        }
         if next.is_empty() {
             result.closure = true;
             return Ok(result);
@@ -867,7 +962,7 @@ fn resolve_enum_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Opti
         .domain_values(key_type)
         .ok()?
         .into_iter()
-        .find(|value| matches!(value, Value::Enum { member, .. } if member == name))
+        .find(|value| matches!(value, Value::Enum { member, .. } if **member == *name))
 }
 
 /// Resolve `name` as an integer constant only for bounded integer key types.
