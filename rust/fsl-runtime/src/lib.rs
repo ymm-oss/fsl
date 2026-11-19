@@ -1518,7 +1518,12 @@ fn checked_binary(
 #[allow(clippy::needless_pass_by_value)]
 fn as_bool(value: Value) -> Result<bool, RuntimeError> {
     match value {
-        Value::Bool(value) => Ok(value),
+        Value::Bool(truth) => {
+            // A Boolean owns nothing. Forgetting it skips the call to the
+            // out-of-line drop of `Value`, which would only find that out.
+            std::mem::forget(value);
+            Ok(truth)
+        }
         _ => Err(runtime_error("expected Boolean value")),
     }
 }

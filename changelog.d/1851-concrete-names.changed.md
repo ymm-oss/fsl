@@ -5,3 +5,4 @@ Cloning an enum or struct value shares its type and member names instead of copy
 A quantifier rebinds its binder in place instead of inserting its name again for every candidate.
 An assignment's index is evaluated once, and the double-assignment check compares the written location instead of its text.
 A search that asked its store whether a successor was already stored keeps that encoding to store it.
+Reading a Boolean condition no longer calls the out-of-line drop of the value it was evaluated to.
