@@ -3602,7 +3602,11 @@ pub fn find_boundary_violation(
 ///
 /// Both searches start at the same initial state, step the same candidates
 /// in the same order, skip the same violating successors, and stop at the
-/// same budget; they differ only in that this one stops at a finding. So the
+/// same budget. They differ in when else they stop: this one stops at a
+/// finding, and [`expression_reachability`] on its own also stops as soon as
+/// every expression is decided, while this one keeps walking for the
+/// boundary search. The states only this walk visits come after every
+/// expression has its verdict, so they cannot change it. So the
 /// reachability is `Some` exactly when no finding stopped the walk, and it
 /// is then the one [`expression_reachability`] returns.
 ///
