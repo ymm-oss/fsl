@@ -67,7 +67,11 @@ array alongside its existing state-exploration fields.
 ## Property attribution
 
 The current kinds are `init`, `type_bound`, `invariant`, `trans`, `ensures`,
-`reachable`, `action_coverage`, `deadlock`, `leadsTo`, and `leadsTo_rank`.
+`partial_op`, `reachable`, `reachable_diagnosis`, `action_coverage`,
+`deadlock`, `leadsTo`, `leadsTo_rank`, and `vacuity`. `reachable_diagnosis`
+charges the init- and transition-free query that classifies a `reachable`
+target, under that target's name; `vacuity` charges the solver-backed vacuity
+lanes, under a property name, an action name, `tick`, or `session`.
 Names are stable Kernel property or action identifiers; `initial_state`,
 `definedness` (the `init` definedness question, asked only when init contains
 an operation that can fail; #1258), and `deadlock` name their structural
