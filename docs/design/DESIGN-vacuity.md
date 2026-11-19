@@ -100,7 +100,7 @@ silently reusing the closed-search verdict.
   candidates no longer pay N full BFS traversals. It reuses `find_boundary_
   violation`'s established scratch-`Monitor`/no-per-node-clone pattern
   (issue #730/#776) rather than inventing a new search mechanism.
-- **One walk with BMC's boundary pre-pass.** `verify --engine bmc` decides these verdicts on the walk of its concrete boundary pre-pass (`fsl_runtime::find_boundary_violation_reaching`, issue #1848): both walks start from the same initial state, step the same candidates in the same order, skip the same violating successors and stop at the same budget. When a `partial_op` or `type_bound` finding stops the pre-pass, rendering walks `expression_reachability` as before.
+- **One walk with BMC's boundary pre-pass.** `verify --engine bmc` decides these verdicts on the walk of its concrete boundary pre-pass (`fsl_runtime::find_boundary_violation_reaching`, issue #1848): both walks start from the same initial state, step the same candidates in the same order, skip the same violating successors and stop at the same budget. On its own, `expression_reachability` also stops once every candidate is decided, while the pre-pass keeps walking for its boundary search; the states only the pre-pass visits come after every verdict is fixed, so the verdicts are the same. When a `partial_op` or `type_bound` finding stops the pre-pass, rendering walks `expression_reachability` as before.
 - **Budget.** Reuses `CONCRETE_PROBE_BUDGET` (50,000 states) — the same
   constant and calibration `find_boundary_violation` uses, protected by the
   same style of corpus-conservation test
