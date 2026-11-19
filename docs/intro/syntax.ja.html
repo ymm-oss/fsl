@@ -195,7 +195,7 @@ verify { instances Return = 3 }</code></pre>
       <tr><th>型</th><th>構文</th><th>使いどころ</th></tr>
       <tr><td>整数・真偽値</td><td><code>n: Int</code>, <code>ok: Bool</code></td><td>整数と真偽値。<code>Int</code> は非有界なので状態には慎重に使います。</td></tr>
       <tr><td>範囲つき整数型</td><td><code>type Qty = 0..5</code></td><td>境界チェックが自動で入ります。</td></tr>
-      <tr><td>対称な範囲つき整数型</td><td><code>symmetric type TaskId = 0..2</code></td><td>特別扱いしない主体ID。応答性探索で同じ形の状態をまとめるために使います。</td></tr>
+      <tr><td>対称な範囲つき整数型</td><td><code>symmetric type TaskId = 0..2</code></td><td>特別扱いしない主体ID。受理されますが、現在は検証の簡約に使われません（結果は <code>symmetric</code> のない同じ spec と同じ）。</td></tr>
       <tr><td>列挙型</td><td><code>enum St { Open, Closed }</code></td><td>状態名や分類。</td></tr>
       <tr><td>対称な列挙型</td><td><code>symmetric enum Worker { A, B }</code></td><td>特別扱いしない有限主体。</td></tr>
       <tr><td>構造体</td><td><code>struct Order { st: St, buyer: Option&lt;UserId&gt; }</code></td><td>複数フィールドをまとめる。フィールドは単純値または値がない/ある型。</td></tr>

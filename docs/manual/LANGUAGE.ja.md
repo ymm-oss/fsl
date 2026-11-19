@@ -818,12 +818,15 @@ induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味�
   `Option<scalar>` という文言を置き換えます。
 - `Map<Int, V>` は `check` で拒否されます。`type ItemId = 0..<max>` のような
   有界キー型を宣言し、`Map<ItemId, V>` を使ってください。
-- `symmetric type` と `symmetric enum` は、liveness の対称性簡約のために、値を
-  交換可能なエンティティ同一性としてマークします。`leadsTo` の lasso/停滞探索の
-  間、fslc は `Map<SymmetricType, V>` と `Set<SymmetricType>` の状態から作られる
-  エンティティごとの行に 1 つの正準の代表を使います。`V` は対称な同一性型を含まない
-  ときだけ使われます。これは、どのタスクの同一性も特別ではない
-  `Map<TaskId, Status>` のようなモデルを意図しています。
+- `symmetric type` と `symmetric enum` は受理され、値が交換可能なエンティティ
+  同一性であることを記録します(Kernel JSON では `types[].symmetric` に残ります)。
+  fslc は現在この印をどの簡約にも使いません: 結果・witness・反例はすべて、同じ
+  spec から `symmetric` を除いたときのものと同じです。以前のリリースは `leadsTo` の
+  lasso/停滞探索を名前の付け替えごとに 1 つの正準の代表だけで行っていましたが、
+  モデルが付け替えに対して不変であること(順序比較、その型のリテラル、
+  `--from-state` のスナップショット、2 つの対称型を結び付けるガード)を誰も
+  検査していなかったため、違反している `leadsTo` を `verified` と報告することが
+  ありました(#1935)。
 
 ## 3. 式
 
@@ -2284,8 +2287,7 @@ Public Kernel v2 はオプトインで、
 `Monitor.state` / replay の論理状態です: すべての変数と Map のキーが必須で、enum は
 メンバー名、Option は値または `null`、Set/Seq は配列、relation はペアの配列です。
 欠落/余剰/型不正の値は、解く前に拒否されます。スナップショット実行は verdict
-キャッシュをバイパスし、対称性簡約を無効化し(同一性が具体的であるため)、
-`--engine induction` を拒否します。結果には `initial_state.source:"snapshot"` と
+キャッシュをバイパスし、`--engine induction` を拒否します。結果には `initial_state.source:"snapshot"` と
 `faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}`
 が追加されるので、有界の `verified` が spec の init からの検証と取り違えられる
 ことはありません。`DESIGN-from-state.md` を参照。

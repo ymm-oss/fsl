@@ -1401,11 +1401,11 @@ compose/arrows or the domain expression language.
 | Domain type | `type Qty = 0..5` | **automatic bound check** (violated/type_bound) |
 | Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
 | Inline state initializer | `state { qty: Qty = 0 }` | Deterministic sugar for the equivalent root assignment in `init`; may not read state |
-| symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type, plus liveness symmetry reduction |
+| symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type; `symmetric` is accepted but not used for any reduction |
 | entity kind | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements (also kernel `spec`); bound by `verify { instances Claim = N }` |
 | number kind | `number Amount` | Finite numeric sort for requirements (also kernel `spec`); bound by `verify { values Amount = lo..hi }`. **`business` does not accept `number`** (parse error `expected business declaration`) |
 | enum | `enum St { A, B }` | members are referenced and displayed by bare name |
-| symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
+| symmetric enum | `symmetric enum Worker { A, B }` | Same as enum; `symmetric` is accepted but not used for any reduction |
 | struct | `struct S { f: Qty, o: Option<Option<K>> }` | field = scalar or nested Option<scalar> only |
 | Option<T> | `c: Option<Option<ItemId>>` | T is a scalar or nested Option around a scalar. `none` / `some(e)` |
 | Map<K, V> | `m: Map<ItemId, Qty>` | K must be a bounded scalar; `Map<Int, V>` is rejected by `check` |
@@ -2582,11 +2582,9 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    - **Global sum idiom**: `decreases sum(k: Case of level[k])` is still the
      simplest instances-count-independent measure when every enabled action
      decreases the total; works with `--instances` overrides too.
-8. `symmetric type` / `symmetric enum` means those values are interchangeable
-   entity identities. For leadsTo lasso/stall search, fslc symmetry-breaks the
-   representative state using canonical rows from `Map<SymmetricType, V>` and
-   `Set<SymmetricType>` state (`V` is used only when it contains no symmetric
-   identity type); use it only when no identity is semantically special.
+8. `symmetric type` / `symmetric enum` records that those values are
+   interchangeable entity identities. fslc accepts it but currently uses it for
+   no reduction: results are those of the same spec without `symmetric`.
 
 ### Ranked-response recipe
 

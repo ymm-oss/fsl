@@ -1105,12 +1105,15 @@ scalar | nested <code>Option&lt;scalar&gt;</code> | struct (scalar / nested <cod
   forms; this replaces the earlier one-level <code>Option&lt;scalar&gt;</code> wording.</li>
 <li><code>Map&lt;Int, V&gt;</code> is rejected by <code>check</code>. Declare a bounded key type, for example
   <code>type ItemId = 0..&lt;max&gt;</code>, and use <code>Map&lt;ItemId, V&gt;</code>.</li>
-<li><code>symmetric type</code> and <code>symmetric enum</code> mark values as interchangeable entity
-  identities for liveness symmetry reduction. During <code>leadsTo</code> lasso/stall
-  search, fslc uses one canonical representative for per-entity rows built from
-  <code>Map&lt;SymmetricType, V&gt;</code> and <code>Set&lt;SymmetricType&gt;</code> state; <code>V</code> is used only when
-  it contains no symmetric identity type. This is intended for models such as
-  <code>Map&lt;TaskId, Status&gt;</code> where no task identity is special.</li>
+<li><code>symmetric type</code> and <code>symmetric enum</code> are accepted and record that the
+  values are interchangeable entity identities (the Kernel JSON keeps it as
+  <code>types[].symmetric</code>). fslc currently does not use the marker for any
+  reduction: every result, witness, and counterexample is the one the same spec
+  without <code>symmetric</code> produces. Earlier releases searched <code>leadsTo</code> lassos and
+  stalls over one canonical representative per renaming; nothing checked that
+  the model was invariant under renaming (order comparisons, literals of the
+  type, <code>--from-state</code> snapshots, guards linking two symmetric types), so that
+  reduction could report <code>verified</code> for a violated <code>leadsTo</code> (#1935).</li>
 </ul></div></details>
 <details id="3-expressions"><summary>3. Expressions<span class="tree-blurb"> — Expression grammar — operators, quantifiers, calls.</span></summary><div class="tree-body"><p><code>true</code>, <code>false</code>, and <code>none</code> are <strong>reserved</strong>: they always resolve to the literal,
 so they cannot name a declaration anywhere — specification, const, <code>def</code> and its
@@ -2753,8 +2756,8 @@ run and asks what can happen from that complete current state. The JSON shape is
 exactly <code>Monitor.state</code> / replay logical state: all variables and Map keys are
 required, enums are member names, Option is value or <code>null</code>, Set/Seq are arrays,
 and relation is an array of pairs. Missing/extra/type-invalid values are rejected
-before solving. Snapshot runs bypass the verdict cache, disable symmetry
-reduction (the identities are concrete), and reject <code>--engine induction</code>.
+before solving. Snapshot runs bypass the verdict cache and reject
+<code>--engine induction</code>.
 Results add <code>initial_state.source:"snapshot"</code> and
 <code>faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}</code>
 so bounded <code>verified</code> cannot be mistaken for verification from the spec init.

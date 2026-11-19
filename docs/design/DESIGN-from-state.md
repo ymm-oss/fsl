@@ -46,10 +46,12 @@ case; replacing that base with one production point would change the meaning of
 `proved`. Combining `--engine induction --from-state` is therefore a semantics
 error, not a downgraded proof.
 
-The snapshot names concrete entity identities, so symmetry reduction is
-disabled for the run. Otherwise a valid labeled production state could be
-discarded merely because it is not the canonical representative of its
-symmetry class.
+The snapshot names concrete entity identities. `symmetric` declarations do not
+change a snapshot run: fslc uses them for no reduction (DESIGN-temporal.md
+§2.5.1), so no labeled production state is discarded for not being a canonical
+representative. Earlier releases documented that snapshot runs disabled the
+`leadsTo` symmetry reduction, but the code applied it; a snapshot that was not
+invariant under renaming could then hide a violation (#1935).
 
 All ordinary bounded checks still run: invariants, transition invariants,
 reachables, action coverage, deadlocks, and bounded liveness. Property filters,

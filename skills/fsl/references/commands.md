@@ -439,8 +439,7 @@ Use `verify --from-state` for bounded prediction from a current concrete state,
 not for proof. The input must be the complete logical JSON emitted by
 `Monitor.state`/replay (enum names, Option as value/`null`, complete Map keys,
 Set/Seq arrays, relation pairs). It replaces `init`, bypasses the verdict cache,
-disables symmetry reduction for concrete identities, and is rejected with the
-induction engine. Results always stamp
+and is rejected with the induction engine. Results always stamp
 `faithfulness.scope:"bounded_from_snapshot"`, `spec_init:"not_used"`, and
 `induction:"not_applicable"`. A step-zero invariant violation is a valid
 predictive result. Do not fill missing variables: partial snapshots are a
