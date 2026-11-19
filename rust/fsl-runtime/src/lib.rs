@@ -3568,7 +3568,9 @@ pub struct BoundaryProbe {
 }
 
 /// Find the first concrete partial-operation or type-bound violation and its
-/// trace, visiting at most `budget` distinct states.
+/// trace, visiting at most `max(budget, 2)` distinct states: the root is
+/// stored first and the count is checked only after a successor is stored,
+/// so a `budget` of 0 or 1 still visits the root and one successor.
 /// For models with actions, initial type bounds are checked first at step 0,
 /// with a root-only trace even at depth 0.
 ///
