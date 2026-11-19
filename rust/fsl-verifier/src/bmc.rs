@@ -652,11 +652,7 @@ pub(crate) async fn checked_read_carriers<'f, S: SmtSolver>(
     read_state: &'f SymbolicState<S::Term>,
     selected: Option<&BTreeSet<String>>,
 ) -> Result<CheckedStateCarriers<'f, S::Term>, VerifyError> {
-    let mut checked = CheckedStateCarriers {
-        read_state,
-        names: BTreeSet::new(),
-        old_frame: None,
-    };
+    let mut checked = CheckedStateCarriers::new(read_state, BTreeSet::new());
     for (name, value) in read_state {
         let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
         let valid = bounds(solver, model, value)?;
@@ -818,11 +814,7 @@ async fn verify_bounded_config<S: SmtSolver>(
             .actions
             .iter()
             .any(|action| fsl_core::action_has_integer_range_binder(model, action))
-            .then(|| CheckedStateCarriers {
-                read_state: &states[step],
-                names: BTreeSet::new(),
-                old_frame: None,
-            });
+            .then(|| CheckedStateCarriers::new(&states[step], BTreeSet::new()));
         let property_violation = check_state_properties_in(
             solver,
             model,
@@ -1009,7 +1001,20 @@ pub(crate) struct CheckedStateCarriers<'f, T> {
     old_frame: Option<(&'f SymbolicState<T>, BTreeSet<String>)>,
 }
 
-impl<T> CheckedStateCarriers<'_, T> {
+impl<'f, T> CheckedStateCarriers<'f, T> {
+    /// Record names whose bounds the caller has established for this exact frame.
+    /// This constructor proves nothing: the address key names the borrowed read
+    /// frame, not an equal map of symbolic values. Bounds belong to that frame's
+    /// evaluation scope, so callers must not certify a clone and use it for the
+    /// original (or reuse a certificate after its premises leave scope).
+    pub(crate) fn new(read_state: &'f SymbolicState<T>, names: BTreeSet<String>) -> Self {
+        Self {
+            read_state,
+            names,
+            old_frame: None,
+        }
+    }
+
     pub(crate) fn contains(&self, read_state: &SymbolicState<T>, name: &str) -> bool {
         (std::ptr::eq(self.read_state, read_state) && self.names.contains(name))
             || self.old_frame.as_ref().is_some_and(|(state, names)| {
@@ -1034,11 +1039,10 @@ pub(crate) fn premised_state_carriers<'f, T>(
     model: &KernelModel,
     read_state: &'f SymbolicState<T>,
 ) -> CheckedStateCarriers<'f, T> {
-    CheckedStateCarriers {
+    CheckedStateCarriers::new(
         read_state,
-        names: model.state.iter().map(|(name, _)| name.clone()).collect(),
-        old_frame: None,
-    }
+        model.state.iter().map(|(name, _)| name.clone()).collect(),
+    )
 }
 
 /// Assert the induction hypothesis's existing bound premises before recording them.
@@ -1047,11 +1051,7 @@ pub(crate) fn assume_induction_carriers<'f, S: SmtSolver>(
     model: &KernelModel,
     state: &'f SymbolicState<S::Term>,
 ) -> Result<CheckedStateCarriers<'f, S::Term>, VerifyError> {
-    let mut checked = CheckedStateCarriers {
-        read_state: state,
-        names: BTreeSet::new(),
-        old_frame: None,
-    };
+    let mut checked = CheckedStateCarriers::new(state, BTreeSet::new());
     for (name, ty) in &model.state {
         if !model.type_has_bounds(ty) {
             continue;
@@ -1074,11 +1074,7 @@ pub(crate) async fn prove_induction_carriers<'f, S: SmtSolver>(
 ) -> Result<(CheckedStateCarriers<'f, S::Term>, Vec<InductionCti>), VerifyError> {
     let (states, choices, instances, k) = history;
     let state = &states[k];
-    let mut checked = CheckedStateCarriers {
-        read_state: state,
-        names: BTreeSet::new(),
-        old_frame: None,
-    };
+    let mut checked = CheckedStateCarriers::new(state, BTreeSet::new());
     let mut failures = Vec::new();
     for (name, ty) in &model.state {
         if !model.type_has_bounds(ty) {
@@ -1167,11 +1163,7 @@ pub(crate) async fn diagnostic_state_carriers<'f, S: SmtSolver>(
     model: &KernelModel,
     state: &'f SymbolicState<S::Term>,
 ) -> Result<Option<CheckedStateCarriers<'f, S::Term>>, VerifyError> {
-    let mut ledger = CheckedStateCarriers {
-        read_state: state,
-        names: BTreeSet::new(),
-        old_frame: None,
-    };
+    let mut ledger = CheckedStateCarriers::new(state, BTreeSet::new());
     for (name, _) in &model.state {
         let value = state
             .get(name)
@@ -1269,11 +1261,7 @@ pub(crate) async fn frozen_range_condition<S: SmtSolver>(
     else {
         return Err(integer_range_error(&plan));
     };
-    let mut ledger = CheckedStateCarriers {
-        read_state: state,
-        names: BTreeSet::new(),
-        old_frame: None,
-    };
+    let mut ledger = CheckedStateCarriers::new(state, BTreeSet::new());
     for prerequisite in prerequisites {
         let RangePrerequisite::StateCarrier { name, .. } = prerequisite else {
             return Err(integer_range_error(&plan));
@@ -1498,11 +1486,7 @@ async fn check_state_properties_in<'f, S: SmtSolver>(
     action_carriers: Option<&mut CheckedStateCarriers<'f, S::Term>>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     reject_unchecked_sequence_overflow(solver, &states[step], checks.checked_bounds).await?;
-    let mut checked_carriers = CheckedStateCarriers {
-        read_state: &states[step],
-        names: BTreeSet::new(),
-        old_frame: None,
-    };
+    let mut checked_carriers = CheckedStateCarriers::new(&states[step], BTreeSet::new());
     let checked_carriers = action_carriers.unwrap_or(&mut checked_carriers);
     for (name, _) in &model.state {
         let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();

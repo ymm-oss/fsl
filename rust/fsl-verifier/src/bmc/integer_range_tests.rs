@@ -78,11 +78,7 @@ fn checked<'f>(
         s.assert(&valid).unwrap();
         names.insert(name.clone()); // Only AFTER actual check AND successful assert.
     }
-    CheckedStateCarriers {
-        read_state: read,
-        old_frame: None,
-        names,
-    }
+    CheckedStateCarriers::new(read, names)
 }
 fn capture(
     s: &Z,
@@ -479,11 +475,7 @@ fn popped_outer_scope_needs_fresh_checks_and_cannot_reuse_permission() {
     solver.pop(1).unwrap();
     let read = frame(&mut solver, &m, 1, 1);
     let scope = Scope::new();
-    let ledger = CheckedStateCarriers {
-        read_state: &read,
-        old_frame: None,
-        names: BTreeSet::new(),
-    };
+    let ledger = CheckedStateCarriers::new(&read, BTreeSet::new());
     let b = binder("i in 0..n");
     refuse_prepared(
         prepare(&mut solver, &m, &b, &read, &scope, &ledger),
