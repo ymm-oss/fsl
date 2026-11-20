@@ -3091,6 +3091,156 @@ selftest_fold() {
   rm -rf "$tmp"
 }
 
+# Fragment leads (issue #1936): check, check-pr, release and fold reject a
+# fragment whose lead would break check-section, or does not name its own
+# category and id; check-pr also runs the command that will consume the
+# pending fragments on a scratch copy, so leads that are each valid but
+# collide in the section are rejected before merge.
+selftest_fragment_lead() {
+  local tmp; tmp="$(mktemp -d)"
+  # Succeeds when command $2.. fails with a diagnostic line starting with $1.
+  # shellcheck disable=SC2329  # invoked through st_expect_pass
+  st_reports() {
+    local code="$1" out; shift
+    if out="$("$@" 2>&1)"; then return 1; fi
+    printf '%s\n' "$out" | grep -q "^$code"
+  }
+  # $1 = label, $2 = file name, $3.. = body lines: accepted alone.
+  st_lead_accepts() {
+    local label="$1" name="$2"; shift 2
+    rm -rf "$tmp/one"; mkdir -p "$tmp/one"
+    st_setup_frag "$tmp/one" "$name" "$@"
+    st_expect_pass "fragment lead accepting: $label ($name)" check "$tmp/one"
+  }
+  # $1 = label, $2 = expected diagnostic, $3 = file name, $4.. = body lines.
+  st_lead_rejects() {
+    local label="$1" code="$2" name="$3"; shift 3
+    rm -rf "$tmp/one"; mkdir -p "$tmp/one"
+    st_setup_frag "$tmp/one" "$name" "$@"
+    st_expect_fail "fragment lead rejecting: $label ($name)" check "$tmp/one"
+    st_expect_pass "fragment lead rejecting: $label -- reported as $code" st_reports "$code" check "$tmp/one"
+  }
+
+  st_lead_accepts "one id" "691-x.fixed.md" "Fixed (#691): a fix." "Continued on a second line."
+  st_lead_accepts "several own ids, the file's first" "691-x.fixed.md" "Fixed (#691, #692): two issues."
+  st_lead_accepts "several own ids, the file's second" "692-x.fixed.md" "Fixed (#691, #692): two issues."
+  st_lead_accepts "a refs list after the own id" "1678-x.fixed.md" "Fixed (#1678, refs #1281): a fix."
+  st_lead_accepts "breaking under Changed" "8-x.changed.md" "Changed (#8, breaking): a CLI change."
+  st_lead_accepts "breaking removal under Changed" "9-x.changed.md" "Changed (#9, breaking removal): a form is refused."
+  st_lead_accepts "a free-text label" "13-x.fixed.md" "Fixed (#13, representative decision 2026-10-26): a dated label."
+  st_lead_accepts "a zero-padded file id" "0691-x.fixed.md" "Fixed (#691): the file id folds to 691."
+  st_lead_accepts "a zero-padded lead id" "691-x.fixed.md" "Fixed (#0691): the lead id folds to 691."
+  st_lead_accepts "blank lines around the body" "691-x.fixed.md" "" "Fixed (#691): a fix." ""
+  rm -rf "$tmp/one"; mkdir -p "$tmp/one"; printf '\n\n' >"$tmp/one/7-x.fixed.md"
+  st_expect_pass "fragment lead accepting: an empty body is left to changelog-fragment-empty" \
+    validate_fragment_leads_all "$tmp/one"
+
+  # The issue's four reproductions, one fragment each.
+  st_lead_rejects "the lead names another issue (#1870 in a #9002 file)" changelog-fragment-lead-mismatch \
+    "9002-second-step.unified.md" "Unified (#1870, second step): something."
+  st_lead_rejects "no lead" changelog-fragment-lead-invalid "9001-docs-align.documented.md" "The docs now say X."
+  st_lead_rejects "the lead's category is not the file's" changelog-fragment-lead-mismatch \
+    "9003-x.added.md" "Fixed (#9003): x."
+  st_lead_rejects "the file's id only after refs" changelog-fragment-lead-mismatch \
+    "1281-x.fixed.md" "Fixed (#1678, refs #1281): a fix."
+  st_lead_rejects "the file's id only in a refs list of two" changelog-fragment-lead-mismatch \
+    "1282-x.fixed.md" "Fixed (#1678, refs #1281, #1282): a fix."
+  st_lead_rejects "the lead without a parenthesised label" changelog-fragment-lead-invalid \
+    "16-x.fixed.md" "Fixed #16: no label."
+  st_lead_rejects "an undeclared lead word" changelog-fragment-lead-invalid "15-x.fixed.md" "Removed (#15): undeclared."
+  st_lead_rejects "a lead without an id" changelog-fragment-lead-invalid "17-x.fixed.md" "Fixed (no id): x."
+  st_lead_rejects "a lead whose ids are all references" changelog-fragment-lead-invalid "18-x.fixed.md" "Fixed (refs #18): x."
+  st_lead_rejects "breaking outside Changed" changelog-fragment-lead-invalid "14-x.fixed.md" "Fixed (#14, breaking): x."
+  st_lead_rejects "the lead on the second line" changelog-fragment-lead-invalid "19-x.fixed.md" "A sentence first." "Fixed (#19): x."
+  st_lead_rejects "a lowercase lead word" changelog-fragment-lead-invalid "20-x.fixed.md" "fixed (#20): x."
+
+  # release refuses the same fragment before writing anything.
+  local d="$tmp/rel"
+  mkdir -p "$d/changelog.d"
+  printf '%s\n' '# Changelog' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '' '- Added (#1): older.' >"$d/CHANGELOG.md"
+  st_setup_frag "$d/changelog.d" "9001-docs-align.documented.md" "The docs now say X."
+  cp -R "$d" "$d.snapshot"
+  st_expect_pass "fragment lead rejecting: release refuses a fragment with no lead -- reported as changelog-fragment-lead-invalid" \
+    st_reports changelog-fragment-lead-invalid release --version 5.2.0 --date 2026-12-02 --changelog "$d/CHANGELOG.md" --fragments-dir "$d/changelog.d"
+  st_expect_pass "fragment lead rejecting: ... CHANGELOG.md and changelog.d/ untouched" diff -r "$d.snapshot" "$d"
+  # Each lead valid, but #51 twice under Fixed: release now checks its own section.
+  rm -f "$d/changelog.d/9001-docs-align.documented.md"
+  st_setup_frag "$d/changelog.d" "50-v.fixed.md" "Fixed (#50, #51): two ids."
+  st_setup_frag "$d/changelog.d" "51-w.fixed.md" "Fixed (#51): #51 again."
+  rm -rf "$d.snapshot"; cp -R "$d" "$d.snapshot"
+  st_expect_pass "release rejecting: a section with a duplicate id -- reported as changelog-release-section-invalid" \
+    st_reports changelog-release-section-invalid release --version 5.2.0 --date 2026-12-02 --changelog "$d/CHANGELOG.md" --fragments-dir "$d/changelog.d"
+  st_expect_pass "release rejecting: ... CHANGELOG.md and changelog.d/ untouched" diff -r "$d.snapshot" "$d"
+  rm -f "$d/changelog.d/51-w.fixed.md"
+  st_expect_pass "release accepting: the same section without the duplicate" \
+    release --version 5.2.0 --date 2026-12-02 --changelog "$d/CHANGELOG.md" --fragments-dir "$d/changelog.d"
+
+  # check-pr end to end, in a throwaway repository whose newest section is
+  # 5.1.0 with `Unified (#70)` and `Fixed (#71)`. $1 = repository; the rest
+  # are "file=body" fragments added with a product change. Prints the base sha.
+  st_lead_repo() {
+    local r="$1" kv; shift
+    rm -rf "$r"; mkdir -p "$r/changelog.d" "$r/rust"
+    (
+      cd "$r"
+      git init -q
+      git config user.email "selftest@example.invalid"
+      git config user.name "selftest"
+      printf '%s\n' '# Changelog' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '' \
+        '- Fixed (#71): a fix.' '- Unified (#70): a first step.' '' '## [5.0.0] - 2026-11-07' '' '- Added (#1): older.' >CHANGELOG.md
+      printf 'fn main() {}\n' >rust/lib.rs
+      git add -A
+      git commit -q -m base
+      git rev-parse HEAD
+      printf 'fn main() { /* changed */ }\n' >rust/lib.rs
+      for kv in "$@"; do printf '%s\n' "${kv#*=}" >"changelog.d/${kv%%=*}"; done
+      git add -A
+      git commit -q -m change
+    )
+  }
+  # shellcheck disable=SC2329  # invoked through st_expect_pass/st_expect_fail
+  st_lead_check_pr() {  # $1 = repository, $2 = base sha
+    ( cd "$1" && BASE_SHA="$2" HEAD_SHA="$(git rev-parse HEAD)" "$SELF" check-pr )
+  }
+  local r="$tmp/pr" base
+  base="$(st_lead_repo "$r" "9002-second-step.unified.md=Unified (#70, second step): something.")"
+  st_expect_pass "check-pr rejecting: a lead naming another issue -- reported as changelog-fragment-lead-mismatch" \
+    st_reports changelog-fragment-lead-mismatch st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "9001-docs-align.documented.md=The docs now say X.")"
+  st_expect_pass "check-pr rejecting: a fragment with no lead -- reported as changelog-fragment-lead-invalid" \
+    st_reports changelog-fragment-lead-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "9003-x.added.md=Fixed (#9003): x.")"
+  st_expect_pass "check-pr rejecting: a lead in another category -- reported as changelog-fragment-lead-mismatch" \
+    st_reports changelog-fragment-lead-mismatch st_lead_check_pr "$r" "$base"
+
+  # 5.1.0 untagged: the fragments are folded into it.
+  base="$(st_lead_repo "$r" "72-x.unified.md=Unified (#72, #70): a second step of #70.")"
+  st_expect_pass "check-pr rejecting: an extra id repeating an entry of the untagged newest section -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "72-x.unified.md=Unified (#72, refs #70): a second step of #70.")"
+  st_expect_pass "check-pr accepting: the same fragment with #70 as a reference" st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "72-x.fixed.md=Fixed (#72, #73): two ids." "73-y.fixed.md=Fixed (#73): #73 again.")"
+  st_expect_pass "check-pr rejecting: two fragments sharing an id, folded -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  # 5.1.0 tagged: the fragments go to the next release's section.
+  base="$(st_lead_repo "$r" "72-x.fixed.md=Fixed (#72, #73): two ids." "73-y.fixed.md=Fixed (#73): #73 again.")"
+  ( cd "$r" && git tag v5.1.0 "$base" )
+  st_expect_pass "check-pr rejecting: two fragments sharing an id, released -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "70-x.unified.md=Unified (#70, second step): the rest of #70.")"
+  ( cd "$r" && git tag v5.1.0 "$base" )
+  st_expect_pass "check-pr accepting: an (id, category) of the tagged section repeated for the next release" \
+    st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "70-x.unified.md=Unified (#70, second step): the rest of #70.")"
+  st_expect_pass "check-pr rejecting: ... but not while that section is untagged -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "72-x.fixed.md=Fixed (#72): a fix." "73-y.changed.md=Changed (#73, #74, breaking): a change.")"
+  st_expect_pass "check-pr accepting: valid fragments folded into the untagged section" st_lead_check_pr "$r" "$base"
+
+  unset -f st_reports st_lead_accepts st_lead_rejects st_lead_repo st_lead_check_pr
+  rm -rf "$tmp"
+}
+
 selftest() {
   # Several fixtures below invoke `bash -c '... | classify_product_diff'`
   # (control 1) or `bash -c "... '$SELF' check-pr"` (the control 1/4b
@@ -3125,9 +3275,10 @@ selftest() {
   selftest_control6
   selftest_section
   selftest_fold
+  selftest_fragment_lead
   echo
   if [ "$ST_FAILURES" -eq 0 ]; then
-    echo "aggregate_changelog: selftest PASS -- all six controls', check-section's (with the release-notes cross-check) and fold's accepting and rejecting fixtures behaved as expected"
+    echo "aggregate_changelog: selftest PASS -- all six controls', check-section's (with the release-notes cross-check), fold's and the fragment-lead checks' accepting and rejecting fixtures behaved as expected"
   else
     echo "aggregate_changelog: selftest FAIL -- $ST_FAILURES assertion(s) failed" >&2
     exit 1
