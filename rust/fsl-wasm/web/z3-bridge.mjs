@@ -4,8 +4,10 @@ import { init as initZ3 } from "z3-solver/build/browser.js";
 
 let em;
 
-export async function installZ3Bridge() {
-  const initialized = await initZ3();
+// `initialize` is z3-solver's `init`: the browser build here, the Node build
+// in the host test (`z3-bridge.test.mjs`).
+export async function installZ3Bridge(initialize = initZ3) {
+  const initialized = await initialize();
   em = initialized.em;
   const ctx = new initialized.Context("fsl-wasm");
   const { Array: Z3Array, Bool, If, Int, Solver } = ctx;
@@ -118,14 +120,103 @@ export async function installZ3Bridge() {
     ]);
     return register(ctx.substitute(term(handle), ...substitutions));
   };
-  globalThis.fslZ3Push = () => solver.push();
-  globalThis.fslZ3Pop = (levels) => solver.pop(Number(levels));
-  globalThis.fslZ3Reset = () => solver.reset();
-  globalThis.fslZ3Assert = (handle) => solver.add(term(handle));
-  globalThis.fslZ3AssertAndTrack = (handle, tracker) =>
+  // #1940: the model read for output, re-solved on a fresh context, until
+  // the session moves; the assumptions of the last check and the trackers of
+  // the tracked assertions in scope (one list per open scope), which the
+  // check assumed and its model satisfies too; and whether the last check
+  // answered sat with the session unmoved since, the only time a re-solve is
+  // allowed. The native backend does the same
+  // (`fsl_solver_z3::Z3Solver::resolve_output_model`).
+  let outputModel = null;
+  let lastAssumptions = [];
+  let trackerScopes = [[]];
+  let satUnmoved = false;
+  const moved = () => {
+    outputModel = null;
+    satUnmoved = false;
+  };
+  globalThis.fslZ3Push = () => {
+    moved();
+    solver.push();
+    trackerScopes.push([]);
+  };
+  globalThis.fslZ3Pop = (levels) => {
+    moved();
+    solver.pop(Number(levels));
+    trackerScopes.length -= Number(levels);
+  };
+  globalThis.fslZ3Reset = () => {
+    moved();
+    lastAssumptions = [];
+    trackerScopes = [[]];
+    solver.reset();
+  };
+  globalThis.fslZ3Assert = (handle) => {
+    moved();
+    solver.add(term(handle));
+  };
+  globalThis.fslZ3AssertAndTrack = (handle, tracker) => {
+    moved();
     solver.addAndTrack(term(handle), term(tracker));
-  globalThis.fslZ3Check = async (rawAssumptions) =>
-    String(await solver.check(...[...rawAssumptions].map(term)));
+    trackerScopes[trackerScopes.length - 1].push(term(tracker));
+  };
+  globalThis.fslZ3Check = async (rawAssumptions) => {
+    moved();
+    lastAssumptions = [...rawAssumptions].map(term);
+    const answer = String(await solver.check(...lastAssumptions));
+    satUnmoved = answer === "sat";
+    return answer;
+  };
+  // Solve the current assertions, the last check's assumptions and the
+  // trackers in scope alone on a new context, configured as the native
+  // re-solve is (seed 0), and read the following model values from its
+  // model, translated back. The context is deleted afterwards: the
+  // high-level API never frees one. Refused unless right after a sat check:
+  // after a pop, say, the assertions are weaker than the checked query.
+  globalThis.fslZ3ResolveOutputModel = async () => {
+    if (!satUnmoved) {
+      throw new Error("an output model is re-solved only right after a satisfiable check");
+    }
+    outputModel = null;
+    const Z3 = initialized.Z3;
+    const config = Z3.mk_config();
+    const fresh = Z3.mk_context_rc(config);
+    Z3.del_config(config);
+    try {
+      const freshSolver = Z3.mk_solver(fresh);
+      Z3.solver_inc_ref(fresh, freshSolver);
+      const params = Z3.mk_params(fresh);
+      Z3.params_inc_ref(fresh, params);
+      Z3.params_set_uint(fresh, params, Z3.mk_string_symbol(fresh, "random_seed"), 0);
+      Z3.params_set_uint(fresh, params, Z3.mk_string_symbol(fresh, "smt.random_seed"), 0);
+      Z3.solver_set_params(fresh, freshSolver, params);
+      Z3.params_dec_ref(fresh, params);
+      // `assertions()` returns a tracked assertion as `tracker => term`.
+      const tracked = trackerScopes.flat();
+      for (const assertion of [...solver.assertions(), ...lastAssumptions, ...tracked]) {
+        const translated = Z3.translate(ctx.ptr, assertion.ast, fresh);
+        Z3.inc_ref(fresh, translated);
+        Z3.solver_assert(fresh, freshSolver, translated);
+        Z3.dec_ref(fresh, translated);
+      }
+      const answer = await Z3.solver_check(fresh, freshSolver);
+      if (answer === 1) {
+        const model = Z3.solver_get_model(fresh, freshSolver);
+        Z3.model_inc_ref(fresh, model);
+        outputModel = new ctx.Model(Z3.model_translate(fresh, model, ctx.ptr));
+        Z3.model_dec_ref(fresh, model);
+      } else if (answer === -1) {
+        Z3.solver_dec_ref(fresh, freshSolver);
+        throw new Error(
+          "the assertions of a satisfiable check are unsatisfiable in a fresh Z3 context",
+        );
+      }
+      // `unknown` (0): the reads keep the session's model.
+      Z3.solver_dec_ref(fresh, freshSolver);
+    } finally {
+      Z3.del_context(fresh);
+    }
+  };
   globalThis.fslZ3Statistics = () => {
     const values = new Map(
       [...solver.statistics()].map(({ key, value }) => [key, value]),
@@ -156,7 +247,7 @@ export async function installZ3Bridge() {
       return existing >= 0 ? existing : register(entry);
     });
   globalThis.fslZ3ModelEval = (handle, boolean) => {
-    const value = solver.model().eval(term(handle), true);
+    const value = (outputModel ?? solver.model()).eval(term(handle), true);
     return boolean ? ctx.isTrue(value) : Number(value.value());
   };
 }

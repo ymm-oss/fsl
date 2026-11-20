@@ -21,6 +21,7 @@ const setupCommands = [
   ["npm", "--prefix", "rust/fsl-wasm", "ci"],
   ["npm", "--prefix", "rust/fsl-wasm", "run", "test:outcome"],
   ["npm", "--prefix", "rust/fsl-wasm", "run", "test:imports"],
+  ["npm", "--prefix", "rust/fsl-wasm", "run", "test:bridge"],
 ];
 const spikeCommand = setupCommands[2];
 

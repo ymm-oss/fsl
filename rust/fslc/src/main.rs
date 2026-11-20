@@ -9609,7 +9609,8 @@ fn unreached_reachables(
     if let Some(unreached) = runs.get(model) {
         return unreached.clone();
     }
-    let mut solver = fsl_solver_z3::Z3Solver::new().ok()?;
+    // Only the verdicts are read: no model is re-solved for output (#1940).
+    let mut solver = fsl_solver_z3::Z3Solver::new().ok()?.verdicts_only();
     unreached_after(model, &explain_bounded_run(model, &mut solver, depth))
 }
 
@@ -10152,6 +10153,7 @@ fn invariant_outcomes(
     depth: usize,
     removed_init_root: Option<&str>,
     runs: &mut WeakenedModelRuns,
+    traces: CounterfactualTraces,
 ) -> Vec<InvariantOutcome> {
     let unbroken = if unshared_counterfactual_runs() {
         std::collections::BTreeSet::new()
@@ -10165,7 +10167,14 @@ fn invariant_outcomes(
             if unbroken.contains(&property.name) {
                 InvariantOutcome::default()
             } else {
-                target_invariant_outcome(model, &property.name, depth, removed_init_root, runs)
+                target_invariant_outcome(
+                    model,
+                    &property.name,
+                    depth,
+                    removed_init_root,
+                    runs,
+                    traces,
+                )
             }
         })
         .collect()
@@ -10196,7 +10205,10 @@ fn invariants_without_bounded_violation(
         screened
             .invariants
             .retain(|property| remaining.contains(&property.name));
-        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+        // A screening run's verdicts are read, never its traces (#1940).
+        let Ok(mut solver) =
+            fsl_solver_z3::Z3Solver::new().map(fsl_solver_z3::Z3Solver::verdicts_only)
+        else {
             break;
         };
         let result = explain_bounded_run(&screened, &mut solver, depth);
@@ -10227,6 +10239,20 @@ fn violation_name_follows_action(model: &KernelModel, name: &str) -> bool {
         .any(|action| names.public_violation(name, Some(&action.name)).as_str() != plain.as_str())
 }
 
+/// Whether a per-invariant counterfactual run's solver-chosen values can be
+/// printed as they are (#1940).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CounterfactualTraces {
+    /// They can: the run re-solves the models it projects traces from, so
+    /// they do not depend on the runs before it.
+    Printed,
+    /// They are not printed: an outcome that carries one is run again with
+    /// [`Self::Printed`] before printing (the replay in
+    /// [`invariant_counterfactuals_from_source`]), so this run spends no
+    /// re-solve.
+    Replayed,
+}
+
 /// The outcome for the invariant `target` of the weakened `model`, from a
 /// bounded run that retains `target` as its only invariant.
 fn target_invariant_outcome(
@@ -10235,6 +10261,7 @@ fn target_invariant_outcome(
     depth: usize,
     removed_init_root: Option<&str>,
     runs: &mut WeakenedModelRuns,
+    traces: CounterfactualTraces,
 ) -> InvariantOutcome {
     let all_invariants = model.invariants.len();
     let mut outcome = InvariantOutcome::default();
@@ -10242,7 +10269,11 @@ fn target_invariant_outcome(
     model
         .invariants
         .retain(|candidate| candidate.name == target);
-    let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+    let solver = fsl_solver_z3::Z3Solver::new().map(|solver| match traces {
+        CounterfactualTraces::Printed => solver,
+        CounterfactualTraces::Replayed => solver.verdicts_only(),
+    });
+    let Ok(mut solver) = solver else {
         return outcome;
     };
     let result = explain_bounded_run(&model, &mut solver, depth);
@@ -10442,6 +10473,11 @@ fn invariant_counterfactuals_from_source(
                         depth,
                         removed_init_root.as_deref(),
                         runs,
+                        if unshared {
+                            CounterfactualTraces::Printed
+                        } else {
+                            CounterfactualTraces::Replayed
+                        },
                     );
                     if let Some(fairless) = fairless {
                         fair_removal_outcomes = Some((fairless, outcomes.clone()));
@@ -10466,12 +10502,18 @@ fn invariant_counterfactuals_from_source(
         'replay: for (weakening, (_, _, model, removed_init_root)) in weakenings.iter().enumerate()
         {
             for (invariant, property) in original.invariants.iter().enumerate() {
+                let traces = if analyzed[weakening].0[invariant].solver_chosen {
+                    CounterfactualTraces::Printed
+                } else {
+                    CounterfactualTraces::Replayed
+                };
                 let outcome = target_invariant_outcome(
                     model,
                     &property.name,
                     depth,
                     removed_init_root.as_deref(),
                     runs,
+                    traces,
                 );
                 if analyzed[weakening].0[invariant].solver_chosen {
                     analyzed[weakening].0[invariant] = outcome;
@@ -19891,6 +19933,96 @@ spec InitTraceability {
             "{explained:#}"
         );
         assert_eq!(runs, (12, 4), "bounded runs and concrete searches");
+    }
+
+    /// The JSON of `output` without the solver's work and wall-clock fields,
+    /// which an extra query changes: every `cost`, `elapsed_s` and
+    /// `memory_mb` key, at any depth.
+    fn without_solver_work(output: &Value) -> String {
+        fn strip(value: &mut Value) {
+            match value {
+                Value::Object(object) => {
+                    for key in ["cost", "elapsed_s", "memory_mb"] {
+                        object.remove(key);
+                    }
+                    object.values_mut().for_each(strip);
+                }
+                Value::Array(items) => items.iter_mut().for_each(strip),
+                _ => {}
+            }
+        }
+        let mut output = output.clone();
+        strip(&mut output);
+        serde_json::to_string_pretty(&output).expect("serialize output")
+    }
+
+    /// For each #1940 case, whether its output (masked by
+    /// [`without_solver_work`]) is the same when every check on the thread is
+    /// preceded by one extra scoped query. Each run gets its own Z3 context,
+    /// so neither run sees the other's history.
+    fn outputs_survive_extra_queries(resolve: bool) -> Vec<(&'static str, bool)> {
+        type Run = fn(&Path, &str) -> (Value, i32);
+        let verify: Run = |path, source| {
+            run_verify_from_source(path, source, 8, "warn", "bmc", DEFAULT_EXPLICIT_BUDGET, 1)
+        };
+        let explain: Run = |path, source| {
+            run_explain_from_source(path, source, 4, EXPLAIN_WITNESS_DEADLOCK_MODE, false)
+        };
+        let cases: [(&str, &str, Run); 3] = [
+            (
+                "verify cart_v1",
+                include_str!("../../../specs/cart_v1.fsl"),
+                verify,
+            ),
+            (
+                "verify small_forbidden_guarded_cancel",
+                include_str!("../../../examples/gallery/valid/small_forbidden_guarded_cancel.fsl"),
+                verify,
+            ),
+            (
+                "explain refinement_algebra",
+                include_str!("../../../examples/self/refinement_algebra.fsl"),
+                explain,
+            ),
+        ];
+        fsl_solver_z3::test_hooks::set_resolve_disabled(!resolve);
+        let survived = cases
+            .into_iter()
+            .map(|(label, source, run)| {
+                let fixture = SnapshotFixture::new("issue-1940-extra-queries", source);
+                let output = |perturbing| {
+                    fsl_solver_z3::test_hooks::set_perturbing(perturbing);
+                    let (output, status) =
+                        fsl_solver_z3::with_fresh_context(|| run(&fixture.path, source));
+                    fsl_solver_z3::test_hooks::set_perturbing(false);
+                    assert_eq!(status, 0, "{label}: {output:#}");
+                    without_solver_work(&output)
+                };
+                (label, output(false) == output(true))
+            })
+            .collect();
+        fsl_solver_z3::test_hooks::set_resolve_disabled(false);
+        survived
+    }
+
+    /// A printed witness or trace depends on the asserted formula, the
+    /// property and the step, not on the other queries the session asked
+    /// (#1940): one extra scoped query before every check leaves the output
+    /// byte-identical apart from solver work and timing.
+    #[test]
+    fn printed_traces_do_not_depend_on_extra_queries() {
+        for (label, survived) in outputs_survive_extra_queries(true) {
+            assert!(survived, "{label}: an extra query changed the output");
+        }
+    }
+
+    /// The control: with the re-solve turned off, the same extra queries
+    /// change the printed traces of every case, so the test above can fail.
+    #[test]
+    fn without_the_resolve_extra_queries_change_printed_traces() {
+        for (label, survived) in outputs_survive_extra_queries(false) {
+            assert!(!survived, "{label}: the extra queries changed nothing");
+        }
     }
 
     /// Screening, sharing and replay print what making every per-invariant

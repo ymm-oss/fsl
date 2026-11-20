@@ -11,5 +11,10 @@ publish.workspace = true
 fsl-solver = { path = "../fsl-solver" }
 z3.workspace = true
 
+[features]
+# Test-only switches (`test_hooks`): perturb a session's query history and turn
+# the output-model re-solve off (#1940). Enabled only by dev-dependencies.
+test-hooks = []
+
 [lints]
 workspace = true

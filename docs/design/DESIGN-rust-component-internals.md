@@ -636,7 +636,8 @@ dependency.
 
 ### `fsl-solver-z3`
 
-- `Z3Solver` alone owns the native solver, stack depth, version, and metrics. `Z3Term` is the typed
+- `Z3Solver` alone owns the native solver, stack depth, version, and metrics, and the model re-solved
+  for output on a fresh context (`resolve_output_model`, #1940). `Z3Term` is the typed
   backend handle; conversion and statistics helpers remain subordinate to the trait implementation.
 - Seed/version setup stays in construction. Verification policy never enters this adapter.
 - **Current decision:** retain one module. Any split must follow a new independently testable
@@ -645,7 +646,8 @@ dependency.
 ### `fsl-solver-z3js`
 
 - `Z3JsSolver` owns Rust-side version, stack accounting, and metrics. The JavaScript bridge owns
-  actual assertion/model state and opaque term handles.
+  actual assertion/model state, the model re-solved for output on a fresh context
+  (`fslZ3ResolveOutputModel`, #1940), and opaque term handles.
 - Promise-based `check` is the async failure boundary; Rust-only compilation cannot establish
   handle lifetime or bridge completeness.
 - **Current decision:** retain one Rust adapter module and the separate JavaScript bridge. Browser

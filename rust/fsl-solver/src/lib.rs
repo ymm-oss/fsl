@@ -220,10 +220,12 @@ impl Error for SolverError {}
 
 pub type SolverResult<T> = Result<T, SolverError>;
 pub type CheckFuture<'a> = Pin<Box<dyn Future<Output = SolverResult<SatResult>> + 'a>>;
+pub type ModelFuture<'a> = Pin<Box<dyn Future<Output = SolverResult<()>> + 'a>>;
 
 /// Minimal solver contract shared by native Z3 and browser Worker backends.
 ///
-/// Term construction is synchronous. Only satisfiability checks may cross an
+/// Term construction is synchronous. Only satisfiability checks, and the
+/// output-model re-solve ([`SmtSolver::resolve_output_model`]), may cross an
 /// asynchronous boundary, which is the boundary needed by the Worker backend.
 ///
 /// # Errors
@@ -294,6 +296,31 @@ pub trait SmtSolver {
     fn check(&mut self) -> CheckFuture<'_>;
     fn check_assuming(&mut self, assumptions: &[Self::Term]) -> CheckFuture<'_>;
     fn unsat_core(&self) -> SolverResult<Vec<Self::Term>>;
+
+    /// Called after a `sat` answer, before the following [`Self::model_eval`]
+    /// calls read a model that the user sees (a witness, a counterexample
+    /// trace, a CTI or a counterexample state; #1940).
+    ///
+    /// The model a check returns is chosen by the backend, and that choice can
+    /// depend on the queries the session asked before, not only on what is
+    /// asserted. A backend that implements this method makes the following
+    /// reads come from a model that depends only on the current assertions
+    /// (a tracked assertion with its tracker assumed, as the check assumed
+    /// it) and the assumptions of the last check, and on nothing else this
+    /// session did, until the next stack, assertion or check operation. The
+    /// default keeps reading the last check's model: such a backend's printed
+    /// models still depend on the session's query history.
+    ///
+    /// Such a backend returns an error unless the last check answered `sat`
+    /// and no stack, assertion or check operation came after it: a call
+    /// after a `pop`, for one, would re-solve a weaker formula than the one
+    /// checked.
+    ///
+    /// It is not a check: it does not count toward [`Self::statistics`].
+    fn resolve_output_model(&mut self) -> ModelFuture<'_> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+
     fn model_eval(&self, term: &Self::Term) -> SolverResult<Option<ModelValue>>;
 }
 

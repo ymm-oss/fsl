@@ -22,7 +22,7 @@ use crate::eval::{
     eval_with_bindings_in, evaluation_status, property_evaluation_status_in,
 };
 use crate::liveness::{leadsto_bindings, leadsto_condition, leadsto_condition_in};
-use crate::scoped_query::{OnUnknown, PopFailure, scoped_check, scoped_query};
+use crate::scoped_query::{OnUnknown, PopFailure, scoped_check, scoped_output_query};
 use crate::trace::{has_missing_sequence_slots, project_trace};
 use crate::transition::{
     ActionInstance, action_has_partial_operation_candidate, action_instances,
@@ -375,6 +375,10 @@ async fn prove_induction_scoped<S: SmtSolver>(
                     k_used.insert(property.name(model), k);
                 }
                 SatResult::Sat => {
+                    if let Err(error) = solver.resolve_output_model().await {
+                        solver.pop(1)?;
+                        return Err(error.into());
+                    }
                     if !matches!(property, Property::Bound(_)) {
                         for state in &states {
                             if has_missing_sequence_slots(solver, state)? {
@@ -437,6 +441,10 @@ async fn prove_induction_scoped<S: SmtSolver>(
             solver.assert(&solver.not(bool_term(&value)?)?)?;
             match solver.check().await? {
                 SatResult::Sat => {
+                    if let Err(error) = solver.resolve_output_model().await {
+                        solver.pop(1)?;
+                        return Err(error.into());
+                    }
                     for state in &states {
                         if has_missing_sequence_slots(solver, state)? {
                             solver.pop(1)?;
@@ -493,7 +501,7 @@ pub(crate) async fn partial_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Option<Vec<fsl_core::TraceStep>>, VerifyError> {
-    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+    scoped_output_query(solver, [condition], PopFailure::First, |solver, result| {
         if OnUnknown::Fail("solver returned unknown in induction").proves_unsat(result)? {
             Ok(None)
         } else {
@@ -2312,6 +2320,10 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
             solver.assert(&solver.lt(&measure0, &solver.int_value(0))?)?;
             match solver.check().await? {
                 SatResult::Sat => {
+                    if let Err(error) = solver.resolve_output_model().await {
+                        solver.pop(1)?;
+                        return Err(error.into());
+                    }
                     let measure_value = model_int(solver, &measure0)?;
                     let trace = project_trace(solver, model, &[state0], &[], &instances, 0)?;
                     solver.pop(1)?;
@@ -2358,7 +2370,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     .filter(|&index| !model.actions[instances[index].action_index].fair)
                     .collect::<Vec<_>>();
                 if !nonfair.is_empty()
-                    && let Some(failure) = scoped_query(
+                    && let Some(failure) = scoped_output_query(
                         solver,
                         [&pending],
                         PopFailure::First,
@@ -2482,7 +2494,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                         solver.not(&q1)?,
                         solver.not(&enabled1)?,
                     ])?;
-                    if let Some(failure) = scoped_query(
+                    if let Some(failure) = scoped_output_query(
                         solver,
                         [&flickers],
                         PopFailure::First,
@@ -2634,6 +2646,10 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
             solver.assert(&solver.not(&any_enabled)?)?;
             match solver.check().await? {
                 SatResult::Sat => {
+                    if let Err(error) = solver.resolve_output_model().await {
+                        solver.pop(1)?;
+                        return Err(error.into());
+                    }
                     let measure_value = model_int(solver, &measure_dl)?;
                     let trace =
                         project_trace(solver, model, &[deadlock_state], &[], &instances, 0)?;
@@ -2696,7 +2712,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     let selected = solver.equal(&choice, &solver.int_value(i64_index(index)?))?;
                     let failure =
                         solver.and(&[pending.clone(), selected, solver.not(&progresses)?])?;
-                    if let Some(failure) = scoped_query(
+                    if let Some(failure) = scoped_output_query(
                         solver,
                         [&failure],
                         PopFailure::First,
@@ -2765,7 +2781,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     let selected = solver.equal(&choice, &solver.int_value(i64_index(index)?))?;
                     let failure =
                         solver.and(&[pending.clone(), selected, solver.not(&allowed)?])?;
-                    if let Some(failure) = scoped_query(
+                    if let Some(failure) = scoped_output_query(
                         solver,
                         [&failure],
                         PopFailure::First,

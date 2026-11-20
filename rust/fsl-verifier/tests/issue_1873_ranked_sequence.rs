@@ -11,7 +11,7 @@ use std::task::{Context, Poll, Waker};
 
 use fsl_core::{FsResolver, build_model, parse_kernel_source};
 use fsl_solver::{
-    CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort,
+    CheckFuture, ModelFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort,
     VerificationStatistics,
 };
 use fsl_solver_z3::Z3Solver;
@@ -37,6 +37,9 @@ impl SmtSolver for RecordingSolver {
     type Term = <Z3Solver as SmtSolver>::Term;
     fn version(&self) -> &str {
         self.inner.version()
+    }
+    fn resolve_output_model(&mut self) -> ModelFuture<'_> {
+        self.inner.resolve_output_model()
     }
     fn set_query_context(&mut self, kind: &str, name: &str) {
         self.calls.get_mut().push(format!("context {kind} {name}"));

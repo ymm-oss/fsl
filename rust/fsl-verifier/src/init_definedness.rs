@@ -50,7 +50,9 @@ pub(crate) struct InitFailureSite<T> {
 /// The backend's term table is shared by every later solver session on the
 /// thread, so even building terms the search never built moves the
 /// under-determined models later sessions return (the induction step's CTI
-/// is one). An init with nothing that can fail must therefore build nothing.
+/// was one; printed models are re-solved since #1940, the session's solver
+/// work is not). An init with nothing that can fail must therefore build
+/// nothing.
 /// `false` is exact only in that direction: every construct
 /// `evaluation_status` can report undefined answers `true` here (arithmetic,
 /// negation, `abs`, `sum`, an index read, a `Seq` method, an indexed

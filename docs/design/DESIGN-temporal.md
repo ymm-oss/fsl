@@ -321,14 +321,22 @@ failure is a transition-progress failure.
     may change: `elapsed_s`, per-property `checks`/`elapsed_s`, and solver
     statistics. Verdicts, witnesses, traces, `pending_since`, `loop_start`,
     findings, vacuity, coverage, stderr, and exit codes must stay identical.
-    Scoped push/pop restores assertions, not Z3's query history: later
-    bindings and properties can still project witnesses. Complete differential
-    comparison is therefore required; a different valid witness is a failure
-    of this optimization's output-preservation contract.
+    Scoped push/pop restores assertions, not Z3's query history: when #1888
+    landed, later bindings and properties projected their witnesses from the
+    session's model, which that history could change, so complete
+    differential comparison was required; a different valid witness is a
+    failure of this optimization's output-preservation contract.
     The deadlock-stall probes (§2.4) keep one query
     per pending step: they run inside the unrolling, and a combined per-step
     query was observed to change the `reachable` witnesses projected later in
     the same session.
+    Since #1940 every printed trace, the lasso's included, is projected from a
+    model re-solved on a fresh Z3 context (`SmtSolver::resolve_output_model`,
+    `DESIGN-rust-port.md` §4). With the same binary, a witness depends only on
+    the asserted formula, the property and the step, so a change that only
+    adds, removes or reorders scoped queries (as #1888 did) keeps native
+    witnesses byte-identical. The enumeration above still picks the lasso
+    `(i, j, p)` without reading a model; it is unchanged.
   - enabled_a reuses the same `_eval_requires` conjunction as the coverage check
     (expr_cache works).
   - The deadlock stall (§2.4) is checked *inside* `_bmc_explore`, per step,

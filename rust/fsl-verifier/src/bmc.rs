@@ -19,7 +19,7 @@ use crate::induction::{InductionCti, partial_witness};
 use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::scoped_query::{
-    OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_query,
+    OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_output_query,
 };
 use crate::trace::project_trace;
 use crate::transition::{
@@ -384,8 +384,8 @@ async fn verify_bounded_session<S: SmtSolver>(
     // on the reset solver, after the search has produced all of its evidence.
     // Asked inside the search, those queries (and even the terms they build)
     // move the backend's internal state, and the native and browser Z3 builds
-    // then resolve under-determined witnesses differently; the native/Worker
-    // evidence is byte-compared (see the vacuity note in `verify_bounded_config`).
+    // then resolved under-determined witnesses differently (printed models are
+    // now re-solved, #1940; see the vacuity note in `verify_bounded_config`).
     // The reset is also needed for soundness, not only parity: the search has
     // asserted the transitions of later steps, each of which requires a
     // successor state, so without it every path that dead-ends after step `s`
@@ -971,10 +971,11 @@ async fn verify_bounded_config<S: SmtSolver>(
     // The solver-dependent vacuity lanes run last, after every witness,
     // reachable, and deadlock trace has been projected. They ask nothing about
     // the unrolled states — each lane quantifies over freshly named ones — but
-    // a query still moves the backend's internal state, and two Z3 builds may
-    // then resolve an under-determined model differently. The native and
-    // browser evidence contract is byte-compared, so no new query may run
-    // before the evidence it could perturb.
+    // a query still moves the backend's internal state, and the session's
+    // own model with it. Printed models are re-solved on a fresh context and
+    // do not move (`SmtSolver::resolve_output_model`, #1940), but the
+    // session's solver work does, so no new query may run before the
+    // evidence it could perturb.
     //
     // By this point the unrolling has asserted a mandatory forward transition
     // out of every state, which a spec that deadlocks on every path makes
@@ -2381,7 +2382,7 @@ async fn build_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Vec<TraceStep>, VerifyError> {
-    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+    scoped_output_query(solver, [condition], PopFailure::First, |solver, result| {
         if OnUnknown::Fail("solver returned unknown for witness").proves_unsat(result)? {
             Err(VerifyError::new("witness condition became unsatisfiable"))
         } else {

@@ -61,7 +61,7 @@ fn export_writes_a_schema_valid_reproducer_for_a_safety_invariant_violation() {
     let (value, status) = run(&[
         "counterexample",
         "export",
-        &fixture("sweep_violating.fsl"),
+        &fixture("issue_1940_unique_shortest_violation.fsl"),
         "--depth",
         "4",
         "-o",
@@ -95,7 +95,7 @@ fn export_writes_a_schema_valid_reproducer_for_a_safety_invariant_violation() {
 fn bmc_and_explicit_projections_match_for_the_same_shortest_trace() {
     let bmc_path = scratch("bmc");
     let explicit_path = scratch("explicit");
-    let spec = fixture("sweep_violating.fsl");
+    let spec = fixture("issue_1940_unique_shortest_violation.fsl");
     let (_, bmc_status) = run(&[
         "counterexample",
         "export",
@@ -186,7 +186,7 @@ fn unsupported_shapes_are_rejected_before_export() {
     let (value, status) = run(&[
         "counterexample",
         "export",
-        &fixture("sweep_violating.fsl"),
+        &fixture("issue_1940_unique_shortest_violation.fsl"),
         "--depth",
         "4",
         "--engine",

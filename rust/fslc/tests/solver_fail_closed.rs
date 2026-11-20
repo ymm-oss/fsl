@@ -7,7 +7,7 @@ use std::task::{Context, Poll, Waker};
 
 use fsl_core::{FsResolver, FslValue, build_model, parse_kernel_source};
 use fsl_solver::{
-    CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort,
+    CheckFuture, ModelFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort,
     VerificationStatistics,
 };
 
@@ -82,6 +82,9 @@ impl SmtSolver for FirstCheckFault {
         self.inner.version()
     }
 
+    fn resolve_output_model(&mut self) -> ModelFuture<'_> {
+        self.inner.resolve_output_model()
+    }
     fn set_query_context(&mut self, kind: &str, name: &str) {
         self.inner.set_query_context(kind, name);
     }

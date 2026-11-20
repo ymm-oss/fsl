@@ -172,6 +172,17 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   per-invariant runs are then made in order on the thread's own context, as
   before #1838, up to the last such outcome, and the solver-chosen outcomes
   are taken from them.
+- **Re-solved traces (#1940).** A run whose traces can be printed re-solves
+  each model it projects a trace from on a fresh Z3 context
+  (`DESIGN-rust-port.md` §4), so a printed solver-chosen value no longer
+  depends on the runs before it. The screening runs, the reachable phase's
+  runs and the invariant phase's analysis runs read only verdicts and make
+  their solver `verdicts_only`: they spend no re-solve. In the replay above,
+  only the runs whose outcome carries a solver-chosen value re-solve; the
+  other replayed runs, the fresh context and the in-order replay are kept as
+  they were, though the printed output no longer needs them (removing them
+  is a separate change). With `unshared_counterfactual_runs` every
+  per-invariant run re-solves, since its outcomes are printed directly.
 - **Tests.** `shared_counterfactual_runs_print_the_unshared_output`
   (a unit test in `rust/fslc/src/main.rs`) compares the JSON of `explain` at depth 4
   on `examples/nfr/support_sla.fsl` and `examples/self/refinement_algebra.fsl`,

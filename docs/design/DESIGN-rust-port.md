@@ -161,6 +161,50 @@ Asyncify at those calls; native Z3 returns an immediately-ready future. The
 verifier preserves the existing incremental solver shape: transition constraints
 are retained across depths and property probes use push/assert/check/pop.
 
+The sketch above predates the code: the trait is `fsl_solver::SmtSolver`, and
+`resolve_output_model` (below) is a third asynchronous method.
+
+**Printed models (#1940).** The model a `check` returns is the backend's
+choice, and Z3's choice depends on the queries the session asked before, not
+only on what is asserted. Every model the verifier reads for output — a
+reachable witness, a violation, deadlock, `leadsTo` or partial-operation
+trace (`build_witness`), an induction CTI or rank failure, an
+invariant-implication counterexample — is read after
+`SmtSolver::resolve_output_model`. Both backends re-solve the current
+assertions (and the last check's assumptions, and the trackers of tracked
+assertions, which a check assumes too) on a new Z3 context, with the
+session's seed, and read the model from there: native `Z3Solver` through
+`z3::Synchronized`, the browser through `fslZ3ResolveOutputModel` in
+`rust/fsl-wasm/web/z3-bridge.mjs` (low-level `Z3_translate` into a context it
+deletes afterwards). The guarantee: with the same
+binary (and so the same Z3 build), a printed witness or trace is a function of
+the asserted formula, which is fixed by the spec, the property and the step.
+A change that only adds, removes or reorders scoped queries keeps the output
+byte-identical. It is not a guarantee across Z3 builds. Nor does it hold when
+the fresh context answers `unknown` where the session answered `sat` (a time
+limit, or an incomplete theory such as non-linear arithmetic): the reads then
+fall back to the session's own model, silently, and that model can depend on
+the session's history; the output does not mark it. The re-solve is refused
+(an error, not a fallback) unless the last check answered `sat` and the
+session has not moved since, so it never re-solves a formula weaker than the
+one checked. Native/Worker parity
+compares witnesses and traces by their shape (keys, action names, value
+shapes), not their values, except the `issue_1457` collection witnesses,
+which are unique; a reachable or deadlock witness whose shape differs passes
+only if both sides replay on the Monitor and reach the same states (#1789;
+`rust/fsl-wasm/parity.mjs`). That still needs the Worker to pick the same
+witness whenever the choices differ in shape: with the re-solve on the native
+side only, `refinement_algebra` and `design_bypasses_control` failed parity,
+so the browser re-solves too. Native and Worker re-solve the same assertions
+on fresh contexts of the same Z3 version; that they then pick the same model
+is observed (parity passes, no witness needed replay), not guaranteed. The re-solve is not a check and is not counted in `cost`:
+`checks` and the per-property counts are unchanged, but the model translated back into the
+session's context adds terms there, so the session's later `conflicts`, `decisions` and
+`propagations` can differ (74 of 1,334 corpus `verify` runs, 37 default and 37 `--engine induction`, at #1940). A
+session whose traces are never printed (`explain`'s screening and analysis
+runs, the #1149 ranking pre-pass) is made `Z3Solver::verdicts_only` and
+skips it.
+
 Integer values use `i64` with checked arithmetic. Overflow is an error, never a
 silent wrap. Division and remainder preserve SMT-LIB Euclidean semantics. Native
 and browser Z3 releases must be pinned to the same version; the concrete release
@@ -307,10 +351,11 @@ solver-independent crates used by both delivery surfaces:
 - The solver-dependent lanes run after every witness, reachable, and deadlock
   trace has been projected. They quantify over freshly named states and never
   read the unrolled ones, but a query still moves the backend's internal
-  state, and the native and browser Z3 builds may then resolve an
-  under-determined model differently — which the byte-compared evidence
-  contract reports as a parity failure. No new query may run before the
-  evidence it could perturb.
+  state, and the browser Z3 build may then resolve an under-determined model
+  differently. Printed models are re-solved on a fresh context and do not
+  move (§4, #1940); the session's solver work and any model read without
+  the re-solve still do. No new query may run before the evidence it could
+  perturb.
 - Backend-neutral analysis must keep its symbolic-state allocation independent
   of the spec's size. Every constraint a probe needs is asserted inside a
   `push`/`pop`, so one reusable state per analysis is enough; allocating one
