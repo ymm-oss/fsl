@@ -297,3 +297,42 @@ spec EnumLiteral {
         "AllMarked",
     );
 }
+
+/// A stall, not a lasso: without `noop`, finishing task 0 deadlocks with task
+/// 1 still pending. The other fixtures all keep an always-enabled `noop`, so
+/// only this one reaches the deadlock-stall query (`check_leadsto_stagnation`).
+#[test]
+fn stall_with_a_literal_index() {
+    let source = r"
+spec StallLiteralIndex {
+  symmetric type TaskId = 0..1
+  enum Status { Pending, Done }
+  state { status: Map<TaskId, Status> }
+  init {
+    forall t: TaskId { status[t] = Pending }
+  }
+  fair action finish0() {
+    requires status[0] == Pending
+    status[0] = Done
+  }
+  invariant AlwaysTrue { true }
+  leadsTo EveryTaskFinishes {
+    forall t: TaskId {
+      status[t] == Pending ~> status[t] == Done
+    }
+  }
+}
+";
+    let symmetric = verify(source, 4);
+    let plain = verify(&plain(source), 4);
+    assert_symmetric_matches_violated_plain(&symmetric, &plain, "EveryTaskFinishes");
+    let details = plain
+        .leadsto_violation
+        .as_ref()
+        .and_then(|violation| violation.leads_to.as_ref())
+        .expect("leadsTo details");
+    assert_eq!(
+        details.loop_start, None,
+        "expected a stall, got {details:?}"
+    );
+}
