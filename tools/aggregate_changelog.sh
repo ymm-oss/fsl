@@ -85,14 +85,24 @@
 # Usage:
 #   aggregate_changelog.sh check
 #       Validates every fragment currently in changelog.d/: name shape and
-#       category membership (control 6), and duplicate (id, category) pairs
-#       (control 2).
+#       category membership (control 6), duplicate (id, category) pairs
+#       (control 2), body hygiene, and the body's lead (issue #1936): it
+#       must pass check-section's lead rules once rendered, its category
+#       must be the file name's, and the file name's id must be one of its
+#       own ids, not an id after `refs` (changelog-fragment-lead-invalid,
+#       changelog-fragment-lead-mismatch).
 #   aggregate_changelog.sh check-pr
 #       The merge-readiness pre-merge checks: everything `check` does, plus
 #       control 1 (a product-surface diff with no new, non-empty fragment)
 #       and control 4's direct-edit-forbidden half, both computed from
 #       BASE_SHA/HEAD_SHA in the environment (the same convention
-#       tools/check-product-gate-scope.sh uses).
+#       tools/check-product-gate-scope.sh uses). Last, it runs the command
+#       that will consume the pending fragments on a scratch copy of
+#       CHANGELOG.md -- `fold` into the newest section while that section is
+#       untagged and `[Unreleased]` is empty, `release` otherwise -- and
+#       fails if the section it writes would break check-section's rules,
+#       e.g. two fragments naming one id under one category
+#       (changelog-fragment-section-invalid; issue #1936).
 #   aggregate_changelog.sh check-stale
 #       Control 4's release-time half: fails if changelog.d/ still has any
 #       fragment at tag time.
@@ -116,10 +126,11 @@
 #       section (preceded by whatever the existing `[Unreleased]` body still
 #       holds, moved verbatim -- the migration pull request deliberately
 #       left it there, see docs/design/DESIGN-changelog-fragments.md), verifies
-#       conservation (control 5), rewrites CHANGELOG.md, and deletes the
-#       consumed fragments -- all before returning, so the authority
-#       handover from fragment to version section is a single atomic step
-#       for the caller to commit.
+#       conservation (control 5), checks the written section with
+#       check-section's rules (changelog-release-section-invalid; issue
+#       #1936), rewrites CHANGELOG.md, and deletes the consumed fragments --
+#       all before returning, so the authority handover from fragment to
+#       version section is a single atomic step for the caller to commit.
 #   aggregate_changelog.sh fold --version X.Y.Z [--changelog FILE]
 #                               [--fragments-dir DIR]
 #       Folds fragments that merged after the release commit into the
@@ -129,8 +140,9 @@
 #       (verify_fold). With no fragments it changes nothing (issue #1806).
 #   aggregate_changelog.sh selftest
 #       Executes the accepting and rejecting fixtures for all six controls,
-#       check-section (including its release-notes cross-check) and fold,
-#       printing each rejecting fixture's exit status.
+#       check-section (including its release-notes cross-check), fold, and
+#       the fragment-lead checks, printing each rejecting fixture's exit
+#       status.
 
 set -euo pipefail
 export LC_ALL=C
@@ -440,6 +452,65 @@ validate_fragment_hygiene_all() {
   [ "${#files[@]}" -eq 0 ] && return 0
   for f in "${files[@]}"; do
     validate_fragment_hygiene "$dir/$f"
+  done
+}
+
+# Rejects a fragment whose lead would break check-section once rendered, or
+# that does not name the fragment it is in (issue #1936). The first line of
+# the body, rendered as render_fragment renders it, goes through the same
+# lead_parse and lead_rules as a section bullet
+# (`changelog-fragment-lead-invalid`, naming the section rule it breaks); then
+# the lead's category must be the file name's category, and the file name's
+# id one of the lead's own ids -- not an id after `refs`, which
+# changelog.d/README.md defines as a cross-reference
+# (`changelog-fragment-lead-mismatch`). `Fixed (#691, #692):` in
+# 692-x.fixed.md is accepted. An empty body is left to the empty-fragment
+# checks, which name it more precisely.
+validate_fragment_lead() {
+  local dir="$1" f="$2" meta id cat body out
+  meta="$(parse_fragment_name "$f")"
+  id="${meta%%$'\t'*}"
+  cat="${meta##*$'\t'}"
+  body="$(trimmed_fragment_body "$dir/$f")"
+  [ -z "$body" ] && return 0
+  out="$(printf -- '- %s\n' "${body%%$'\n'*}" | awk -v cats="${DECLARED_CATEGORY_ORDER[*]}" \
+      -v file="$dir/$f" -v fid="$id" -v fcat="$cat" "$(lead_awk_lib)"'
+    function invalid(lines,    n, r, k, tab) {
+      n = split(lines, r, "\n")
+      for (k = 1; k <= n; k++) {
+        if (r[k] == "") continue
+        tab = index(r[k], "\t")
+        print "changelog-fragment-lead-invalid: " file ": " substr(r[k], 1, tab - 1) ": " substr(r[k], tab + 1)
+      }
+    }
+    BEGIN { lead_init(cats) }
+    NR == 1 {
+      err = lead_parse($0)
+      if (err != "") { invalid(err); exit }
+      invalid(lead_rules())
+      if (lead_cat != fcat)
+        print "changelog-fragment-lead-mismatch: " file ": the lead category `" lead_word "` is not the file name category `" fcat "`"
+      if (lead_n == 0) exit
+      own = ""
+      for (i = 1; i <= lead_n; i++) {
+        if (lead_id[i] == fid + 0) exit
+        own = own (i > 1 ? ", " : "") "#" lead_id[i]
+      }
+      print "changelog-fragment-lead-mismatch: " file ": the file name id #" fid " is not one of the lead'"'"'s own ids (" own "); an id after `refs` is a cross-reference"
+    }
+  ')" || fail "changelog-fragment-lead-invalid: $dir/$f (could not parse the lead)"
+  [ -z "$out" ] || fail "$out"
+}
+
+validate_fragment_leads_all() {
+  local dir="$1"
+  local -a files=()
+  local f listed
+  listed="$(list_fragment_files "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
+  [ "${#files[@]}" -eq 0 ] && return 0
+  for f in "${files[@]}"; do
+    validate_fragment_lead "$dir" "$f"
   done
 }
 
@@ -1000,7 +1071,8 @@ check() {
   validate_fragment_names "$dir"
   check_duplicates "$dir"
   validate_fragment_hygiene_all "$dir"
-  echo "aggregate_changelog: check PASS -- every fragment in '$dir' has a conforming name and no duplicate (id, category)"
+  validate_fragment_leads_all "$dir"
+  echo "aggregate_changelog: check PASS -- every fragment in '$dir' has a conforming name, no duplicate (id, category), and a lead that names its own category and id"
 }
 
 check_pr() {
@@ -1008,6 +1080,7 @@ check_pr() {
   validate_fragment_names "$dir"
   check_duplicates "$dir"
   validate_fragment_hygiene_all "$dir"
+  validate_fragment_leads_all "$dir"
   # Computed once, before either control that depends on it: control 4's own
   # fail-closed check (an invalid direct edit fails right here) and control
   # 1's release exclusion both consume this single classification, so they
@@ -1019,7 +1092,61 @@ check_pr() {
   set -e
   [ "$status" -eq 0 ] || exit 1
   check_missing_or_empty_fragment "$classification"
+  check_fragment_destination "$dir" "CHANGELOG.md"
   echo "aggregate_changelog: check-pr PASS"
+}
+
+# check-pr's fold simulation (issue #1936). Each fragment passing
+# validate_fragment_lead is not enough: two fragments can name the same id
+# under one category (`Fixed (#100, #200)` beside `Fixed (#200)`), or a
+# fragment's extra id can repeat an entry of the section it will be folded
+# into, and only the rendered section shows it. This runs the command that
+# will consume the pending fragments of $1 on a scratch copy of $2 and fails
+# when it would:
+#   - `fold --version X.Y.Z` when the newest section X.Y.Z is not tagged and
+#     `[Unreleased]` is empty -- the window between the release commit and
+#     the tag, when docs/design/RELEASE.md folds late fragments into X.Y.Z;
+#     version_is_tagged is fold's own fold-version-tagged predicate;
+#   - otherwise `release`, into a new section (scratch version 0.0.0), which
+#     now runs check_section_body on its own output.
+# A tagged section is never the destination: its fragments belong to the
+# next release, where an (id, category) pair the tagged section already has
+# is not a duplicate (the 5.2.0 section has `Unified (#1874)`, and #1874's
+# second `unified` fragment waits for the release after it).
+check_fragment_destination() {
+  local dir="$1" changelog="$2"
+  local -a files=()
+  local f listed
+  listed="$(list_fragment_files "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
+  [ "${#files[@]}" -eq 0 ] && return 0
+  [ -f "$changelog" ] || fail "changelog-fragment-section-invalid: '$changelog' not found, so the section the fragments of '$dir' go into cannot be checked"
+  local newest unreleased scratch status target
+  newest="$(released_section_versions "$changelog")"
+  newest="${newest%%$'\n'*}"
+  unreleased="$(unreleased_raw_body "$changelog" | trim_blank_edges)"
+  scratch="$(mktemp -d)" || fail "check-pr: could not create a scratch directory"
+  mkdir "$scratch/changelog.d"
+  cp "$changelog" "$scratch/CHANGELOG.md"
+  for f in "${files[@]}"; do cp "$dir/$f" "$scratch/changelog.d/$f"; done
+  set +e
+  if [ -n "$newest" ] && [ -z "$unreleased" ] && ! version_is_tagged "$changelog" "$newest"; then
+    target="## [$newest] (untagged), as \`fold --version $newest\` would fold them"
+    # The scratch copy is not in a repository; keep git from finding one
+    # above it (fold's own tag check) when TMPDIR is inside a work tree.
+    GIT_CEILING_DIRECTORIES="$(dirname "$scratch")" "$SELF" fold --version "$newest" \
+      --changelog "$scratch/CHANGELOG.md" --fragments-dir "$scratch/changelog.d" >/dev/null
+    status=$?
+  else
+    target="the next release's section, as \`release\` would write it (scratch version 0.0.0)"
+    "$SELF" release --version 0.0.0 --date 1970-01-01 \
+      --changelog "$scratch/CHANGELOG.md" --fragments-dir "$scratch/changelog.d" >/dev/null
+    status=$?
+  fi
+  set -e
+  rm -rf "$scratch"
+  [ "$status" -eq 0 ] \
+    || fail "changelog-fragment-section-invalid: the fragments of '$dir' would break the check-section rules in $target (see above)"
 }
 
 check_stale() {
@@ -1347,6 +1474,7 @@ release() {
   validate_fragment_names "$fragdir"
   check_duplicates "$fragdir"
   validate_fragment_hygiene_all "$fragdir"
+  validate_fragment_leads_all "$fragdir"
 
   local -a sorted=()
   local f listed
@@ -1399,6 +1527,12 @@ release() {
     printf '%s\n\n' "$combined"
     printf '%s\n' "$rest"
   } >"$changelog.new"
+  # As fold does (verify_fold): the written section must pass check-section
+  # before it replaces the changelog (issue #1936). Cross-fragment duplicate
+  # ids, and a pre-mechanism `[Unreleased]` body moved in verbatim, are seen
+  # only here.
+  check_section_body "$changelog.new" "$version" >&2 \
+    || { rm -f "$changelog.new"; fail "changelog-release-section-invalid: ## [$version] as release would write it breaks the check-section rules (see above); '$changelog' and '$fragdir' are unchanged"; }
   mv "$changelog.new" "$changelog"
 
   if [ "${#sorted[@]}" -gt 0 ]; then
@@ -1558,6 +1692,15 @@ verify_fold() {
     || fail "fold-conservation-failed: the folded ## [$version] breaks the check-section rules (see above)"
 }
 
+# Succeeds when tag v$2 names a commit in the repository holding changelog
+# $1. Only a tag ref present locally is seen: an unfetched tag, or a
+# changelog outside a Git work tree, is not. fold refuses a tagged version
+# with it, and check-pr's fold simulation reads it to tell the fold window
+# from the time after the tag.
+version_is_tagged() {
+  git -C "$(dirname "$1")" rev-parse -q --verify "refs/tags/v$2^{commit}" >/dev/null 2>&1
+}
+
 fold() {
   local version="" changelog="CHANGELOG.md" fragdir="changelog.d"
   while [ "$#" -gt 0 ]; do
@@ -1574,6 +1717,7 @@ fold() {
   validate_fragment_names "$fragdir"
   check_duplicates "$fragdir"
   validate_fragment_hygiene_all "$fragdir"
+  validate_fragment_leads_all "$fragdir"
   local -a sorted=()
   local f listed
   listed="$(sort_fragments "$fragdir")"
@@ -1601,7 +1745,7 @@ fold() {
   # After the tag, changelog.d/ holds the next release's fragments. Only a
   # tag ref present locally is seen: an unfetched tag, or a changelog outside
   # a Git work tree, is not.
-  if git -C "$(dirname "$changelog")" rev-parse -q --verify "refs/tags/v$version^{commit}" >/dev/null 2>&1; then
+  if version_is_tagged "$changelog" "$version"; then
     fail "fold-version-tagged: v$version is already tagged; its fragments belong to the next release"
   fi
 
@@ -2894,7 +3038,14 @@ selftest_fold() {
   d="$tmp/badfrag"
   st_fold_fixture "$d" "${section[@]}"
   st_setup_frag "$d/changelog.d" "6-w.fixed.md" "Fixed #6 has no parenthesised label."
-  st_fold_refuses "a fragment whose bullet breaks the section rules" fold-conservation-failed "$d" --version 5.1.0
+  st_fold_refuses "a fragment whose lead breaks the section rules" changelog-fragment-lead-invalid "$d" --version 5.1.0
+  # Each lead names its own id, but together they repeat #51 under Fixed:
+  # only the folded section shows it, and verify_fold's check_section_body
+  # is what refuses it.
+  st_fold_fixture "$d" "${section[@]}"
+  st_setup_frag "$d/changelog.d" "50-v.fixed.md" "Fixed (#50, #51): two ids."
+  st_setup_frag "$d/changelog.d" "51-w.fixed.md" "Fixed (#51): #51 again."
+  st_fold_refuses "two fragments whose leads share an id" fold-conservation-failed "$d" --version 5.1.0
   st_fold_fixture "$d" "${section[@]}"
   printf '\n\n' >"$d/changelog.d/6-w.fixed.md"
   st_fold_refuses "an empty fragment" changelog-fragment-empty "$d" --version 5.1.0

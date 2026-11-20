@@ -242,7 +242,8 @@ check_automation() {
   # controls (docs/design/DESIGN-changelog-fragments.md): nonconforming fragment
   # name, duplicate (id, category), nondeterministic/nonconforming order,
   # unaggregated-at-release plus direct-edit-forbidden, and aggregation
-  # conservation; plus check-section's and fold's fixtures (issue #1806).
+  # conservation; plus check-section's and fold's fixtures (issue #1806) and
+  # the fragment-lead checks' (issue #1936).
   # Pure, no BASE_SHA/HEAD_SHA needed here -- the real
   # pull-request-diff checks run directly in merge-readiness.yml, the same
   # split check-product-gate-scope.sh's own `selftest` versus its real

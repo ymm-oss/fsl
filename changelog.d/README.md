@@ -54,6 +54,27 @@ Start the body with the lead `<Category> (#<id>[, <label>]):`, the category
 word capitalized (`Fixed (#691):`). A `#N` written after `refs` in the label
 (`Fixed (#1678, refs #1281):`) is a cross-reference, not the entry's own id.
 
+`check`, `check-pr`, `release` and `fold` enforce the lead on the body's
+first line (issue #1936). It must pass the lead rules `check-section` applies
+to a released section (a declared category word and at least one own id, and
+a `breaking` label only under `Changed`; otherwise
+`changelog-fragment-lead-invalid`). Its category word must be the file name's
+category, and the file name's id must be one of the lead's own ids
+(`changelog-fragment-lead-mismatch`). So `692-x.fixed.md` may lead with
+`Fixed (#691, #692):`, but not with `Fixed (#691, refs #692):`, and a
+follow-up to an earlier change names its own id first:
+`Unified (#1899, refs #1870):` in `1899-x.unified.md`.
+
+`check-pr` also checks the leads together. It runs the command that will
+consume the pending fragments on a scratch copy of `CHANGELOG.md` and fails
+(`changelog-fragment-section-invalid`) if the section that command writes
+would break `check-section`'s rules, for example two fragments that both
+name `#200` under `Fixed`. The command is `fold --version X.Y.Z` while the
+newest section X.Y.Z is not yet tagged and `[Unreleased]` is empty (see
+"Verification" below), and `release` otherwise. A tagged section is never
+the destination, so a fragment may repeat an (id, category) pair of an
+earlier release.
+
 **Breaking changes are `changed` fragments with a label.** Use
 `Changed (#N, breaking removal):` for a form that was accepted and is now
 refused, and `Changed (#N, breaking):` for another breaking change, such as a
@@ -77,8 +98,8 @@ itself start with a Markdown list marker (`- `, `* `, `+ `) or an ATX
 heading marker (`#` through `######` followed by a space), either of which
 would corrupt the bullet the aggregator renders around it
 (`changelog-fragment-hygiene-invalid`). A bare issue reference with no
-following space, e.g. a body starting `#737: …`, is not a heading and is
-fine.
+following space, e.g. a body starting `#737: …`, is not a heading, so the
+hygiene check accepts it; the lead rule above still rejects it.
 
 **Never hand-edit `CHANGELOG.md`'s `[Unreleased]` section.** Adding or
 deleting a line there directly is rejected pre-merge
@@ -157,8 +178,8 @@ accumulated in this directory by then. Only new entries route through
 `tools/aggregate_changelog.sh selftest` exercises the accepting and rejecting
 fixtures of every control, of `check-section` and of `fold`.
 `tools/aggregate_changelog.sh check` validates the
-fragments currently in this directory (name shape and duplicate ids) without
-aggregating anything.
+fragments currently in this directory (name shape, duplicate ids, body
+hygiene and the lead) without aggregating anything.
 
 `tools/aggregate_changelog.sh check-section` applies the same rules to the
 released `CHANGELOG.md` sections from 5.0.0 on, after aggregation and any hand
@@ -177,3 +198,5 @@ into the released section with `tools/aggregate_changelog.sh fold --version
 X.Y.Z` (`docs/design/RELEASE.md`, "Fragments that merge after the release
 commit"): the bullet `release` would have rendered, at the position its
 order gives, with the heading date unchanged and the fragment deleted.
+`release`, like `fold`, refuses to write a section that breaks
+`check-section`'s rules (`changelog-release-section-invalid`).
