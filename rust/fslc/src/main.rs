@@ -19934,6 +19934,96 @@ spec InitTraceability {
         assert_eq!(runs, (12, 4), "bounded runs and concrete searches");
     }
 
+    /// The JSON of `output` without the solver's work and wall-clock fields,
+    /// which an extra query changes: every `cost`, `elapsed_s` and
+    /// `memory_mb` key, at any depth.
+    fn without_solver_work(output: &Value) -> String {
+        fn strip(value: &mut Value) {
+            match value {
+                Value::Object(object) => {
+                    for key in ["cost", "elapsed_s", "memory_mb"] {
+                        object.remove(key);
+                    }
+                    object.values_mut().for_each(strip);
+                }
+                Value::Array(items) => items.iter_mut().for_each(strip),
+                _ => {}
+            }
+        }
+        let mut output = output.clone();
+        strip(&mut output);
+        serde_json::to_string_pretty(&output).expect("serialize output")
+    }
+
+    /// For each #1940 case, whether its output (masked by
+    /// [`without_solver_work`]) is the same when every check on the thread is
+    /// preceded by one extra scoped query. Each run gets its own Z3 context,
+    /// so neither run sees the other's history.
+    fn outputs_survive_extra_queries(resolve: bool) -> Vec<(&'static str, bool)> {
+        type Run = fn(&Path, &str) -> (Value, i32);
+        let verify: Run = |path, source| {
+            run_verify_from_source(path, source, 8, "warn", "bmc", DEFAULT_EXPLICIT_BUDGET, 1)
+        };
+        let explain: Run = |path, source| {
+            run_explain_from_source(path, source, 4, EXPLAIN_WITNESS_DEADLOCK_MODE, false)
+        };
+        let cases: [(&str, &str, Run); 3] = [
+            (
+                "verify cart_v1",
+                include_str!("../../../specs/cart_v1.fsl"),
+                verify,
+            ),
+            (
+                "verify small_forbidden_guarded_cancel",
+                include_str!("../../../examples/gallery/valid/small_forbidden_guarded_cancel.fsl"),
+                verify,
+            ),
+            (
+                "explain refinement_algebra",
+                include_str!("../../../examples/self/refinement_algebra.fsl"),
+                explain,
+            ),
+        ];
+        fsl_solver_z3::test_hooks::set_resolve_disabled(!resolve);
+        let survived = cases
+            .into_iter()
+            .map(|(label, source, run)| {
+                let fixture = SnapshotFixture::new("issue-1940-extra-queries", source);
+                let output = |perturbing| {
+                    fsl_solver_z3::test_hooks::set_perturbing(perturbing);
+                    let (output, status) =
+                        fsl_solver_z3::with_fresh_context(|| run(&fixture.path, source));
+                    fsl_solver_z3::test_hooks::set_perturbing(false);
+                    assert_eq!(status, 0, "{label}: {output:#}");
+                    without_solver_work(&output)
+                };
+                (label, output(false) == output(true))
+            })
+            .collect();
+        fsl_solver_z3::test_hooks::set_resolve_disabled(false);
+        survived
+    }
+
+    /// A printed witness or trace depends on the asserted formula, the
+    /// property and the step, not on the other queries the session asked
+    /// (#1940): one extra scoped query before every check leaves the output
+    /// byte-identical apart from solver work and timing.
+    #[test]
+    fn printed_traces_do_not_depend_on_extra_queries() {
+        for (label, survived) in outputs_survive_extra_queries(true) {
+            assert!(survived, "{label}: an extra query changed the output");
+        }
+    }
+
+    /// The control: with the re-solve turned off, the same extra queries
+    /// change the printed traces of every case, so the test above can fail.
+    #[test]
+    fn without_the_resolve_extra_queries_change_printed_traces() {
+        for (label, survived) in outputs_survive_extra_queries(false) {
+            assert!(!survived, "{label}: the extra queries changed nothing");
+        }
+    }
+
     /// Screening, sharing and replay print what making every per-invariant
     /// run in order prints, from the same solver context. Each spec has a
     /// counterfactual whose trace the solver chose (#1838).

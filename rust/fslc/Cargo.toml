@@ -41,6 +41,9 @@ sha2 = { workspace = true, optional = true }
 sha2.workspace = true
 
 [dev-dependencies]
+# `test-hooks`: perturb the query history and turn the output-model re-solve
+# off in the #1940 determinism tests. Release builds do not enable it.
+fsl-solver-z3 = { path = "../fsl-solver-z3", features = ["test-hooks"] }
 jsonschema = { version = "0.48.0", default-features = false }
 libc = "0.2"
 # Syntax-tree users: edition_dispatch_inventory.rs,
