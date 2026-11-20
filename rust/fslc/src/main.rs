@@ -10206,7 +10206,8 @@ fn invariants_without_bounded_violation(
             .invariants
             .retain(|property| remaining.contains(&property.name));
         // A screening run's verdicts are read, never its traces (#1940).
-        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new().map(|solver| solver.verdicts_only())
+        let Ok(mut solver) =
+            fsl_solver_z3::Z3Solver::new().map(fsl_solver_z3::Z3Solver::verdicts_only)
         else {
             break;
         };
