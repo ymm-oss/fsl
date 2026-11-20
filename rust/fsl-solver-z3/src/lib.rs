@@ -843,4 +843,71 @@ mod tests {
         assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(2)));
         Ok(())
     }
+    /// The value one session reads for an under-determined `x`, on its own
+    /// context: optionally after a scoped query that pinned `x = 777`, and
+    /// optionally re-solved for output (#1940).
+    fn chosen_x(history: bool, resolve: bool) -> SolverResult<Option<ModelValue>> {
+        with_fresh_context(|| {
+            let solver = Z3Solver::new()?;
+            let mut solver = if resolve {
+                solver
+            } else {
+                solver.verdicts_only()
+            };
+            let x = solver.constant("resolve_x", &Sort::Int)?;
+            solver.assert(&solver.ge(&x, &solver.int_value(0))?)?;
+            solver.assert(&solver.le(&x, &solver.int_value(1000))?)?;
+            if history {
+                solver.push();
+                solver.assert(&solver.equal(&x, &solver.int_value(777))?)?;
+                assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+                solver.pop(1)?;
+            }
+            assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+            block_on_ready_unit(solver.resolve_output_model())?;
+            solver.model_eval(&x)
+        })
+    }
+
+    fn block_on_ready_unit(mut future: ModelFuture<'_>) -> SolverResult<()> {
+        use std::task::{Context, Poll, Waker};
+
+        let mut context = Context::from_waker(Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(result) => result,
+            Poll::Pending => Err(SolverError::new("native Z3 future unexpectedly pending")),
+        }
+    }
+
+    /// A re-solved model does not depend on an earlier scoped query; the
+    /// check's own model does (the control, with `verdicts_only`).
+    #[test]
+    fn resolved_output_model_ignores_the_session_history() -> SolverResult<()> {
+        assert_eq!(chosen_x(true, true)?, chosen_x(false, true)?);
+        assert_ne!(
+            chosen_x(true, false)?,
+            chosen_x(false, false)?,
+            "control: the scoped query no longer moves the check's model"
+        );
+        Ok(())
+    }
+
+    /// The re-solved model is read only until the session moves: after the
+    /// scope is popped and the session checks again, reads come from that
+    /// check, not from the model re-solved inside the scope.
+    #[test]
+    fn the_next_check_drops_the_resolved_model() -> SolverResult<()> {
+        let mut solver = Z3Solver::new()?;
+        let x = solver.constant("dropped_x", &Sort::Int)?;
+        solver.push();
+        solver.assert(&solver.equal(&x, &solver.int_value(3))?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+        block_on_ready_unit(solver.resolve_output_model())?;
+        assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(3)));
+        solver.pop(1)?;
+        solver.assert(&solver.equal(&x, &solver.int_value(4))?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+        assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(4)));
+        Ok(())
+    }
 }
