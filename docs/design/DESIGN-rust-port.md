@@ -171,7 +171,8 @@ reachable witness, a violation, deadlock, `leadsTo` or partial-operation
 trace (`build_witness`), an induction CTI or rank failure, an
 invariant-implication counterexample — is read after
 `SmtSolver::resolve_output_model`. Both backends re-solve the current
-assertions (and the last check's assumptions) on a new Z3 context, with the
+assertions (and the last check's assumptions, and the trackers of tracked
+assertions, which a check assumes too) on a new Z3 context, with the
 session's seed, and read the model from there: native `Z3Solver` through
 `z3::Synchronized`, the browser through `fslZ3ResolveOutputModel` in
 `rust/fsl-wasm/web/z3-bridge.mjs` (low-level `Z3_translate` into a context it

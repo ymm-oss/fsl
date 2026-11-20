@@ -305,7 +305,8 @@ pub trait SmtSolver {
     /// depend on the queries the session asked before, not only on what is
     /// asserted. A backend that implements this method makes the following
     /// reads come from a model that depends only on the current assertions
-    /// and the assumptions of the last check, and on nothing else this
+    /// (a tracked assertion with its tracker assumed, as the check assumed
+    /// it) and the assumptions of the last check, and on nothing else this
     /// session did, until the next stack, assertion or check operation. The
     /// default keeps reading the last check's model: such a backend's printed
     /// models still depend on the session's query history.

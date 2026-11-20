@@ -76,6 +76,12 @@ pub struct Z3Solver {
     assumptions: Vec<Bool>,
     /// The re-solved model the next reads come from, until the session moves.
     output_model: Option<Model>,
+    /// The trackers of the tracked assertions in scope: Z3 asserts
+    /// `tracker => term` and assumes every tracker in each check, so they are
+    /// part of what a check's model satisfies.
+    trackers: Vec<Bool>,
+    /// The number of trackers in scope at each open `push`.
+    tracker_marks: Vec<usize>,
 }
 
 fn session_params(timeout_ms: Option<u32>) -> Params {
@@ -176,6 +182,8 @@ impl Z3Solver {
             resolves_output: true,
             assumptions: Vec::new(),
             output_model: None,
+            trackers: Vec::new(),
+            tracker_marks: Vec::new(),
         })
     }
 
@@ -612,6 +620,7 @@ impl SmtSolver for Z3Solver {
         self.moved();
         self.solver.push();
         self.stack_depth += 1;
+        self.tracker_marks.push(self.trackers.len());
     }
 
     fn pop(&mut self, levels: u32) -> SolverResult<()> {
@@ -621,12 +630,17 @@ impl SmtSolver for Z3Solver {
         self.moved();
         self.solver.pop(levels);
         self.stack_depth -= levels;
+        let open = self.tracker_marks.len() - levels as usize;
+        self.trackers.truncate(self.tracker_marks[open]);
+        self.tracker_marks.truncate(open);
         Ok(())
     }
 
     fn reset(&mut self) -> SolverResult<()> {
         self.moved();
         self.assumptions.clear();
+        self.trackers.clear();
+        self.tracker_marks.clear();
         self.solver.reset();
         self.stack_depth = 0;
         Ok(())
@@ -639,9 +653,10 @@ impl SmtSolver for Z3Solver {
     }
 
     fn assert_and_track(&mut self, term: &Self::Term, tracker: &Self::Term) -> SolverResult<()> {
+        let (term, tracker) = (expect_bool(term)?, expect_bool(tracker)?);
         self.moved();
-        self.solver
-            .assert_and_track(expect_bool(term)?.clone(), expect_bool(tracker)?);
+        self.solver.assert_and_track(term.clone(), tracker);
+        self.trackers.push(tracker.clone());
         Ok(())
     }
 
@@ -689,18 +704,21 @@ impl SmtSolver for Z3Solver {
             .collect())
     }
 
-    /// Re-solve the current assertions, and the last check's assumptions,
-    /// on a new Z3 context, and read the following model values from its
-    /// model (#1940). A solver made [`Z3Solver::verdicts_only`] keeps the
-    /// check's model.
+    /// Re-solve the current assertions, the last check's assumptions and
+    /// the trackers in scope on a new Z3 context, and read the following
+    /// model values from its model (#1940). A solver made
+    /// [`Z3Solver::verdicts_only`] keeps the check's model.
     fn resolve_output_model(&mut self) -> ModelFuture<'_> {
         Box::pin(async move {
             self.output_model = None;
             if !self.resolves_output || resolve_disabled() {
                 return Ok(());
             }
+            // `get_assertions` returns a tracked assertion as
+            // `tracker => term`; the check assumed its tracker.
             let mut assertions = self.solver.get_assertions();
             assertions.extend(self.assumptions.iter().cloned());
+            assertions.extend(self.trackers.iter().cloned());
             self.output_model = resolve_in_fresh_context(&assertions, self.timeout_ms)?;
             Ok(())
         })
@@ -908,6 +926,30 @@ mod tests {
         solver.assert(&solver.equal(&x, &solver.int_value(4))?)?;
         assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
         assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(4)));
+        Ok(())
+    }
+
+    /// A tracked assertion reaches the fresh context as `tracker => term`;
+    /// the re-solve assumes the tracker, as the check did, so the model still
+    /// satisfies the term. A tracker popped with its scope is not assumed.
+    #[test]
+    fn resolved_output_model_satisfies_tracked_assertions() -> SolverResult<()> {
+        let mut solver = Z3Solver::new()?;
+        let x = solver.constant("tracked_x", &Sort::Int)?;
+        let y = solver.constant("tracked_y", &Sort::Int)?;
+        let kept = solver.constant("tracked_kept", &Sort::Bool)?;
+        let popped = solver.constant("tracked_popped", &Sort::Bool)?;
+        solver.assert_and_track(&solver.equal(&x, &solver.int_value(5))?, &kept)?;
+        solver.push();
+        solver.assert_and_track(&solver.equal(&y, &solver.int_value(6))?, &popped)?;
+        solver.pop(1)?;
+        solver.assert(&solver.not(&solver.equal(&y, &solver.int_value(6))?)?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+        block_on_ready_unit(solver.resolve_output_model())?;
+        // Without the tracker assumed, the fresh context sets it false.
+        assert_eq!(solver.model_eval(&kept)?, Some(ModelValue::Bool(true)));
+        assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(5)));
+        assert_ne!(solver.model_eval(&y)?, Some(ModelValue::Int(6)));
         Ok(())
     }
 }

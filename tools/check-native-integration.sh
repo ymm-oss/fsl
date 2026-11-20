@@ -359,6 +359,9 @@ check_wasm() {
   # The browser run reads each spec's imports through this scanner; pin its
   # comment and unterminated-string handling first (#1056).
   npm --prefix rust/fsl-wasm run test:imports
+  # The Z3 bridge's output-model re-solve on the host, through z3-solver's
+  # Node build (#1940).
+  npm --prefix rust/fsl-wasm run test:bridge
   check_wasm_browser "wasm browser" npm --prefix rust/fsl-wasm run test:browser
 }
 

@@ -68,7 +68,9 @@ readiness and completion/timeout timestamps, plus the last observed client phase
 distinguish progress from an unexplained pending page. These diagnostics do not
 change outcome JSON, parity envelopes, normalization, exclusions or corpus scope.
 Package-free FSL/spike outcome, completion and retry controls run through the
-FSL package's `test:outcome` entry point in the WASM lane before the FSL browser.
+FSL package's `test:outcome` entry point in the WASM lane before the FSL browser;
+after `test:imports`, `test:bridge` runs the Z3 bridge's output-model re-solve
+(#1940) on the host through z3-solver's Node build.
 A retry is a bounded mitigation, not evidence that the underlying latency cause
 is resolved or that parity has passed.
 

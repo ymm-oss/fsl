@@ -4,8 +4,10 @@ import { init as initZ3 } from "z3-solver/build/browser.js";
 
 let em;
 
-export async function installZ3Bridge() {
-  const initialized = await initZ3();
+// `initialize` is z3-solver's `init`: the browser build here, the Node build
+// in the host test (`z3-bridge.test.mjs`).
+export async function installZ3Bridge(initialize = initZ3) {
+  const initialized = await initialize();
   em = initialized.em;
   const ctx = new initialized.Context("fsl-wasm");
   const { Array: Z3Array, Bool, If, Int, Solver } = ctx;
@@ -119,25 +121,30 @@ export async function installZ3Bridge() {
     return register(ctx.substitute(term(handle), ...substitutions));
   };
   // #1940: the model read for output, re-solved on a fresh context, until
-  // the session moves; and the assumptions of the last check, which it
-  // satisfies too. The native backend does the same
+  // the session moves; and the assumptions of the last check and the
+  // trackers of the tracked assertions in scope (one list per open scope),
+  // which the check assumed and its model satisfies too. The native backend does the same
   // (`fsl_solver_z3::Z3Solver::resolve_output_model`).
   let outputModel = null;
   let lastAssumptions = [];
+  let trackerScopes = [[]];
   const moved = () => {
     outputModel = null;
   };
   globalThis.fslZ3Push = () => {
     moved();
     solver.push();
+    trackerScopes.push([]);
   };
   globalThis.fslZ3Pop = (levels) => {
     moved();
     solver.pop(Number(levels));
+    trackerScopes.length -= Number(levels);
   };
   globalThis.fslZ3Reset = () => {
     moved();
     lastAssumptions = [];
+    trackerScopes = [[]];
     solver.reset();
   };
   globalThis.fslZ3Assert = (handle) => {
@@ -147,16 +154,18 @@ export async function installZ3Bridge() {
   globalThis.fslZ3AssertAndTrack = (handle, tracker) => {
     moved();
     solver.addAndTrack(term(handle), term(tracker));
+    trackerScopes[trackerScopes.length - 1].push(term(tracker));
   };
   globalThis.fslZ3Check = async (rawAssumptions) => {
     moved();
     lastAssumptions = [...rawAssumptions].map(term);
     return String(await solver.check(...lastAssumptions));
   };
-  // Solve the current assertions and the last check's assumptions alone on a
-  // new context, configured as the native re-solve is (seed 0), and read the
-  // following model values from its model, translated back. The context is
-  // deleted afterwards: the high-level API never frees one.
+  // Solve the current assertions, the last check's assumptions and the
+  // trackers in scope alone on a new context, configured as the native
+  // re-solve is (seed 0), and read the following model values from its
+  // model, translated back. The context is deleted afterwards: the
+  // high-level API never frees one.
   globalThis.fslZ3ResolveOutputModel = async () => {
     moved();
     const Z3 = initialized.Z3;
@@ -172,7 +181,9 @@ export async function installZ3Bridge() {
       Z3.params_set_uint(fresh, params, Z3.mk_string_symbol(fresh, "smt.random_seed"), 0);
       Z3.solver_set_params(fresh, freshSolver, params);
       Z3.params_dec_ref(fresh, params);
-      for (const assertion of [...solver.assertions(), ...lastAssumptions]) {
+      // `assertions()` returns a tracked assertion as `tracker => term`.
+      const tracked = trackerScopes.flat();
+      for (const assertion of [...solver.assertions(), ...lastAssumptions, ...tracked]) {
         const translated = Z3.translate(ctx.ptr, assertion.ast, fresh);
         Z3.inc_ref(fresh, translated);
         Z3.solver_assert(fresh, freshSolver, translated);
