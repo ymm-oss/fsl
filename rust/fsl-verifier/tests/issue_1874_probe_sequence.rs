@@ -469,6 +469,9 @@ fn definedness_probe_sequences_are_unchanged() {
 
 /// Full BMC evidence from the base, rather than only query text. Shortening
 /// the search's guard-undefined term lifetime changes this deadlock witness.
+/// The solver is `verdicts_only`: a re-solved witness (#1940) no longer
+/// depends on the session's term history, so only the session's own model
+/// still shows a changed lifetime.
 #[test]
 fn search_probe_term_lifetimes_preserve_witnesses() {
     // Base measurements (d1df480b / 0cb57b69), before #1874:
@@ -495,7 +498,7 @@ fn search_probe_term_lifetimes_preserve_witnesses() {
             let model = model(include_str!(
                 "../../../examples/gallery/adversarial/option_struct_set_seq_combo.fsl"
             ));
-            let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
+            let mut solver = fsl_solver_z3::Z3Solver::new().unwrap().verdicts_only();
             let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 8)).unwrap();
             let mut digest = 0xcbf2_9ce4_8422_2325_u64;
             for byte in format!("{result:?}").bytes() {

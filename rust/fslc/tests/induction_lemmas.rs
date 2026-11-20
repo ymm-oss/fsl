@@ -158,15 +158,25 @@ fn iterates_until_distinct_candidates_exclude_successive_ctis() {
     );
 }
 
+/// Each lemma excludes the CTIs of one half of the spec. Which half the
+/// first CTI falls in is the solver's choice (it moved with #1940), so the
+/// lemma that excludes it is found by trying both; the other half still has
+/// a CTI, so the used lemma must not be recommended.
 #[test]
 fn does_not_recommend_a_used_candidate_until_the_target_is_proved() {
     let fixture = "rust/fslc/tests/fixtures/induction_lemma_multi_cti.fsl";
-    let (output, status) = verify(fixture, &["c == d"]);
+    let mut used = 0;
+    for lemma in ["a == b", "c == d"] {
+        let (output, status) = verify(fixture, &[lemma]);
 
-    assert_eq!(status, 1, "{output}");
-    assert_eq!(output["result"], "unknown_cti");
-    assert_eq!(output["lemmas"][0]["status"], "proved");
-    assert_eq!(output["lemmas"][0]["used"], true);
-    assert_eq!(output["lemma_cti_exclusions"].as_array().unwrap().len(), 1);
-    assert!(output.get("auxiliary_invariant_recommendation").is_none());
+        assert_eq!(status, 1, "{output}");
+        assert_eq!(output["result"], "unknown_cti");
+        assert_eq!(output["lemmas"][0]["status"], "proved");
+        assert!(output.get("auxiliary_invariant_recommendation").is_none());
+        if output["lemmas"][0]["used"] == true {
+            used += 1;
+            assert_eq!(output["lemma_cti_exclusions"].as_array().unwrap().len(), 1);
+        }
+    }
+    assert!(used >= 1, "neither lemma excluded the first CTI");
 }

@@ -762,13 +762,17 @@ fn free_scalar_init_preserves_symbolic_bound_violations() {
             &report,
             exit,
         );
+        // `t = Set { x + 0 }`: the member is x. Whether x is also within V
+        // is not asserted when `_bounds_s` is asked (bounds are checked in
+        // state order, s before x), so it is the solver's choice: the
+        // re-solved model (#1940) picks x = -1 where the session's picked 2.
         require(
             &mut errors,
             state["x"]
                 .as_i64()
-                .is_some_and(|value| (0..=3).contains(&value)),
+                .is_some_and(|x| t.is_some_and(|t| t.len() == 1 && t[0].as_i64() == Some(x))),
             &case.name,
-            &format!("{engine} initial x within V"),
+            &format!("{engine} initial t is {{x}}"),
             &report,
             exit,
         );

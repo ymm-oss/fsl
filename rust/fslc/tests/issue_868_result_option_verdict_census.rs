@@ -940,6 +940,31 @@ const CLASSIFICATIONS: &[Classification] = &[
         "check_assuming",
         UnresolvedAlias
     ),
+    // #1940: a future of `()`, the re-solve of the model read for output.
+    entry!(
+        Ordinary,
+        "rust/fsl-solver/src/lib.rs",
+        314,
+        "resolve_output_model",
+        UnresolvedAlias
+    ),
+    // `None` is "the fresh context answered unknown": the reads keep the
+    // session's model. A fallback, not a verdict.
+    entry!(
+        Ordinary,
+        "rust/fsl-solver-z3/src/lib.rs",
+        103,
+        "resolve_in_fresh_context",
+        SolverResultOption
+    ),
+    // Test helper: the model value one session reads.
+    entry!(
+        Ordinary,
+        "rust/fsl-solver-z3/src/lib.rs",
+        849,
+        "chosen_x",
+        SolverResultOption
+    ),
 ];
 
 macro_rules! unresolved_ordinary {
