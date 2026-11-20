@@ -173,7 +173,10 @@ arithmetic on it, a `--from-state` snapshot, maps of two symmetric types that
 mention each other, and guards linking two symmetric types each break it; the
 constraint could then exclude every violating lasso or stall, so a violated
 `leadsTo` was reported `verified` (#1935). The reduction was removed rather
-than restricted.
+than restricted. For a spec without `symmetric`, the removal keeps verdicts,
+witnesses, traces, stderr, and exit codes; only the solver-work statistics
+under `cost` may change, because the lasso and stall queries no longer carry
+the constraint's always-true conjunct.
 
 ### 2.6 Ranked Induction with `decreases`
 
