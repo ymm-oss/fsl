@@ -192,9 +192,11 @@ than hashing an under-specified representation).
   distrust, and `FSLC_CACHE_VERIFY=1` is a paranoid mode that on every hit *also* re-runs the
   engine and reports any verdict divergence as `{"result":"error","kind":"internal"}` — used
   in CI (§8), available to anyone. Native `fslc` does this by skipping the lookup, running
-  fresh, and comparing the fresh `result` with the entry already stored under the run's key
-  before it stores; a divergence is reported (exit 3) and nothing is stored. Since issue
-  #1946 this covers `--engine auto` too, against the key of the engine that decided.
+  fresh, and, before it stores, comparing the fresh `result` with what an ordinary lookup of
+  the run's key returns: the entry stored under that exact key, or else a `violated` entry
+  reached through the key's cross-depth pointer (§5) whose step is within the requested
+  depth. A divergence is reported (exit 3) and nothing is stored. Since issue #1946 this
+  covers `--engine auto` too, against the key of the engine that decided.
 - Test hermeticity: `tests/conftest.py` sets `FSLC_CACHE=off` so the existing suite never
   observes a developer's warm cache; cache tests opt back in with `FSLC_CACHE_DIR=tmp_path`.
 
