@@ -434,7 +434,8 @@ impl SmtSolver for Z3JsSolver {
     /// The bridge re-solves the current assertions, the last check's
     /// assumptions and the trackers in scope on a fresh context, as the
     /// native backend does (#1940), and reads the following model values
-    /// from that model.
+    /// from that model. It refuses unless the last check answered `sat` and
+    /// the session has not moved since.
     fn resolve_output_model(&mut self) -> ModelFuture<'_> {
         Box::pin(async move {
             JsFuture::from(js_resolve_output_model())

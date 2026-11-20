@@ -16,6 +16,10 @@ const int = () => z3.fslZ3Sort("int");
 const bool = () => z3.fslZ3Sort("bool");
 const equals = (left, right) => z3.fslZ3Binary("eq", left, z3.fslZ3IntValue(right));
 
+async function refused() {
+  await assert.rejects(z3.fslZ3ResolveOutputModel(), /right after a satisfiable check/);
+}
+
 test("the re-solve assumes the trackers in scope, as the check did", async () => {
   z3.fslZ3Reset();
   const x = z3.fslZ3Constant("tracked_x", int());
@@ -33,4 +37,21 @@ test("the re-solve assumes the trackers in scope, as the check did", async () =>
   assert.equal(z3.fslZ3ModelEval(kept, true), true);
   assert.equal(z3.fslZ3ModelEval(x, false), 5);
   assert.notEqual(z3.fslZ3ModelEval(y, false), 6);
+});
+
+test("the re-solve is refused unless right after a satisfiable check", async () => {
+  z3.fslZ3Reset();
+  const x = z3.fslZ3Constant("moved_x", int());
+  await refused();
+  z3.fslZ3Push();
+  z3.fslZ3Assert(equals(x, 3));
+  assert.equal(await z3.fslZ3Check([]), "sat");
+  z3.fslZ3Pop(1);
+  await refused();
+  assert.equal(await z3.fslZ3Check([]), "sat");
+  z3.fslZ3Assert(equals(x, 4));
+  await refused();
+  z3.fslZ3Assert(equals(x, 5));
+  assert.equal(await z3.fslZ3Check([]), "unsat");
+  await refused();
 });

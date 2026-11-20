@@ -311,6 +311,11 @@ pub trait SmtSolver {
     /// default keeps reading the last check's model: such a backend's printed
     /// models still depend on the session's query history.
     ///
+    /// Such a backend returns an error unless the last check answered `sat`
+    /// and no stack, assertion or check operation came after it: a call
+    /// after a `pop`, for one, would re-solve a weaker formula than the one
+    /// checked.
+    ///
     /// It is not a check: it does not count toward [`Self::statistics`].
     fn resolve_output_model(&mut self) -> ModelFuture<'_> {
         Box::pin(std::future::ready(Ok(())))

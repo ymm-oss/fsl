@@ -82,6 +82,9 @@ pub struct Z3Solver {
     trackers: Vec<Bool>,
     /// The number of trackers in scope at each open `push`.
     tracker_marks: Vec<usize>,
+    /// Whether the last check answered `sat` and the session has not moved
+    /// since: only then is there a model to re-solve for output.
+    sat_unmoved: bool,
 }
 
 fn session_params(timeout_ms: Option<u32>) -> Params {
@@ -184,6 +187,7 @@ impl Z3Solver {
             output_model: None,
             trackers: Vec::new(),
             tracker_marks: Vec::new(),
+            sat_unmoved: false,
         })
     }
 
@@ -201,6 +205,7 @@ impl Z3Solver {
     /// The session moved: the next reads come from its next check.
     fn moved(&mut self) {
         self.output_model = None;
+        self.sat_unmoved = false;
     }
 
     #[cfg(feature = "test-hooks")]
@@ -671,6 +676,7 @@ impl SmtSolver for Z3Solver {
                 started.elapsed().as_secs_f64(),
                 backend_statistics(&self.solver),
             );
+            self.sat_unmoved = result == SatResult::Sat;
             Ok(result)
         })
     }
@@ -691,6 +697,7 @@ impl SmtSolver for Z3Solver {
                 started.elapsed().as_secs_f64(),
                 backend_statistics(&self.solver),
             );
+            self.sat_unmoved = result == SatResult::Sat;
             Ok(result)
         })
     }
@@ -708,8 +715,17 @@ impl SmtSolver for Z3Solver {
     /// the trackers in scope on a new Z3 context, and read the following
     /// model values from its model (#1940). A solver made
     /// [`Z3Solver::verdicts_only`] keeps the check's model.
+    ///
+    /// Refused unless the last check answered `sat` and the session has not
+    /// moved since: after a `pop`, for one, the current assertions are
+    /// weaker than the query that was checked.
     fn resolve_output_model(&mut self) -> ModelFuture<'_> {
         Box::pin(async move {
+            if !self.sat_unmoved {
+                return Err(SolverError::new(
+                    "an output model is re-solved only right after a satisfiable check",
+                ));
+            }
             self.output_model = None;
             if !self.resolves_output || resolve_disabled() {
                 return Ok(());
@@ -950,6 +966,36 @@ mod tests {
         assert_eq!(solver.model_eval(&kept)?, Some(ModelValue::Bool(true)));
         assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(5)));
         assert_ne!(solver.model_eval(&y)?, Some(ModelValue::Int(6)));
+        Ok(())
+    }
+
+    /// A re-solve needs a satisfiable check the session has not moved past:
+    /// after a `pop` (or an assertion) the current assertions are not the
+    /// query that was checked, and the re-solve is refused, also for a
+    /// [`Z3Solver::verdicts_only`] solver.
+    #[test]
+    fn resolve_is_refused_unless_right_after_a_satisfiable_check() -> SolverResult<()> {
+        for verdicts_only in [false, true] {
+            let solver = Z3Solver::new()?;
+            let mut solver = if verdicts_only {
+                solver.verdicts_only()
+            } else {
+                solver
+            };
+            let x = solver.constant("moved_x", &Sort::Int)?;
+            assert!(block_on_ready_unit(solver.resolve_output_model()).is_err());
+            solver.push();
+            solver.assert(&solver.equal(&x, &solver.int_value(3))?)?;
+            assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+            solver.pop(1)?;
+            assert!(block_on_ready_unit(solver.resolve_output_model()).is_err());
+            assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+            solver.assert(&solver.equal(&x, &solver.int_value(4))?)?;
+            assert!(block_on_ready_unit(solver.resolve_output_model()).is_err());
+            solver.assert(&solver.equal(&x, &solver.int_value(5))?)?;
+            assert_eq!(block_on_ready(solver.check())?, SatResult::Unsat);
+            assert!(block_on_ready_unit(solver.resolve_output_model()).is_err());
+        }
         Ok(())
     }
 }

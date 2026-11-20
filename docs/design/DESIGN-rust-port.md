@@ -180,7 +180,10 @@ deletes afterwards). The guarantee: with the same
 binary (and so the same Z3 build), a printed witness or trace is a function of
 the asserted formula, which is fixed by the spec, the property and the step.
 A change that only adds, removes or reorders scoped queries keeps the output
-byte-identical. It is not a guarantee across Z3 builds. Native/Worker parity
+byte-identical. It is not a guarantee across Z3 builds. The re-solve is refused
+(an error, not a fallback) unless the last check answered `sat` and the
+session has not moved since, so it never re-solves a formula weaker than the
+one checked. Native/Worker parity
 compares witnesses and traces by their shape (keys, action names, value
 shapes), not their values, except the `issue_1457` collection witnesses,
 which are unique; a reachable or deadlock witness whose shape differs passes

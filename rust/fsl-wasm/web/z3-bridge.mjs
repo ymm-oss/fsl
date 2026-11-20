@@ -121,15 +121,19 @@ export async function installZ3Bridge(initialize = initZ3) {
     return register(ctx.substitute(term(handle), ...substitutions));
   };
   // #1940: the model read for output, re-solved on a fresh context, until
-  // the session moves; and the assumptions of the last check and the
-  // trackers of the tracked assertions in scope (one list per open scope),
-  // which the check assumed and its model satisfies too. The native backend does the same
+  // the session moves; the assumptions of the last check and the trackers of
+  // the tracked assertions in scope (one list per open scope), which the
+  // check assumed and its model satisfies too; and whether the last check
+  // answered sat with the session unmoved since, the only time a re-solve is
+  // allowed. The native backend does the same
   // (`fsl_solver_z3::Z3Solver::resolve_output_model`).
   let outputModel = null;
   let lastAssumptions = [];
   let trackerScopes = [[]];
+  let satUnmoved = false;
   const moved = () => {
     outputModel = null;
+    satUnmoved = false;
   };
   globalThis.fslZ3Push = () => {
     moved();
@@ -159,15 +163,21 @@ export async function installZ3Bridge(initialize = initZ3) {
   globalThis.fslZ3Check = async (rawAssumptions) => {
     moved();
     lastAssumptions = [...rawAssumptions].map(term);
-    return String(await solver.check(...lastAssumptions));
+    const answer = String(await solver.check(...lastAssumptions));
+    satUnmoved = answer === "sat";
+    return answer;
   };
   // Solve the current assertions, the last check's assumptions and the
   // trackers in scope alone on a new context, configured as the native
   // re-solve is (seed 0), and read the following model values from its
   // model, translated back. The context is deleted afterwards: the
-  // high-level API never frees one.
+  // high-level API never frees one. Refused unless right after a sat check:
+  // after a pop, say, the assertions are weaker than the checked query.
   globalThis.fslZ3ResolveOutputModel = async () => {
-    moved();
+    if (!satUnmoved) {
+      throw new Error("an output model is re-solved only right after a satisfiable check");
+    }
+    outputModel = null;
     const Z3 = initialized.Z3;
     const config = Z3.mk_config();
     const fresh = Z3.mk_context_rc(config);
