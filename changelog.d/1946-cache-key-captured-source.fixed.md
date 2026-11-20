@@ -15,4 +15,7 @@ run, and `FSLC_CACHE_VERIFY=1` now also reports an `auto` divergence. The key
 prefix moves from `v4` to `v5`, so an entry written before this change, which
 may hold such a verdict, is never served; the first run of each spec after
 upgrading misses once. `sweep` cells and `chain` spec layers key by their
-captured root the same way. Verify output and exit codes are unchanged.
+captured root the same way. Verify output and exit codes are unchanged,
+except that `FSLC_CACHE_VERIFY=1` with `--engine auto` now reports a
+divergence from the stored entry as an `internal` error (exit 3) where it
+used to overwrite the entry and exit 0 or 1.
