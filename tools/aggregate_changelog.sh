@@ -1083,6 +1083,81 @@ released_section_versions() {
   ' "$1"
 }
 
+# The one parser for a bullet lead `- <Category> (<label>):` (issue #1936),
+# shared by check_section_body (a rendered section) and
+# validate_fragment_leads (a fragment, as render_fragment renders its first
+# line), so the pre-merge fragment check and the section check cannot drift.
+# Printed as awk source for the caller to put in front of its own program; a
+# function rather than a variable, so the selftest's `bash -c` children, which
+# see exported functions but not this script's variables, reach it too.
+#
+# lead_init(cats) declares the categories (DECLARED_CATEGORY_ORDER, space
+# separated) and their rank in lead_rank[]. lead_parse(line) parses the lead
+# of bullet line `line`: on success it returns "" and sets lead_word (as
+# written), lead_cat (lowercased), lead_paren (the label), lead_breaking
+# (0|1) and lead_n with lead_id[1..lead_n], the entry's own ids, folded like
+# fragment ids, in lead order, without the ids of a `refs` list; on failure
+# it returns "<code>\t<message>". lead_rules() returns the rules a parsed
+# lead must meet on its own (a breaking label only under `Changed`, at least
+# one own id) as "<code>\t<message>\n" lines, "" when it meets them.
+lead_awk_lib() {
+  cat <<'AWK'
+function lead_init(cats,    n, c, i) {
+  n = split(cats, c, " ")
+  for (i = 1; i <= n; i++) lead_rank[c[i]] = i
+}
+function lead_parse(line,    op, rest, cl, labels, m, item, j, s, ls, in_refs, t, tok, i) {
+  lead_word = ""; lead_cat = ""; lead_paren = ""; lead_breaking = 0; lead_n = 0
+  split("", lead_id)
+  if (line !~ /^- [A-Z][a-z]+ \(/)
+    return "changelog-section-lead-invalid\tbullet does not start with `- <Category> (`: " substr(line, 1, 60)
+  op = index(line, " (")
+  lead_word = substr(line, 3, op - 3)
+  rest = substr(line, op + 2)
+  cl = index(rest, "):")
+  lead_paren = substr(rest, 1, cl - 1)
+  if (cl == 0 || index(lead_paren, "(") || index(lead_paren, ")"))
+    return "changelog-section-lead-invalid\tbullet lead has no `(...)`: label: " substr(line, 1, 60)
+  lead_cat = tolower(lead_word)
+  if (!(lead_cat in lead_rank))
+    return "changelog-section-category-undeclared\t`" lead_word "` is not a declared category"
+  # The label is a comma-separated list of items. An item is a breaking
+  # label only when it starts with the word `breaking` (`breaking`,
+  # `breaking removal`), so `non-breaking` and `not breaking` are not.
+  # An item starting with `refs` opens a reference list: its ids, and
+  # those of the bare `#N` items that follow it (`refs #A, #B`), are
+  # cross-references, not ids of the entry itself.
+  labels = lead_paren
+  gsub(/;/, ",", labels)
+  m = split(labels, item, ",")
+  in_refs = 0
+  for (j = 1; j <= m; j++) {
+    s = item[j]
+    sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
+    ls = tolower(s)
+    if (ls ~ /^refs([ \t]|$)/) { in_refs = 1; continue }
+    if (in_refs && s ~ /^#[0-9]+$/) continue
+    in_refs = 0
+    if (ls ~ /^breaking([ \t]|$)/) lead_breaking = 1
+    t = split(s, tok, /[ \t]+/)
+    for (i = 1; i <= t; i++) {
+      if (tok[i] !~ /^#[0-9]+$/) continue
+      lead_id[++lead_n] = substr(tok[i], 2) + 0
+    }
+  }
+  return ""
+}
+function lead_rules(    out) {
+  out = ""
+  if (lead_breaking && lead_cat != "changed")
+    out = out "changelog-section-breaking-outside-changed\t`" lead_word " (" lead_paren ")` carries a breaking label outside `Changed`\n"
+  if (lead_n == 0)
+    out = out "changelog-section-id-missing\t`" lead_word " (" lead_paren ")` names no issue or pull-request id\n"
+  return out
+}
+AWK
+}
+
 # Prints one diagnostic line per violation in section $2 of $1; exits 1 if
 # there was any, 2 if the section does not exist. When $3 names a file, it
 # also writes one line per bullet whose lead parses, in section order:
@@ -1091,14 +1166,22 @@ released_section_versions() {
 # these leads instead of parsing the section a second way.
 check_section_body() {
   local changelog="$1" version="$2" leads_out="${3:-}"
-  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" -v leads_out="$leads_out" '
+  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" -v leads_out="$leads_out" "$(lead_awk_lib)"'
     function report(code, msg) {
       printf "%s: [%s] %s:%d: %s\n", code, want, FILENAME, NR, msg
       bad++
     }
+    # Reports each "<code>\t<message>" line of $1.
+    function report_all(lines,    n, r, k, tab) {
+      n = split(lines, r, "\n")
+      for (k = 1; k <= n; k++) {
+        if (r[k] == "") continue
+        tab = index(r[k], "\t")
+        report(substr(r[k], 1, tab - 1), substr(r[k], tab + 1))
+      }
+    }
     BEGIN {
-      n = split(cats, c, " ")
-      for (i = 1; i <= n; i++) rank[c[i]] = i
+      lead_init(cats)
       heading = "## [" want "]"
     }
     /^## \[/ {
@@ -1110,69 +1193,27 @@ check_section_body() {
     /^[ \t]*$/ { next }
     /^- / {
       bullets++
-      line = $0
-      if (line !~ /^- [A-Z][a-z]+ \(/) {
-        report("changelog-section-lead-invalid", "bullet does not start with `- <Category> (`: " substr(line, 1, 60))
-        next
-      }
-      op = index(line, " (")
-      word = substr(line, 3, op - 3)
-      rest = substr(line, op + 2)
-      cl = index(rest, "):")
-      paren = substr(rest, 1, cl - 1)
-      if (cl == 0 || index(paren, "(") || index(paren, ")")) {
-        report("changelog-section-lead-invalid", "bullet lead has no `(...)`: label: " substr(line, 1, 60))
-        next
-      }
-      cat = tolower(word)
-      if (!(cat in rank)) {
-        report("changelog-section-category-undeclared", "`" word "` is not a declared category")
-        next
-      }
-      if (rank[cat] < last_rank) {
+      err = lead_parse($0)
+      if (err != "") { report_all(err); next }
+      word = lead_word; cat = lead_cat
+      if (lead_rank[cat] < last_rank) {
         report("changelog-section-order-invalid", "`" word "` after `" last_word "` breaks the declared category order")
       }
-      if (rank[cat] > last_rank) { last_rank = rank[cat]; last_word = word }
-      # The label is a comma-separated list of items. An item is a breaking
-      # label only when it starts with the word `breaking` (`breaking`,
-      # `breaking removal`), so `non-breaking` and `not breaking` are not.
-      # An item starting with `refs` opens a reference list: its ids, and
-      # those of the bare `#N` items that follow it (`refs #A, #B`), are
-      # cross-references, not ids of the entry itself.
-      labels = paren
-      gsub(/;/, ",", labels)
-      m = split(labels, item, ",")
-      ids = 0; breaking = 0; in_refs = 0; first = 0; idlist = ""
-      for (j = 1; j <= m; j++) {
-        s = item[j]
-        sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
-        ls = tolower(s)
-        if (ls ~ /^refs([ \t]|$)/) { in_refs = 1; continue }
-        if (in_refs && s ~ /^#[0-9]+$/) continue
-        in_refs = 0
-        if (ls ~ /^breaking([ \t]|$)/) breaking = 1
-        t = split(s, tok, /[ \t]+/)
-        for (i = 1; i <= t; i++) {
-          if (tok[i] !~ /^#[0-9]+$/) continue
-          id = substr(tok[i], 2) + 0
-          ids++
-          if (ids == 1) first = id
-          idlist = idlist (ids > 1 ? "," : "") id
-          key = id SUBSEP cat
-          if (key in seen) {
-            report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
-          } else {
-            seen[key] = NR
-          }
+      if (lead_rank[cat] > last_rank) { last_rank = lead_rank[cat]; last_word = word }
+      idlist = ""
+      for (i = 1; i <= lead_n; i++) {
+        id = lead_id[i]
+        idlist = idlist (i > 1 ? "," : "") id
+        key = id SUBSEP cat
+        if (key in seen) {
+          report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
+        } else {
+          seen[key] = NR
         }
       }
-      if (breaking && cat != "changed") {
-        report("changelog-section-breaking-outside-changed", "`" word " (" paren ")` carries a breaking label outside `Changed`")
-      }
-      if (ids == 0) {
-        report("changelog-section-id-missing", "`" word " (" paren ")` names no issue or pull-request id")
-      } else if (leads_out != "") {
-        printf "%d\t%s\t%d\t%d\t%d\t%s\n", bullets, cat, first, breaking, NR, idlist > leads_out
+      report_all(lead_rules())
+      if (lead_n > 0 && leads_out != "") {
+        printf "%d\t%s\t%d\t%d\t%d\t%s\n", bullets, cat, lead_id[1], lead_breaking, NR, idlist > leads_out
       }
       next
     }
