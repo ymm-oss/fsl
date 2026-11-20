@@ -43,7 +43,7 @@
 | [`DESIGN-explicit-engine.md`](design/DESIGN-explicit-engine.md) | `verify --engine explicit` (Rust-native): Z3-free concrete-state BFS, closure ⇒ `proved`, `unknown_budget` truncation, deterministic-init and binder-domain fail-closed gates; plus the `--engine auto` composite (explicit first, transparent BMC fallback, `engine`/`engine_fallback` tracking) |
 | [`DESIGN-bfs-bmc-native-migration.md`](design/DESIGN-bfs-bmc-native-migration.md) | Accepted #761 migration plan for replacing frozen-Python BFS/BMC parity with a checked native Monitor/legacy-BFS/explicit-BFS/BMC decision and bidirectional witness matrix |
 | [`DESIGN-literate.md`](design/DESIGN-literate.md) | Literate Markdown FSL: in-place blanking extraction of ` ```fsl ` fenced blocks, materialization, position-preserving diagnostics, scope boundaries (WASM waiver, LSP deferral) |
-| [`DESIGN-from-state.md`](design/DESIGN-from-state.md) | Predictive BMC from a complete Monitor/replay logical-state snapshot (`verify --from-state`), including type validation, faithfulness metadata, cache/symmetry boundaries, and induction exclusion |
+| [`DESIGN-from-state.md`](design/DESIGN-from-state.md) | Predictive BMC from a complete Monitor/replay logical-state snapshot (`verify --from-state`), including type validation, faithfulness metadata, the verdict-cache bypass, and induction exclusion |
 | [`DESIGN-trans.md`](design/DESIGN-trans.md) | `trans` (transition invariant / two-state safety) |
 | [`DESIGN-temporal.md`](design/DESIGN-temporal.md) | leadsTo, weak fairness (lasso counterexamples), and respond scenarios |
 | [`DESIGN-refinement.md`](design/DESIGN-refinement.md) | Refinement checking (mapping files, conditional expressions, preserve progress) |
