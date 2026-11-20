@@ -1107,9 +1107,12 @@ pub async fn invariant_implication<S: SmtSolver>(
     solver.assert(&solver.not(&conjunction)?)?;
     match solver.check().await? {
         SatResult::Unsat => Ok(ImplicationResult::Implied),
-        SatResult::Sat => Ok(ImplicationResult::Counterexample(project_state(
-            solver, consequent, &state,
-        )?)),
+        SatResult::Sat => {
+            solver.resolve_output_model().await?;
+            Ok(ImplicationResult::Counterexample(project_state(
+                solver, consequent, &state,
+            )?))
+        }
         SatResult::Unknown => Err(VerifyError::solver(
             "solver returned unknown in invariant implication",
         )),

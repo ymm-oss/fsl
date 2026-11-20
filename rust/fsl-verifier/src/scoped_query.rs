@@ -74,7 +74,14 @@ pub(crate) async fn scoped_check_conjunction<S: SmtSolver>(
         Ok(conjunction) => conjunction,
         Err(error) => return Err(closed_before_check(solver, error, pop_failure)),
     };
-    asserted_and_checked(solver, [&conjunction], pop_failure, |_, result| Ok(result)).await
+    asserted_and_checked(
+        solver,
+        [&conjunction],
+        pop_failure,
+        ModelUse::Decision,
+        |_, result| Ok(result),
+    )
+    .await
 }
 
 /// Check `terms` in a fresh scope and read the answer with `inside` while the
@@ -90,7 +97,32 @@ where
     S::Term: 't,
 {
     solver.push();
-    asserted_and_checked(solver, terms, pop_failure, inside).await
+    asserted_and_checked(solver, terms, pop_failure, ModelUse::Decision, inside).await
+}
+
+/// [`scoped_query`] for a query whose `sat` model `inside` reads for output:
+/// on `sat`, the model is re-solved ([`SmtSolver::resolve_output_model`])
+/// before `inside` reads it, so what it projects does not depend on the
+/// queries the session asked before (#1940).
+pub(crate) async fn scoped_output_query<'t, S, T>(
+    solver: &mut S,
+    terms: impl IntoIterator<Item = &'t S::Term>,
+    pop_failure: PopFailure,
+    inside: impl FnOnce(&S, SatResult) -> Result<T, VerifyError>,
+) -> Result<T, VerifyError>
+where
+    S: SmtSolver,
+    S::Term: 't,
+{
+    solver.push();
+    asserted_and_checked(solver, terms, pop_failure, ModelUse::Output, inside).await
+}
+
+/// Whether a scoped query's `sat` model is read for output.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModelUse {
+    Decision,
+    Output,
 }
 
 /// Pop the open scope after `error` failed it before its check.
@@ -109,6 +141,7 @@ async fn asserted_and_checked<'t, S, T>(
     solver: &mut S,
     terms: impl IntoIterator<Item = &'t S::Term>,
     pop_failure: PopFailure,
+    model_use: ModelUse,
     inside: impl FnOnce(&S, SatResult) -> Result<T, VerifyError>,
 ) -> Result<T, VerifyError>
 where
@@ -121,6 +154,12 @@ where
         }
     }
     let answered = match solver.check().await {
+        Ok(SatResult::Sat) if model_use == ModelUse::Output => {
+            match solver.resolve_output_model().await {
+                Ok(()) => inside(solver, SatResult::Sat),
+                Err(error) => Err(error.into()),
+            }
+        }
         Ok(result) => inside(solver, result),
         Err(error) => Err(error.into()),
     };

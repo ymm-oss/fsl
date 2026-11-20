@@ -1416,8 +1416,11 @@ fn ranked_lasso_discharges(
             .stack_size(STACK_SIZE)
             .name("fslc-ranking".to_owned())
             .spawn_scoped(scope, || {
+                // Only which properties it proves is read; a failure's trace
+                // is dropped, so no model is re-solved for output (#1940).
                 let Ok(mut solver) =
                     fsl_solver_z3::Z3Solver::with_timeout_ms(RANKING_PREPASS_CHECK_TIMEOUT_MS)
+                        .map(fsl_solver_z3::Z3Solver::verdicts_only)
                 else {
                     return (std::collections::BTreeSet::new(), None);
                 };

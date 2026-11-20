@@ -19,7 +19,7 @@ use crate::induction::{InductionCti, partial_witness};
 use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::scoped_query::{
-    OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_query,
+    OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_output_query,
 };
 use crate::trace::project_trace;
 use crate::transition::{
@@ -2381,7 +2381,7 @@ async fn build_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Vec<TraceStep>, VerifyError> {
-    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+    scoped_output_query(solver, [condition], PopFailure::First, |solver, result| {
         if OnUnknown::Fail("solver returned unknown for witness").proves_unsat(result)? {
             Err(VerifyError::new("witness condition became unsatisfiable"))
         } else {

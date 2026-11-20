@@ -7,7 +7,8 @@
 //! affected by native SMT term lifetimes even when formulas stay identical.
 use fsl_core::{FsResolver, KernelModel, build_model, parse_kernel_source};
 use fsl_solver::{
-    CheckFuture, ModelValue, SatResult, SmtSolver, SolverResult, Sort, VerificationStatistics,
+    CheckFuture, ModelFuture, ModelValue, SatResult, SmtSolver, SolverResult, Sort,
+    VerificationStatistics,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -109,6 +110,9 @@ impl SmtSolver for RecordingSolver {
         substitute(term: &Self::Term, replacements: &[(Self::Term, Self::Term)]) -> SolverResult<Self::Term>;
         unsat_core() -> SolverResult<Vec<Self::Term>>;
         model_eval(term: &Self::Term) -> SolverResult<Option<ModelValue>>;
+    }
+    fn resolve_output_model(&mut self) -> ModelFuture<'_> {
+        self.inner.resolve_output_model()
     }
     fn set_query_context(&mut self, kind: &str, name: &str) {
         self.segments.push(Segment {

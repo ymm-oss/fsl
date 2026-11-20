@@ -3,8 +3,8 @@
 //! Native Z3 implementation of the backend-neutral FSL SMT contract.
 
 use fsl_solver::{
-    BackendStatistics, CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverMetrics,
-    SolverResult, Sort, VerificationStatistics,
+    BackendStatistics, CheckFuture, ModelFuture, ModelValue, SatResult, SmtSolver, SolverError,
+    SolverMetrics, SolverResult, Sort, VerificationStatistics,
 };
 use std::sync::OnceLock;
 use z3::ast::{Array, Ast, Bool, Dynamic, Int};
@@ -69,6 +69,67 @@ pub struct Z3Solver {
     version: String,
     stack_depth: u32,
     metrics: SolverMetrics,
+    timeout_ms: Option<u32>,
+    /// Whether [`SmtSolver::resolve_output_model`] re-solves (#1940).
+    resolves_output: bool,
+    /// The assumptions of the last check, part of what its model satisfies.
+    assumptions: Vec<Bool>,
+    /// The re-solved model the next reads come from, until the session moves.
+    output_model: Option<Model>,
+}
+
+fn session_params(timeout_ms: Option<u32>) -> Params {
+    let mut params = Params::new();
+    params.set_u32("random_seed", RANDOM_SEED);
+    params.set_u32("smt.random_seed", RANDOM_SEED);
+    if let Some(timeout_ms) = timeout_ms {
+        params.set_u32("timeout", timeout_ms);
+    }
+    params
+}
+
+/// What a fresh context answered for the assertions of a `sat` session.
+enum Resolved {
+    Model(z3::Synchronized<Model>),
+    Unsat,
+    Unknown,
+}
+
+/// Solve `assertions` alone on a new Z3 context, configured as a session is,
+/// and return its model translated back to the calling thread's context.
+///
+/// A new context has no history, so the model depends only on `assertions`
+/// (their terms and order) and on the Z3 build (#1940).
+fn resolve_in_fresh_context(
+    assertions: &[Bool],
+    timeout_ms: Option<u32>,
+) -> SolverResult<Option<Model>> {
+    let assertions = z3::Synchronized::new(&assertions.to_vec());
+    let resolved = z3::with_z3_config(&z3::Config::new(), || {
+        let assertions = assertions.recover();
+        let solver = Solver::new();
+        solver.set_params(&session_params(timeout_ms));
+        for assertion in &assertions {
+            solver.assert(assertion);
+        }
+        match solver.check() {
+            z3::SatResult::Sat => solver.get_model().map_or(Resolved::Unknown, |model| {
+                Resolved::Model(z3::Synchronized::new(&model))
+            }),
+            z3::SatResult::Unsat => Resolved::Unsat,
+            z3::SatResult::Unknown => Resolved::Unknown,
+        }
+    });
+    match resolved {
+        Resolved::Model(model) => Ok(Some(model.recover())),
+        // Only a check with a time limit can answer `unknown` here; the
+        // reads then keep the session's model, as a backend without this
+        // method does.
+        Resolved::Unknown => Ok(None),
+        Resolved::Unsat => Err(SolverError::new(
+            "the assertions of a satisfiable check are unsatisfiable in a fresh Z3 context",
+        )),
+    }
 }
 
 impl Z3Solver {
@@ -105,20 +166,96 @@ impl Z3Solver {
             )));
         }
         let solver = Solver::new();
-        let mut params = Params::new();
-        params.set_u32("random_seed", RANDOM_SEED);
-        params.set_u32("smt.random_seed", RANDOM_SEED);
-        if let Some(timeout_ms) = timeout_ms {
-            params.set_u32("timeout", timeout_ms);
-        }
-        solver.set_params(&params);
+        solver.set_params(&session_params(timeout_ms));
         Ok(Self {
             solver,
             version,
             stack_depth: 0,
             metrics: SolverMetrics::default(),
+            timeout_ms,
+            resolves_output: true,
+            assumptions: Vec::new(),
+            output_model: None,
         })
     }
+
+    /// This solver for a session whose models nobody sees: only its verdicts
+    /// are used, and every trace it projects is dropped. Its
+    /// [`SmtSolver::resolve_output_model`] keeps the check's model, so it
+    /// spends no fresh-context solve. A model read from it can depend on the
+    /// queries the session asked before (#1940).
+    #[must_use]
+    pub fn verdicts_only(mut self) -> Self {
+        self.resolves_output = false;
+        self
+    }
+
+    /// The session moved: the next reads come from its next check.
+    fn moved(&mut self) {
+        self.output_model = None;
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn perturb_history(&self) {
+        if test_hooks::perturbing() {
+            // One more scoped query before the check: the negation of the
+            // latest assertion, as a probe ordered before the query would be.
+            if let Some(latest) = self.solver.get_assertions().last() {
+                self.solver.push();
+                self.solver.assert(latest.not());
+                let _ = self.solver.check();
+                self.solver.pop(1);
+            }
+        }
+    }
+
+    #[cfg(not(feature = "test-hooks"))]
+    #[allow(clippy::unused_self)]
+    fn perturb_history(&self) {}
+}
+
+/// Test-only switches (#1940), compiled only with the `test-hooks` feature:
+/// they let a test perturb a session's query history and turn the
+/// output-model re-solve off, on the calling thread.
+#[cfg(feature = "test-hooks")]
+pub mod test_hooks {
+    use std::cell::Cell;
+
+    thread_local! {
+        static PERTURB: Cell<bool> = const { Cell::new(false) };
+        static NO_RESOLVE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Before every check of every solver on this thread, ask one extra
+    /// scoped query: the negation of the latest assertion.
+    pub fn set_perturbing(on: bool) {
+        PERTURB.with(|flag| flag.set(on));
+    }
+
+    pub(crate) fn perturbing() -> bool {
+        PERTURB.with(Cell::get)
+    }
+
+    /// Make every solver on this thread read the check's own model for
+    /// output, as before #1940: the control that shows what the re-solve
+    /// changes.
+    pub fn set_resolve_disabled(disabled: bool) {
+        NO_RESOLVE.with(|flag| flag.set(disabled));
+    }
+
+    pub(crate) fn resolve_disabled() -> bool {
+        NO_RESOLVE.with(Cell::get)
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+fn resolve_disabled() -> bool {
+    test_hooks::resolve_disabled()
+}
+
+#[cfg(not(feature = "test-hooks"))]
+const fn resolve_disabled() -> bool {
+    false
 }
 
 fn statistic_value(solver: &Solver, names: &[&str]) -> Option<StatisticsValue> {
@@ -472,6 +609,7 @@ impl SmtSolver for Z3Solver {
     }
 
     fn push(&mut self) {
+        self.moved();
         self.solver.push();
         self.stack_depth += 1;
     }
@@ -480,29 +618,37 @@ impl SmtSolver for Z3Solver {
         if levels > self.stack_depth {
             return Err(SolverError::new("solver stack underflow"));
         }
+        self.moved();
         self.solver.pop(levels);
         self.stack_depth -= levels;
         Ok(())
     }
 
     fn reset(&mut self) -> SolverResult<()> {
+        self.moved();
+        self.assumptions.clear();
         self.solver.reset();
         self.stack_depth = 0;
         Ok(())
     }
 
     fn assert(&mut self, term: &Self::Term) -> SolverResult<()> {
+        self.moved();
         self.solver.assert(expect_bool(term)?);
         Ok(())
     }
 
     fn assert_and_track(&mut self, term: &Self::Term, tracker: &Self::Term) -> SolverResult<()> {
+        self.moved();
         self.solver
             .assert_and_track(expect_bool(term)?.clone(), expect_bool(tracker)?);
         Ok(())
     }
 
     fn check(&mut self) -> CheckFuture<'_> {
+        self.moved();
+        self.assumptions.clear();
+        self.perturb_history();
         Box::pin(async move {
             let started = std::time::Instant::now();
             let result = map_sat(self.solver.check());
@@ -519,9 +665,13 @@ impl SmtSolver for Z3Solver {
             .iter()
             .map(|term| expect_bool(term).cloned())
             .collect::<SolverResult<Vec<_>>>();
+        self.moved();
+        self.assumptions.clear();
+        self.perturb_history();
         Box::pin(async move {
+            self.assumptions = assumptions?;
             let started = std::time::Instant::now();
-            let result = map_sat(self.solver.check_assumptions(&assumptions?));
+            let result = map_sat(self.solver.check_assumptions(&self.assumptions));
             self.metrics.record_check(
                 started.elapsed().as_secs_f64(),
                 backend_statistics(&self.solver),
@@ -539,7 +689,27 @@ impl SmtSolver for Z3Solver {
             .collect())
     }
 
+    /// Re-solve the current assertions, and the last check's assumptions,
+    /// on a new Z3 context, and read the following model values from its
+    /// model (#1940). A solver made [`Z3Solver::verdicts_only`] keeps the
+    /// check's model.
+    fn resolve_output_model(&mut self) -> ModelFuture<'_> {
+        Box::pin(async move {
+            self.output_model = None;
+            if !self.resolves_output || resolve_disabled() {
+                return Ok(());
+            }
+            let mut assertions = self.solver.get_assertions();
+            assertions.extend(self.assumptions.iter().cloned());
+            self.output_model = resolve_in_fresh_context(&assertions, self.timeout_ms)?;
+            Ok(())
+        })
+    }
+
     fn model_eval(&self, term: &Self::Term) -> SolverResult<Option<ModelValue>> {
+        if let Some(model) = &self.output_model {
+            return evaluate_model(model, term);
+        }
         let model = self
             .solver
             .get_model()

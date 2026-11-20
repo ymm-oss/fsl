@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Real-Z3 target-bound routing faults; all unaffected operations delegate.
 use fsl_solver::{
-    CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort,
+    CheckFuture, ModelFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort,
     VerificationStatistics,
 };
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +91,9 @@ impl SmtSolver for FaultSolver {
     }
     fn model_eval(&self, term: &Self::Term) -> SolverResult<Option<ModelValue>> {
         self.inner.model_eval(term)
+    }
+    fn resolve_output_model(&mut self) -> ModelFuture<'_> {
+        self.inner.resolve_output_model()
     }
     fn set_query_context(&mut self, kind: &str, name: &str) {
         self.trace
