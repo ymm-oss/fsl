@@ -1062,12 +1062,15 @@ induction、Public Kernel v1 は、等価な <code>init</code> ブロックと�
   <code>Option&lt;scalar&gt;</code> という文言を置き換えます。</li>
 <li><code>Map&lt;Int, V&gt;</code> は <code>check</code> で拒否されます。<code>type ItemId = 0..&lt;max&gt;</code> のような
   有界キー型を宣言し、<code>Map&lt;ItemId, V&gt;</code> を使ってください。</li>
-<li><code>symmetric type</code> と <code>symmetric enum</code> は、liveness の対称性簡約のために、値を
-  交換可能なエンティティ同一性としてマークします。<code>leadsTo</code> の lasso/停滞探索の
-  間、fslc は <code>Map&lt;SymmetricType, V&gt;</code> と <code>Set&lt;SymmetricType&gt;</code> の状態から作られる
-  エンティティごとの行に 1 つの正準の代表を使います。<code>V</code> は対称な同一性型を含まない
-  ときだけ使われます。これは、どのタスクの同一性も特別ではない
-  <code>Map&lt;TaskId, Status&gt;</code> のようなモデルを意図しています。</li>
+<li><code>symmetric type</code> と <code>symmetric enum</code> は受理され、値が交換可能なエンティティ
+  同一性であることを記録します(Kernel JSON では <code>types[].symmetric</code> に残ります)。
+  fslc は現在この印をどの簡約にも使いません: 結果・witness・反例はすべて、同じ
+  spec から <code>symmetric</code> を除いたときのものと同じです。以前のリリースは <code>leadsTo</code> の
+  lasso/停滞探索を名前の付け替えごとに 1 つの正準の代表だけで行っていましたが、
+  モデルが付け替えに対して不変であること(順序比較、その型のリテラル、
+  <code>--from-state</code> のスナップショット、2 つの対称型を結び付けるガード)を誰も
+  検査していなかったため、違反している <code>leadsTo</code> を <code>verified</code> と報告することが
+  ありました(#1935)。</li>
 </ul></div></details>
 <details id="3-expressions"><summary>3. 式<span class="tree-blurb"> — 式の文法 — 演算子、量化子、関数呼び出しなど。</span></summary><div class="tree-body"><p><code>true</code> / <code>false</code> / <code>none</code> は<strong>予約語</strong>である。式中では常にリテラルに解決されるため、
 宣言名として使えない —— 仕様名、const、<code>def</code> とその引数、型、enum とそのメンバー、
@@ -2560,8 +2563,7 @@ Public Kernel v2 はオプトインで、
 <code>Monitor.state</code> / replay の論理状態です: すべての変数と Map のキーが必須で、enum は
 メンバー名、Option は値または <code>null</code>、Set/Seq は配列、relation はペアの配列です。
 欠落/余剰/型不正の値は、解く前に拒否されます。スナップショット実行は verdict
-キャッシュをバイパスし、対称性簡約を無効化し(同一性が具体的であるため)、
-<code>--engine induction</code> を拒否します。結果には <code>initial_state.source:"snapshot"</code> と
+キャッシュをバイパスし、<code>--engine induction</code> を拒否します。結果には <code>initial_state.source:"snapshot"</code> と
 <code>faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}</code>
 が追加されるので、有界の <code>verified</code> が spec の init からの検証と取り違えられる
 ことはありません。<code>DESIGN-from-state.md</code> を参照。</p>

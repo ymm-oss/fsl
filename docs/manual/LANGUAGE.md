@@ -863,12 +863,15 @@ scalar | nested `Option<scalar>` | struct (scalar / nested `Option<scalar>` fiel
   forms; this replaces the earlier one-level `Option<scalar>` wording.
 - `Map<Int, V>` is rejected by `check`. Declare a bounded key type, for example
   `type ItemId = 0..<max>`, and use `Map<ItemId, V>`.
-- `symmetric type` and `symmetric enum` mark values as interchangeable entity
-  identities for liveness symmetry reduction. During `leadsTo` lasso/stall
-  search, fslc uses one canonical representative for per-entity rows built from
-  `Map<SymmetricType, V>` and `Set<SymmetricType>` state; `V` is used only when
-  it contains no symmetric identity type. This is intended for models such as
-  `Map<TaskId, Status>` where no task identity is special.
+- `symmetric type` and `symmetric enum` are accepted and record that the
+  values are interchangeable entity identities (the Kernel JSON keeps it as
+  `types[].symmetric`). fslc currently does not use the marker for any
+  reduction: every result, witness, and counterexample is the one the same spec
+  without `symmetric` produces. Earlier releases searched `leadsTo` lassos and
+  stalls over one canonical representative per renaming; nothing checked that
+  the model was invariant under renaming (order comparisons, literals of the
+  type, `--from-state` snapshots, guards linking two symmetric types), so that
+  reduction could report `verified` for a violated `leadsTo` (#1935).
 
 ## 3. Expressions
 
@@ -2478,8 +2481,8 @@ run and asks what can happen from that complete current state. The JSON shape is
 exactly `Monitor.state` / replay logical state: all variables and Map keys are
 required, enums are member names, Option is value or `null`, Set/Seq are arrays,
 and relation is an array of pairs. Missing/extra/type-invalid values are rejected
-before solving. Snapshot runs bypass the verdict cache, disable symmetry
-reduction (the identities are concrete), and reject `--engine induction`.
+before solving. Snapshot runs bypass the verdict cache and reject
+`--engine induction`.
 Results add `initial_state.source:"snapshot"` and
 `faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}`
 so bounded `verified` cannot be mistaken for verification from the spec init.

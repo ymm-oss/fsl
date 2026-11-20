@@ -11,8 +11,8 @@
 // - このPoCではHumanReviewを処理済み終端状態として扱う。
 // - SLA/deadlineはまだモデル化していない。
 requirements AgenticRagRequirements {
-  // ReqはリクエストID。liveness探索を軽くするため、個々のIDに意味差がない
-  // 対称なIDとして宣言している。
+  // ReqはリクエストID。個々のIDに意味差がないことを示すため、対称なIDとして
+  // 宣言している(fslcは現在この宣言を検証の簡約に使わない。#1935)。
   symmetric type Req = 0..1
   // Retryは「残りリトライ回数」。0になったら再検索を続けず、拒否または
   // 人間レビューへ進める。
