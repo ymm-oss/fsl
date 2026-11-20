@@ -15,6 +15,7 @@ witnesses and counterexamples of the same spec without it; in
 `examples/agentic_rag` verdicts are unchanged and some witnesses and CTIs swap
 `r = 0` / `r = 1`. For the 661 corpus files without `symmetric`, `verify` and
 `--engine induction` output is unchanged apart from solver statistics under
-`cost` in 3 files. Six regression tests from the issue's survey compare each
-`symmetric` spec with its plain twin; with the reduction restored, all six
-fail.
+`cost` in 3 files. Seven regression tests from the issue's survey, one of
+them a deadlock stall, compare each `symmetric` spec with its plain twin;
+with the reduction restored, all seven fail. An eighth checks that a fair
+`symmetric` spec still verifies exactly like its plain twin.
