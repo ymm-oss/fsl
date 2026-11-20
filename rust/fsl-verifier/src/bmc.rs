@@ -383,9 +383,9 @@ async fn verify_bounded_session<S: SmtSolver>(
     // #1240: every action instance's definedness is asked in a second session
     // on the reset solver, after the search has produced all of its evidence.
     // Asked inside the search, those queries (and even the terms they build)
-    // move the backend's internal state, and the native and browser Z3 builds
-    // then resolve under-determined witnesses differently; the native/Worker
-    // evidence is byte-compared (see the vacuity note in `verify_bounded_config`).
+    // move the backend's internal state, and the browser Z3 build then
+    // resolves under-determined witnesses differently (native printed models
+    // are re-solved, #1940; see the vacuity note in `verify_bounded_config`).
     // The reset is also needed for soundness, not only parity: the search has
     // asserted the transitions of later steps, each of which requires a
     // successor state, so without it every path that dead-ends after step `s`
@@ -971,10 +971,13 @@ async fn verify_bounded_config<S: SmtSolver>(
     // The solver-dependent vacuity lanes run last, after every witness,
     // reachable, and deadlock trace has been projected. They ask nothing about
     // the unrolled states — each lane quantifies over freshly named ones — but
-    // a query still moves the backend's internal state, and two Z3 builds may
-    // then resolve an under-determined model differently. The native and
-    // browser evidence contract is byte-compared, so no new query may run
-    // before the evidence it could perturb.
+    // a query still moves the backend's internal state, and the browser Z3
+    // build may then resolve an under-determined model differently. Native
+    // printed models are re-solved in a fresh context and do not move
+    // (`SmtSolver::resolve_output_model`, #1940); browser ones are not, and
+    // native/Worker parity compares witness shapes and replays a differing
+    // one (#1789). So no new query may run before the evidence it could
+    // perturb.
     //
     // By this point the unrolling has asserted a mandatory forward transition
     // out of every state, which a spec that deadlocks on every path makes

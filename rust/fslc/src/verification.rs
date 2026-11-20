@@ -1398,7 +1398,10 @@ const RANKING_PREPASS_CHECK_TIMEOUT_MS: u32 = 5_000;
 /// model Z3 returns for the BMC session's later witness queries (observed on
 /// `helpful` specs whose ranking fails and whose lasso witness then differed).
 /// A fresh thread gets a fresh default context, so the BMC session sees
-/// exactly the query history it has without the pre-pass.
+/// exactly the query history it has without the pre-pass. (Since #1940 the
+/// BMC session's printed witnesses are re-solved in a fresh context and no
+/// longer depend on that history; the separate thread still keeps the
+/// session's solver work, and so its `cost`, as it is without the pre-pass.)
 ///
 /// The pre-pass is optional evidence: a thread that cannot be spawned, a
 /// solver that cannot be created, a timeout, or a panic inside the ranking
@@ -1476,9 +1479,9 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
         return Err(error_exit(error_output("internal", &error)));
     }
     // Static reachable diagnosis deliberately uses a separate solver session.
-    // Even stack-isolated queries perturb backend query history and can change
-    // underdetermined witness projections, which are byte-compared across the
-    // native and browser backends.
+    // Even stack-isolated queries perturb backend query history; native
+    // printed witnesses are re-solved (#1940), but browser ones still follow
+    // that history, and the browser runs the same split.
     let mut statistics = fsl_solver::SmtSolver::statistics(&solver);
     // A pre-pass that asked nothing (no ranked `leadsTo`) leaves `cost` as it
     // was without it.

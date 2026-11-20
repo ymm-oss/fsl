@@ -307,8 +307,13 @@ whose ranking failed on its first ranked property), whose witness is then
 byte-identical to the full search's. A lasso search that runs *after* a
 discharged property starts from a session that skipped that property's
 probes; its verdict is the full search's (the skipped probes were `unsat`),
-but Z3 may return a different, equally valid lasso witness (the corpus
-differential observed none).
+and when this was written Z3 could return a different, equally valid lasso
+witness (the corpus differential observed none). Since #1940 the witness is
+projected from a model re-solved on a fresh context
+(`DESIGN-rust-port.md` §4): the skipped probes are scoped and leave the
+asserted formula as it was, so with the same binary the native witness is
+the full search's too. The separate thread still keeps the BMC session's
+solver work, and so its `cost`, as it is without the pre-pass.
 
 **Envelope change.** Only `cost`: `cost.properties` gains a
 `{"kind":"leadsTo_rank","name":<leadsTo>}` row for each ranked `leadsTo`
