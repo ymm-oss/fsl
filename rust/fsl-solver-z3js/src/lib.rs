@@ -11,8 +11,8 @@
 //! `z3-solver` npm bridge installed on the current Web Worker global.
 
 use fsl_solver::{
-    BackendStatistics, CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverMetrics,
-    SolverResult, Sort, VerificationStatistics,
+    BackendStatistics, CheckFuture, ModelFuture, ModelValue, SatResult, SmtSolver, SolverError,
+    SolverMetrics, SolverResult, Sort, VerificationStatistics,
 };
 use js_sys::{Array, Float64Array, Promise, Uint32Array};
 use wasm_bindgen::prelude::*;
@@ -58,6 +58,8 @@ extern "C" {
     fn js_statistics() -> Float64Array;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3UnsatCore)]
     fn js_unsat_core() -> Array;
+    #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3ResolveOutputModel)]
+    fn js_resolve_output_model() -> Promise;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3ModelEval)]
     fn js_model_eval(term: u32, boolean: bool) -> JsValue;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Version)]
@@ -427,6 +429,18 @@ impl SmtSolver for Z3JsSolver {
             .filter_map(|value| value.as_f64())
             .map(|handle| Self::term(handle as u32, Sort::Bool))
             .collect())
+    }
+
+    /// The bridge re-solves the current assertions and the last check's
+    /// assumptions on a fresh context, as the native backend does (#1940),
+    /// and reads the following model values from that model.
+    fn resolve_output_model(&mut self) -> ModelFuture<'_> {
+        Box::pin(async move {
+            JsFuture::from(js_resolve_output_model())
+                .await
+                .map(|_| ())
+                .map_err(js_error)
+        })
     }
 
     fn model_eval(&self, term: &Self::Term) -> SolverResult<Option<ModelValue>> {

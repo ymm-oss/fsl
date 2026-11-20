@@ -170,19 +170,26 @@ only on what is asserted. Every model the verifier reads for output — a
 reachable witness, a violation, deadlock, `leadsTo` or partial-operation
 trace (`build_witness`), an induction CTI or rank failure, an
 invariant-implication counterexample — is read after
-`SmtSolver::resolve_output_model`. The native backend re-solves the current
+`SmtSolver::resolve_output_model`. Both backends re-solve the current
 assertions (and the last check's assumptions) on a new Z3 context, with the
-session's seed, and reads the model from there. The guarantee: with the same
+session's seed, and read the model from there: native `Z3Solver` through
+`z3::Synchronized`, the browser through `fslZ3ResolveOutputModel` in
+`rust/fsl-wasm/web/z3-bridge.mjs` (low-level `Z3_translate` into a context it
+deletes afterwards). The guarantee: with the same
 binary (and so the same Z3 build), a printed witness or trace is a function of
 the asserted formula, which is fixed by the spec, the property and the step.
 A change that only adds, removes or reorders scoped queries keeps the output
-byte-identical. It is not a guarantee across Z3 builds, and it does not cover
-the browser backend, which keeps the trait's default (the check's own model).
-Native/Worker parity does not need it: it compares witnesses and traces by
-their shape (keys, action names, value shapes), not their values, except the
-`issue_1457` collection witnesses, which are unique; a reachable or deadlock
-witness whose shape differs passes only if both sides replay on the Monitor
-(#1789; `rust/fsl-wasm/parity.mjs`). The re-solve is not a check and is not counted in `cost`:
+byte-identical. It is not a guarantee across Z3 builds. Native/Worker parity
+compares witnesses and traces by their shape (keys, action names, value
+shapes), not their values, except the `issue_1457` collection witnesses,
+which are unique; a reachable or deadlock witness whose shape differs passes
+only if both sides replay on the Monitor and reach the same states (#1789;
+`rust/fsl-wasm/parity.mjs`). That still needs the Worker to pick the same
+witness whenever the choices differ in shape: with the re-solve on the native
+side only, `refinement_algebra` and `design_bypasses_control` failed parity,
+so the browser re-solves too. Native and Worker re-solve the same assertions
+on fresh contexts of the same Z3 version; that they then pick the same model
+is observed (parity passes, no witness needed replay), not guaranteed. The re-solve is not a check and is not counted in `cost`:
 `checks` and the per-property counts are unchanged, but the model translated back into the
 session's context adds terms there, so the session's later `conflicts`, `decisions` and
 `propagations` can differ (74 of 1,334 corpus `verify` runs, 37 default and 37 `--engine induction`, at #1940). A
@@ -337,10 +344,9 @@ solver-independent crates used by both delivery surfaces:
   trace has been projected. They quantify over freshly named states and never
   read the unrolled ones, but a query still moves the backend's internal
   state, and the browser Z3 build may then resolve an under-determined model
-  differently. Native printed models are re-solved and do not move (§4,
-  #1940); the browser's still can. Parity compares witness shapes, and a
-  reachable or deadlock witness whose shape differs passes only if both
-  sides replay (#1789). No new query may run before the evidence it could
+  differently. Printed models are re-solved on a fresh context and do not
+  move (§4, #1940); the session's solver work and any model read without
+  the re-solve still do. No new query may run before the evidence it could
   perturb.
 - Backend-neutral analysis must keep its symbolic-state allocation independent
   of the spec's size. Every constraint a probe needs is asserted inside a

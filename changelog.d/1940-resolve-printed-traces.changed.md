@@ -12,6 +12,7 @@ contents in the JSON output of `verify`, `explain` and the commands built on
 them; verdicts, steps, coverage, vacuity and exit codes are unchanged, as are
 `cost.solver.checks` and the per-property check counts. `cost.solver`
 `conflicts`, `decisions` and `propagations` can change. The browser Worker
-keeps the solver's own model. `fsl_solver::SmtSolver` gains
+re-solves the same way, so native and Worker witnesses keep agreeing.
+`fsl_solver::SmtSolver` gains
 `resolve_output_model` (default: no-op) and `fsl_solver_z3::Z3Solver` gains
 `verdicts_only`.

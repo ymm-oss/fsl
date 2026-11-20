@@ -118,14 +118,84 @@ export async function installZ3Bridge() {
     ]);
     return register(ctx.substitute(term(handle), ...substitutions));
   };
-  globalThis.fslZ3Push = () => solver.push();
-  globalThis.fslZ3Pop = (levels) => solver.pop(Number(levels));
-  globalThis.fslZ3Reset = () => solver.reset();
-  globalThis.fslZ3Assert = (handle) => solver.add(term(handle));
-  globalThis.fslZ3AssertAndTrack = (handle, tracker) =>
+  // #1940: the model read for output, re-solved on a fresh context, until
+  // the session moves; and the assumptions of the last check, which it
+  // satisfies too. The native backend does the same
+  // (`fsl_solver_z3::Z3Solver::resolve_output_model`).
+  let outputModel = null;
+  let lastAssumptions = [];
+  const moved = () => {
+    outputModel = null;
+  };
+  globalThis.fslZ3Push = () => {
+    moved();
+    solver.push();
+  };
+  globalThis.fslZ3Pop = (levels) => {
+    moved();
+    solver.pop(Number(levels));
+  };
+  globalThis.fslZ3Reset = () => {
+    moved();
+    lastAssumptions = [];
+    solver.reset();
+  };
+  globalThis.fslZ3Assert = (handle) => {
+    moved();
+    solver.add(term(handle));
+  };
+  globalThis.fslZ3AssertAndTrack = (handle, tracker) => {
+    moved();
     solver.addAndTrack(term(handle), term(tracker));
-  globalThis.fslZ3Check = async (rawAssumptions) =>
-    String(await solver.check(...[...rawAssumptions].map(term)));
+  };
+  globalThis.fslZ3Check = async (rawAssumptions) => {
+    moved();
+    lastAssumptions = [...rawAssumptions].map(term);
+    return String(await solver.check(...lastAssumptions));
+  };
+  // Solve the current assertions and the last check's assumptions alone on a
+  // new context, configured as the native re-solve is (seed 0), and read the
+  // following model values from its model, translated back. The context is
+  // deleted afterwards: the high-level API never frees one.
+  globalThis.fslZ3ResolveOutputModel = async () => {
+    moved();
+    const Z3 = initialized.Z3;
+    const config = Z3.mk_config();
+    const fresh = Z3.mk_context_rc(config);
+    Z3.del_config(config);
+    try {
+      const freshSolver = Z3.mk_solver(fresh);
+      Z3.solver_inc_ref(fresh, freshSolver);
+      const params = Z3.mk_params(fresh);
+      Z3.params_inc_ref(fresh, params);
+      Z3.params_set_uint(fresh, params, Z3.mk_string_symbol(fresh, "random_seed"), 0);
+      Z3.params_set_uint(fresh, params, Z3.mk_string_symbol(fresh, "smt.random_seed"), 0);
+      Z3.solver_set_params(fresh, freshSolver, params);
+      Z3.params_dec_ref(fresh, params);
+      for (const assertion of [...solver.assertions(), ...lastAssumptions]) {
+        const translated = Z3.translate(ctx.ptr, assertion.ast, fresh);
+        Z3.inc_ref(fresh, translated);
+        Z3.solver_assert(fresh, freshSolver, translated);
+        Z3.dec_ref(fresh, translated);
+      }
+      const answer = await Z3.solver_check(fresh, freshSolver);
+      if (answer === 1) {
+        const model = Z3.solver_get_model(fresh, freshSolver);
+        Z3.model_inc_ref(fresh, model);
+        outputModel = new ctx.Model(Z3.model_translate(fresh, model, ctx.ptr));
+        Z3.model_dec_ref(fresh, model);
+      } else if (answer === -1) {
+        Z3.solver_dec_ref(fresh, freshSolver);
+        throw new Error(
+          "the assertions of a satisfiable check are unsatisfiable in a fresh Z3 context",
+        );
+      }
+      // `unknown` (0): the reads keep the session's model.
+      Z3.solver_dec_ref(fresh, freshSolver);
+    } finally {
+      Z3.del_context(fresh);
+    }
+  };
   globalThis.fslZ3Statistics = () => {
     const values = new Map(
       [...solver.statistics()].map(({ key, value }) => [key, value]),
@@ -156,7 +226,7 @@ export async function installZ3Bridge() {
       return existing >= 0 ? existing : register(entry);
     });
   globalThis.fslZ3ModelEval = (handle, boolean) => {
-    const value = solver.model().eval(term(handle), true);
+    const value = (outputModel ?? solver.model()).eval(term(handle), true);
     return boolean ? ctx.isTrue(value) : Number(value.value());
   };
 }

@@ -1479,9 +1479,9 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
         return Err(error_exit(error_output("internal", &error)));
     }
     // Static reachable diagnosis deliberately uses a separate solver session.
-    // Even stack-isolated queries perturb backend query history; native
-    // printed witnesses are re-solved (#1940), but browser ones still follow
-    // that history, and the browser runs the same split.
+    // Even stack-isolated queries perturb backend query history. Printed
+    // witnesses are re-solved (#1940); the session's solver work still
+    // follows that history, and the browser runs the same split.
     let mut statistics = fsl_solver::SmtSolver::statistics(&solver);
     // A pre-pass that asked nothing (no ranked `leadsTo`) leaves `cost` as it
     // was without it.

@@ -646,7 +646,8 @@ dependency.
 ### `fsl-solver-z3js`
 
 - `Z3JsSolver` owns Rust-side version, stack accounting, and metrics. The JavaScript bridge owns
-  actual assertion/model state and opaque term handles.
+  actual assertion/model state, the model re-solved for output on a fresh context
+  (`fslZ3ResolveOutputModel`, #1940), and opaque term handles.
 - Promise-based `check` is the async failure boundary; Rust-only compilation cannot establish
   handle lifetime or bridge completeness.
 - **Current decision:** retain one Rust adapter module and the separate JavaScript bridge. Browser
