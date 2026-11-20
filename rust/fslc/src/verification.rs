@@ -4194,7 +4194,7 @@ mod tests {
 }
 ";
 
-    fn verify_captured(path: &Path, source: &str, options: &CliVerifyOptions) -> CommandResult {
+    fn verify_captured(path: &Path, source: &str, options: &CliVerifyOptions) -> (Value, i32) {
         run_verify_cli_from_source(path, path, source, source.as_bytes(), options)
     }
 
