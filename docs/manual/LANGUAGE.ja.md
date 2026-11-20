@@ -6013,7 +6013,8 @@ DESIGN-*.md があります)。
   `verification.cost.solver.decisions`、
   `verification.cost.solver.propagations` だけを、描画前の
   presentation 用の写しから省きます。stdout と `-o`/`--output` のファイルの両方に
-  効きます。ソースや domain state のフィールド、`solver.checks`、プロパティの
+  効きます。counterfactual の `violation.cost.elapsed_s` は、その規則を外したモデルの
+  解析全体(各不変条件の実行すべて)の時間で、その不変条件だけの時間ではありません。ソースや domain state のフィールド、`solver.checks`、プロパティの
   `kind`/`name`/`checks` は保持し、通常の verify JSON や exit code は変えません。
   実時間の timing と実行環境に依存する Z3 内部の統計を省きますが、既定の HTML は
   timing と solver の統計をすべて保持します。

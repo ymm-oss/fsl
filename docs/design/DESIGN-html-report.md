@@ -66,7 +66,10 @@ fslc html spec.fsl --depth 8 [-o report.html] [--deadlock warn|error|ignore] [--
   `verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
   `verification.cost.solver.decisions`, and
   `verification.cost.solver.propagations` from presentation
-  copies before rendering, for both stdout and `-o`/`--output` files. Source,
+  copies before rendering, for both stdout and `-o`/`--output` files.
+  `explained.counterfactuals[].violation.cost.elapsed_s` times the whole
+  analysis of the entry's weakening, not that invariant alone
+  (`docs/design/DESIGN-explain.md` §1). Source,
   domain-state fields, `solver.checks`, and property `kind`/`name`/`checks` remain
   intact. Wall-clock timings and environment-dependent Z3 internal statistics
   are omitted for byte-stable comparison. The default report retains all timings

@@ -23,9 +23,17 @@ form's counterfactual analysis; the readable text computed none.
 {"result":"explained",
  "skeleton":{"state":…, "actions":[{"name","actor?","requires_text","writes","ensures_text","requirement"}],
              "properties":[{"kind","name","body_text","requirement"}], "auto_checks":…},
- "counterfactuals":[{"invariant","weakening":{op,loc,target},"trace","requirement"}],
+ "counterfactuals":[{"invariant","weakening":{op,loc,target},"trace","requirement","violation"}],
  "witnesses":[…]}
 ```
+
+`counterfactuals[].violation.cost.elapsed_s` is the wall time of the whole
+analysis of the weakening that produced the entry (its screening runs and
+every per-invariant run, §4) plus building the entry's explanation; it is not
+the time of that invariant's own run. Entries from the same weakening
+therefore carry nearly the same value, and a `fair_remove` weakening whose
+outcomes were reused from an earlier fair removal reports little more than
+the explanation time.
 
 ## 2. The three artifacts
 
