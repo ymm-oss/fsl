@@ -182,7 +182,10 @@ Native/Worker parity does not need it: it compares witnesses and traces by
 their shape (keys, action names, value shapes), not their values, except the
 `issue_1457` collection witnesses, which are unique; a reachable or deadlock
 witness whose shape differs passes only if both sides replay on the Monitor
-(#1789; `rust/fsl-wasm/parity.mjs`). The re-solve is not a check and is not counted in `cost`. A
+(#1789; `rust/fsl-wasm/parity.mjs`). The re-solve is not a check and is not counted in `cost`:
+`checks` and the per-property counts are unchanged, but the model translated back into the
+session's context adds terms there, so the session's later `conflicts`, `decisions` and
+`propagations` can differ (74 of 1,334 corpus `verify` runs, 37 default and 37 `--engine induction`, at #1940). A
 session whose traces are never printed (`explain`'s screening and analysis
 runs, the #1149 ranking pre-pass) is made `Z3Solver::verdicts_only` and
 skips it.
