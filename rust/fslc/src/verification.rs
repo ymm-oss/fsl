@@ -1903,6 +1903,17 @@ fn cache_enabled(options: &CliVerifyOptions) -> bool {
         && std::env::var("FSLC_CACHE").map_or(true, |value| value.trim().to_lowercase() != "off")
 }
 
+/// `FSLC_CACHE_VERIFY=1`: skip lookups, run fresh, and report a divergence
+/// from the stored entry instead of storing (§4 of
+/// `docs/design/DESIGN-incremental-verify.md`).
+fn cache_verify_mode() -> bool {
+    #[cfg(test)]
+    if tests::test_cache_root().is_some() {
+        return false;
+    }
+    std::env::var("FSLC_CACHE_VERIFY").as_deref() == Ok("1")
+}
+
 fn cache_root() -> Option<PathBuf> {
     #[cfg(test)]
     if let Some(root) = tests::test_cache_root() {
@@ -2832,7 +2843,7 @@ fn cached_verification(
     cache_keys: Option<&(String, String)>,
 ) -> Option<CommandResult> {
     let (key, xdepth) = cache_keys?;
-    if std::env::var("FSLC_CACHE_VERIFY").as_deref() == Ok("1") {
+    if cache_verify_mode() {
         return None;
     }
     let output = verify_cache_lookup(key, xdepth, options.depth)?;
@@ -2949,7 +2960,7 @@ fn cached_auto_verification(
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
 ) -> Option<CommandResult> {
-    if std::env::var("FSLC_CACHE_VERIFY").as_deref() == Ok("1") {
+    if cache_verify_mode() {
         return None;
     }
     let explicit_cached = keys
@@ -3016,7 +3027,7 @@ fn store_verify_cache_entry(
     options: &CliVerifyOptions,
     output: &Value,
 ) -> Option<CommandResult> {
-    if std::env::var("FSLC_CACHE_VERIFY").as_deref() == Ok("1")
+    if cache_verify_mode()
         && let Some(cached) = verify_cache_lookup(key, xdepth, options.depth)
         && cached.get("result") != output.get("result")
     {
@@ -4100,8 +4111,10 @@ pub(crate) mod tests {
     thread_local! {
         /// This test thread's private cache root ([`PrivateCache`]). An
         /// in-process test cannot set `FSLC_CACHE_DIR` without racing every
-        /// other test of the binary, so `cache_root` and `cache_enabled`
-        /// consult this first.
+        /// other test of the binary, so `cache_root`, `cache_enabled` and
+        /// `cache_verify_mode` consult this first: while it is set the cache
+        /// is on at this root and `FSLC_CACHE`, `FSLC_CACHE_DIR` and
+        /// `FSLC_CACHE_VERIFY` from the environment are ignored.
         static TEST_CACHE_ROOT: std::cell::RefCell<Option<PathBuf>> =
             const { std::cell::RefCell::new(None) };
         /// Run once, after the cache lookup and before verification
@@ -4130,7 +4143,8 @@ pub(crate) mod tests {
     }
 
     /// A scratch directory whose `cache/` is this thread's verify cache with
-    /// the cache on, whatever `FSLC_CACHE` says, until drop.
+    /// the cache on and `FSLC_CACHE_VERIFY` off, whatever the environment
+    /// says, until drop.
     pub(crate) struct PrivateCache {
         pub(crate) dir: PathBuf,
     }
