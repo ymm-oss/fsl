@@ -73,7 +73,8 @@ name `#200` under `Fixed`. The command is `fold --version X.Y.Z` while the
 newest section X.Y.Z is not yet tagged and `[Unreleased]` is empty (see
 "Verification" below), and `release` otherwise. A tagged section is never
 the destination, so a fragment may repeat an (id, category) pair of an
-earlier release.
+earlier release. Only a local tag is seen: in a clone without tags, run
+`git fetch --tags` first, or `check-pr` folds into an already tagged section.
 
 **Breaking changes are `changed` fragments with a label.** Use
 `Changed (#N, breaking removal):` for a form that was accepted and is now

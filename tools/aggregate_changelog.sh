@@ -1132,7 +1132,7 @@ check_fragment_destination() {
   for f in "${files[@]}"; do cp "$dir/$f" "$scratch/changelog.d/$f"; done
   set +e
   if [ -n "$newest" ] && [ -z "$unreleased" ] && ! version_is_tagged "$changelog" "$newest"; then
-    target="## [$newest] (untagged), as \`fold --version $newest\` would fold them"
+    target="## [$newest], as \`fold --version $newest\` would fold them (no local tag v$newest; if it is tagged, \`git fetch --tags\` and rerun)"
     # The scratch copy is not in a repository; keep git from finding one
     # above it (fold's own tag check) when TMPDIR is inside a work tree.
     GIT_CEILING_DIRECTORIES="$(dirname "$scratch")" "$SELF" fold --version "$newest" \
