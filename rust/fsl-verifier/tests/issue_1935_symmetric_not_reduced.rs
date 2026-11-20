@@ -336,3 +336,35 @@ spec StallLiteralIndex {
         "expected a stall, got {details:?}"
     );
 }
+
+/// Positive twin: every task can finish under fairness, so the `symmetric`
+/// spec and its plain twin both verify, with identical results.
+#[test]
+fn fair_symmetric_spec_still_verifies() {
+    let source = r"
+spec FairTasks {
+  symmetric type TaskId = 0..2
+  enum Status { Pending, Done }
+  state { status: Map<TaskId, Status> }
+  init {
+    forall t: TaskId { status[t] = Pending }
+  }
+  fair action finish(t: TaskId) {
+    requires status[t] == Pending
+    status[t] = Done
+  }
+  action noop() { }
+  invariant AlwaysTrue { true }
+  leadsTo EveryTaskFinishes {
+    forall t: TaskId {
+      status[t] == Pending ~> status[t] == Done
+    }
+  }
+}
+";
+    let symmetric = verify(source, 6);
+    let plain = verify(&plain(source), 6);
+    assert!(plain.violation.is_none(), "{plain:?}");
+    assert!(plain.leadsto_violation.is_none(), "{plain:?}");
+    assert_eq!(symmetric, plain);
+}
