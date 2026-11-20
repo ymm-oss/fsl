@@ -1613,16 +1613,21 @@ fn command() -> Result<(Value, i32), String> {
                 .as_ref()
                 .map_or_else(|| display_path.clone(), |state| state.path.clone());
             Ok(if command == "verify" {
-                let source = match literate_guard
-                    .map_or_else(|| read_spec_source(&path), |state| Ok(state.source))
-                {
-                    Ok(source) => source,
+                // A literate root's cache identity is the Markdown document
+                // captured with its source, never a second read (#1946).
+                let (source, document) = match literate_guard.map_or_else(
+                    || read_spec_source(&path).map(|source| (source, None)),
+                    |state| Ok((state.source, Some(state.document))),
+                ) {
+                    Ok(captured) => captured,
                     Err(error) => return Ok((spec_load_error_output(&error), 2)),
                 };
+                let cache_identity = document.as_deref().unwrap_or(&source).as_bytes();
                 with_version_metadata(run_verify_cli_from_source(
                     &path,
                     &display_path,
                     &source,
+                    cache_identity,
                     &options,
                 ))
             } else {
@@ -3686,8 +3691,13 @@ fn run_sweep_grid_from_source(
                     from_state: None,
                     shared: SharedOptions::default(),
                 };
-                let (mut verification, status) =
-                    run_verify_cli_admitted(path, path, source, &options, Some(edition));
+                let (mut verification, status) = run_verify_cli_admitted(
+                    path,
+                    source.as_bytes(),
+                    source,
+                    &options,
+                    Some(edition),
+                );
                 if verification.get("result").and_then(Value::as_str) == Some("error") {
                     // A spec error (parse/type/semantics/io/vacuous/…) is not a
                     // counterexample: folding it into the sweep grid let a single
@@ -4461,7 +4471,11 @@ fn run_chain_step(
                             let root = project_root(roots, layer, false);
                             let (detail, status) = run_prepared_project_roots(&[root], |sources| {
                                 run_verify_cli_admitted(
-                                    &file_path, &file_path, sources[0], &options, None,
+                                    &file_path,
+                                    sources[0].as_bytes(),
+                                    sources[0],
+                                    &options,
+                                    None,
                                 )
                             });
                             (detail, status, "verify", Some(depth))
@@ -6624,7 +6638,8 @@ fn add_strict_tag_warnings_from_source(
     {
         return Ok(());
     }
-    let additions = strict_tag_warnings_from_source(model, source, requirements)?;
+    let requirements = requirements.map(strict_tags::RequirementsFile::read);
+    let additions = strict_tag_warnings_from_source(model, source, requirements.as_ref())?;
     let Some(envelope) = output.as_object_mut() else {
         return Ok(());
     };
@@ -18827,7 +18842,7 @@ fn run_verify_admitted_from_source(
         use_cache: false,
         ..CliVerifyOptions::default()
     };
-    run_verify_cli_admitted(path, path, source, &options, finish)
+    run_verify_cli_admitted(path, source.as_bytes(), source, &options, finish)
 }
 
 fn bindings_json(bindings: &[std::collections::BTreeMap<String, FslValue>]) -> Value {
@@ -19631,7 +19646,7 @@ spec InitTraceability {
             shared: SharedOptions { edition },
             ..CliVerifyOptions::default()
         };
-        run_verify_cli_from_source(path, path, source, &options)
+        run_verify_cli_from_source(path, path, source, source.as_bytes(), &options)
     }
 
     /// Platform-neutral #808 control. Capturing source A from a regular file

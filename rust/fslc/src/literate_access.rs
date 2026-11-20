@@ -94,10 +94,14 @@ use serde_json::{Value, json};
 ///
 /// The path preserves existing diagnostic labels and the lexical resolver base;
 /// no file is created or removed there. The original Markdown path is passed
-/// separately as the display path and verify-cache identity.
+/// separately as the display path.
 pub struct LiterateState {
     pub path: PathBuf,
     pub source: String,
+    /// The Markdown document `source` was extracted from, as read. The verify
+    /// cache identifies a literate root by these bytes (issue #1946), never by
+    /// a second read of the document.
+    pub document: String,
 }
 
 /// Capture literate Markdown FSL's ```` ```fsl ```` fences from `path` in
@@ -129,6 +133,7 @@ fn capture_literate(path: &Path) -> Result<Option<LiterateState>, String> {
     Ok(Some(LiterateState {
         path: literate_materialization_path(path, stem, std::process::id()),
         source: blanked,
+        document: raw,
     }))
 }
 
