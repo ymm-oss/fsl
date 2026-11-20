@@ -183,6 +183,26 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   they were, though the printed output no longer needs them (removing them
   is a separate change). With `unshared_counterfactual_runs` every
   per-invariant run re-solves, since its outcomes are printed directly.
+- **No descriptive probes (#1868).** The counterfactual runs (screening,
+  per-invariant and replayed runs, and the reachable phase's runs; all through
+  `counterfactual_bounded_run`) call
+  `fsl_verifier::verify_bounded_without_coverage`: they ask no
+  `action_coverage` probe and no vacuity lane. The counterfactual code reads a
+  run's violation (kind, name, step, last action and, in a run that re-solves,
+  its trace), its reachables and its `leadsTo` verdict, never its
+  `action_coverage`, `vacuity` or deadlock trace, and those probes were most of
+  the phase's solver time (on `examples/agentic_rag/agentic_rag_design.fsl`,
+  `html` at depth 8 spent about two thirds of its wall time in the
+  `action_coverage` probes of counterfactual runs). The output is unchanged:
+  both probe families are scoped push/check/pop queries that assert nothing,
+  so every verdict is the same, and a printed trace is re-solved from the
+  assertions alone (#1940), so the queries the run no longer asks cannot move
+  it. Before #1940 they did: skipping them changed a printed trace of
+  `examples/self/refinement_algebra.fsl`. A skipped probe that would have
+  answered `unknown` failed its run before; no spec in the corpus has one. The
+  witness run is not a counterfactual run and keeps both probes. Test:
+  `counterfactual_runs_ask_no_coverage_or_vacuity_probe` (`main.rs`) records the
+  query kinds the witness and counterfactual runs ask on a small spec.
 - **Tests.** `shared_counterfactual_runs_print_the_unshared_output`
   (a unit test in `rust/fslc/src/main.rs`) compares the JSON of `explain` at depth 4
   on `examples/nfr/support_sla.fsl` and `examples/self/refinement_algebra.fsl`,
