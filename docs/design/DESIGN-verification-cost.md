@@ -67,15 +67,26 @@ array alongside its existing state-exploration fields.
 ## Property attribution
 
 The current kinds are `init`, `type_bound`, `invariant`, `trans`, `ensures`,
-`partial_op`, `reachable`, `reachable_diagnosis`, `action_coverage`,
-`deadlock`, `leadsTo`, `leadsTo_rank`, and `vacuity`. `reachable_diagnosis`
+`partial_op`, `key_domain`, `reachable`, `reachable_diagnosis`,
+`action_coverage`, `deadlock`, `leadsTo`, `leadsTo_rank`, `vacuity`,
+`semantics`, and `collection_support`. `reachable_diagnosis`
 charges the init- and transition-free query that classifies a `reachable`
 target, under that target's name; `vacuity` charges the solver-backed vacuity
 lanes, under a property name, an action name, `tick`, or `session`.
+`key_domain` charges induction's keyed-domain definedness probes, under the
+property or action name. `semantics` and `collection_support` appear only when
+a state's implicit bound is not among the checked properties (for example
+under `--property`): `semantics` charges the probe that a fixed-capacity
+sequence's length cannot exceed its capacity, under the bound's synthetic
+name, and `collection_support` charges the proof that no live key escapes a
+reframed Set or relation's support, under the state name.
 Names are stable Kernel property or action identifiers; `initial_state`,
 `definedness` (the `init` definedness question, asked only when init contains
 an operation that can fail; #1258), and `deadlock` name their structural
-checks. BMC's per-step definedness check over
+checks. `partial_op` rows are named in four ways: a property name (the
+definedness probe of an invariant, `trans`, `reachable`, or `leadsTo`
+expression), `terminal` (the `terminal` predicate at a deadlocked state),
+`actions`, and `<action>`. BMC's per-step definedness check over
 every action instance's guard and enabled body is charged to `partial_op` /
 `actions` (#1240), together with the range-lemma queries that serve it (an
 `Int` state leaf's bound, kept only when the solver proves it entailed); only
@@ -84,6 +95,10 @@ when it is satisfiable are the per-instance queries asked, charged to
 solver, after the search has produced every witness, so the `partial_op` /
 `<action>` rows also count that pass's typed probes alongside the search's
 own; the `init` / `definedness` question is asked first in the same pass.
+When the spec declares `terminal`, BMC's deadlock search switches the query
+context to `partial_op` / `terminal` before its terminal probes and does not
+switch it back, so the per-step deadlock probes are also charged to
+`partial_op` / `terminal` and no `deadlock` / `deadlock` row appears.
 Witness reconstruction remains charged
 to the property whose satisfiability query produced it.
 
