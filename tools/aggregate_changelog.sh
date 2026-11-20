@@ -2768,6 +2768,13 @@ selftest_section() {
 # the section, and compares the whole file with the expected one.
 selftest_fold() {
   local tmp; tmp="$(mktemp -d)"
+  # fold refuses a version tagged in the changelog's repository, and git looks
+  # for that repository upwards from the fixture. With TMPDIR inside a clone
+  # of this repository, which has v5.1.0, every fixture below would be refused
+  # as fold-version-tagged; stop the search at $tmp (the `tagged` fixture has
+  # its own .git).
+  local GIT_CEILING_DIRECTORIES="$tmp"
+  export GIT_CEILING_DIRECTORIES
   local -a head=('# Changelog' '' 'Intro.' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '')
   local -a tail=('' '## [5.0.0] - 2026-11-07' '' '- Added (#1): older.' '' '[Unreleased]: https://example.invalid/compare/v5.1.0...HEAD')
   local -a section=(
