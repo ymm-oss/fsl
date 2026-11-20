@@ -1613,23 +1613,7 @@ fn command() -> Result<(Value, i32), String> {
                 .as_ref()
                 .map_or_else(|| display_path.clone(), |(state, _)| state.path.clone());
             Ok(if command == "verify" {
-                // A literate root's cache identity is the Markdown document
-                // captured with its source, never a second read (#1946).
-                let (source, document) = match literate_guard.map_or_else(
-                    || read_spec_source(&path).map(|source| (source, None)),
-                    |(state, document)| Ok((state.source, Some(document))),
-                ) {
-                    Ok(captured) => captured,
-                    Err(error) => return Ok((spec_load_error_output(&error), 2)),
-                };
-                let cache_identity = document.as_deref().unwrap_or(&source).as_bytes();
-                with_version_metadata(run_verify_cli_from_source(
-                    &path,
-                    &display_path,
-                    &source,
-                    cache_identity,
-                    &options,
-                ))
+                run_verify_command_root(&path, &display_path, literate_guard, &options)
             } else {
                 if !options.only_depth_and_deadlock() {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
@@ -6621,6 +6605,35 @@ fn run_testplan_from_source(path: &Path, source: &str, depth: usize) -> (Value, 
 
 fn source_dialect(source: &str) -> &str {
     fslc_rust::migration::source_dialect(source, crate::parse_options())
+}
+
+/// `fslc verify` on its root: a literate root as captured by
+/// [`literate_access_with_document`], else `path` read once here.
+///
+/// A literate root's cache identity is the Markdown document captured with its
+/// source, never a second read (#1946); `issue_1946_call_site_tests` fails if
+/// this goes back to reading the document again.
+fn run_verify_command_root(
+    path: &Path,
+    display_path: &Path,
+    literate: Option<(fslc_rust::literate_access::LiterateState, String)>,
+    options: &CliVerifyOptions,
+) -> (Value, i32) {
+    let (source, document) = match literate.map_or_else(
+        || read_spec_source(path).map(|source| (source, None)),
+        |(state, document)| Ok((state.source, Some(document))),
+    ) {
+        Ok(captured) => captured,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let cache_identity = document.as_deref().unwrap_or(&source).as_bytes();
+    with_version_metadata(run_verify_cli_from_source(
+        path,
+        display_path,
+        &source,
+        cache_identity,
+        options,
+    ))
 }
 
 fn add_strict_tag_warnings_from_source(
@@ -21599,3 +21612,7 @@ assignment-removal|18|5|withdraw_audited assignment|";
         assert_eq!(output, Value::Array(expected));
     }
 }
+
+#[cfg(test)]
+#[path = "issue_1946_call_site_tests.rs"]
+mod issue_1946_call_site_tests;

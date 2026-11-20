@@ -3326,7 +3326,7 @@ fn add_cli_strict_tag_warnings(
         .map_err(|error| error_exit(io_error_output(&error)))
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[allow(dead_code)]
@@ -4131,12 +4131,12 @@ mod tests {
 
     /// A scratch directory whose `cache/` is this thread's verify cache with
     /// the cache on, whatever `FSLC_CACHE` says, until drop.
-    struct PrivateCache {
-        dir: PathBuf,
+    pub(crate) struct PrivateCache {
+        pub(crate) dir: PathBuf,
     }
 
     impl PrivateCache {
-        fn new(name: &str) -> Self {
+        pub(crate) fn new(name: &str) -> Self {
             static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let dir = std::env::temp_dir().join(format!(
                 "fslc-1946-{name}-{}-{}",
@@ -4150,7 +4150,7 @@ mod tests {
         }
 
         /// The verify entries stored so far (cross-depth pointers excluded).
-        fn entries(&self) -> usize {
+        pub(crate) fn entries(&self) -> usize {
             let generation = self.dir.join("cache").join(VERIFY_CACHE_ENTRY_DIRECTORY);
             std::fs::read_dir(&generation).map_or(0, |shards| {
                 shards
@@ -4172,7 +4172,7 @@ mod tests {
     }
 
     /// Proved by explicit and auto, verified by bmc.
-    const RACE_PROVED: &str = "spec Race1946 {
+    pub(crate) const RACE_PROVED: &str = "spec Race1946 {
   state { a: 0..3 }
   init { a = 0 }
   action inc() {
@@ -4183,7 +4183,7 @@ mod tests {
 }
 ";
     /// Violated by every engine at step 2.
-    const RACE_VIOLATED: &str = "spec Race1946 {
+    pub(crate) const RACE_VIOLATED: &str = "spec Race1946 {
   state { a: 0..3 }
   init { a = 0 }
   action inc() {
