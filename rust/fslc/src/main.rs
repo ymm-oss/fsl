@@ -21614,5 +21614,7 @@ assignment-removal|18|5|withdraw_audited assignment|";
 }
 
 #[cfg(test)]
-#[path = "issue_1946_call_site_tests.rs"]
-mod issue_1946_call_site_tests;
+mod issue_1946_call_site_tests {
+    use super::*;
+    include!("issue_1946_call_site_tests.rs");
+}

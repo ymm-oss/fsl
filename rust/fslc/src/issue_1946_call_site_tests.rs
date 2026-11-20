@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Issue #1946: each caller hands the verify cache the root it captured, not a
-//! second read of the file.
-//!
-//! The key itself is covered in `verification.rs` (`issue_1946_*`). These
-//! tests guard the three call sites that choose the bytes: `verify`'s root
-//! (the literate document), each `sweep` cell, and a `chain` spec layer. Each
-//! captures S1, finds S2 on disk when it verifies, and must store S1's verdict
-//! under S1's key: a later run that captures S2 misses and reports S2's
-//! verdict. A site that re-reads the file stores S1's verdict under S2's key,
-//! and that later run is served the wrong verdict.
+// Issue #1946: each caller hands the verify cache the root it captured, not a
+// second read of the file.
+//
+// The key itself is covered in `verification.rs` (`issue_1946_*`). These
+// tests guard the three call sites that choose the bytes: `verify`'s root
+// (the literate document), each `sweep` cell, and a `chain` spec layer. Each
+// captures S1, finds S2 on disk when it verifies, and must store S1's verdict
+// under S1's key: a later run that captures S2 misses and reports S2's
+// verdict. A site that re-reads the file stores S1's verdict under S2's key,
+// and that later run is served the wrong verdict.
 
-use super::*;
+// Included into `main.rs`'s `issue_1946_call_site_tests` module, which
+// imports `super::*`.
 use crate::verification::tests::{PrivateCache, RACE_PROVED, RACE_VIOLATED};
 
 fn explicit() -> CliVerifyOptions {
