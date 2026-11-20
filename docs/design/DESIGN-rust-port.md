@@ -180,7 +180,11 @@ deletes afterwards). The guarantee: with the same
 binary (and so the same Z3 build), a printed witness or trace is a function of
 the asserted formula, which is fixed by the spec, the property and the step.
 A change that only adds, removes or reorders scoped queries keeps the output
-byte-identical. It is not a guarantee across Z3 builds. The re-solve is refused
+byte-identical. It is not a guarantee across Z3 builds. Nor does it hold when
+the fresh context answers `unknown` where the session answered `sat` (a time
+limit, or an incomplete theory such as non-linear arithmetic): the reads then
+fall back to the session's own model, silently, and that model can depend on
+the session's history; the output does not mark it. The re-solve is refused
 (an error, not a fallback) unless the last check answered `sat` and the
 session has not moved since, so it never re-solves a formula weaker than the
 one checked. Native/Worker parity

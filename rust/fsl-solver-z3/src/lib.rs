@@ -131,9 +131,11 @@ fn resolve_in_fresh_context(
     });
     match resolved {
         Resolved::Model(model) => Ok(Some(model.recover())),
-        // Only a check with a time limit can answer `unknown` here; the
-        // reads then keep the session's model, as a backend without this
-        // method does.
+        // A check with a time limit can answer `unknown` here, and so can
+        // an incomplete theory (non-linear arithmetic, quantifiers) that the
+        // session happened to decide. The reads then keep the session's
+        // model, as a backend without this method does, and that model can
+        // depend on the session's history (DESIGN-rust-port §4).
         Resolved::Unknown => Ok(None),
         Resolved::Unsat => Err(SolverError::new(
             "the assertions of a satisfiable check are unsatisfiable in a fresh Z3 context",
