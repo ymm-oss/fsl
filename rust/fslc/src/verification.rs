@@ -4291,20 +4291,21 @@ mod tests {
         let document = cache.dir.join("spec.md");
         let markdown = |source: &str| format!("# Race\n\n```fsl\n{source}```\n");
         std::fs::write(&document, markdown(RACE_PROVED)).expect("write D1");
-        let captured = fslc_rust::literate_access::literate_access("verify", &document)
-            .expect("capture D1")
-            .expect("a literate root");
+        let captured =
+            fslc_rust::literate_access::literate_access_with_document("verify", &document)
+                .expect("capture D1")
+                .expect("a literate root");
         std::fs::write(&document, markdown(RACE_VIOLATED)).expect("the document is now D2");
         let options = CliVerifyOptions {
             engine: "explicit".to_owned(),
             ..CliVerifyOptions::default()
         };
-        let verify = |state: &fslc_rust::literate_access::LiterateState| {
+        let verify = |(state, text): &(fslc_rust::literate_access::LiterateState, String)| {
             run_verify_cli_from_source(
                 &state.path,
                 &document,
                 &state.source,
-                state.document.as_bytes(),
+                text.as_bytes(),
                 &options,
             )
         };
@@ -4315,9 +4316,10 @@ mod tests {
             "{first:#}"
         );
 
-        let current = fslc_rust::literate_access::literate_access("verify", &document)
-            .expect("capture D2")
-            .expect("a literate root");
+        let current =
+            fslc_rust::literate_access::literate_access_with_document("verify", &document)
+                .expect("capture D2")
+                .expect("a literate root");
         let (second, status) = verify(&current);
         assert!(second.get("cache").is_none(), "D2 must miss: {second:#}");
         assert_eq!(

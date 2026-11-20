@@ -16,4 +16,3 @@ prefix moves from `v4` to `v5`, so an entry written before this change, which
 may hold such a verdict, is never served; the first run of each spec after
 upgrading misses once. `sweep` cells and `chain` spec layers key by their
 captured root the same way. Verify output and exit codes are unchanged.
-Rust API: `fslc_rust::literate_access::LiterateState` gains `document`.

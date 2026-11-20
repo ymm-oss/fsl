@@ -94,14 +94,12 @@ use serde_json::{Value, json};
 ///
 /// The path preserves existing diagnostic labels and the lexical resolver base;
 /// no file is created or removed there. The original Markdown path is passed
-/// separately as the display path.
+/// separately as the display path. The Markdown document `source` was
+/// extracted from is returned beside the state by
+/// [`literate_access_with_document`].
 pub struct LiterateState {
     pub path: PathBuf,
     pub source: String,
-    /// The Markdown document `source` was extracted from, as read. The verify
-    /// cache identifies a literate root by these bytes (issue #1946), never by
-    /// a second read of the document.
-    pub document: String,
 }
 
 /// Capture literate Markdown FSL's ```` ```fsl ```` fences from `path` in
@@ -114,7 +112,10 @@ pub struct LiterateState {
 ///
 /// Returns a message when `path` cannot be read or contains no ```` ```fsl ````
 /// fenced code blocks.
-fn capture_literate(path: &Path) -> Result<Option<LiterateState>, String> {
+///
+/// The `String` beside the state is the Markdown document from the same
+/// single read that `source` was extracted from.
+fn capture_literate(path: &Path) -> Result<Option<(LiterateState, String)>, String> {
     if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
         return Ok(None);
     }
@@ -130,11 +131,13 @@ fn capture_literate(path: &Path) -> Result<Option<LiterateState>, String> {
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("literate");
-    Ok(Some(LiterateState {
-        path: literate_materialization_path(path, stem, std::process::id()),
-        source: blanked,
-        document: raw,
-    }))
+    Ok(Some((
+        LiterateState {
+            path: literate_materialization_path(path, stem, std::process::id()),
+            source: blanked,
+        },
+        raw,
+    )))
 }
 
 // Retain the historical name/shape for diagnostic compatibility, not filesystem I/O.
@@ -325,6 +328,23 @@ pub fn literate_access(
     command_key: &str,
     display_path: &Path,
 ) -> Result<Option<LiterateState>, (Value, i32)> {
+    literate_access_with_document(command_key, display_path)
+        .map(|captured| captured.map(|(state, _document)| state))
+}
+
+/// [`literate_access`], also returning the Markdown document the state's
+/// `source` was extracted from, as read in the same single read.
+///
+/// The verify cache identifies a literate root by these bytes (issue #1946),
+/// never by a second read of the document.
+///
+/// # Errors
+///
+/// As [`literate_access`].
+pub fn literate_access_with_document(
+    command_key: &str,
+    display_path: &Path,
+) -> Result<Option<(LiterateState, String)>, (Value, i32)> {
     if display_path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
         return Ok(None);
     }

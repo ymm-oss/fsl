@@ -714,6 +714,15 @@ const CLASSIFICATIONS: &[Classification] = &[
         "literate_access",
         ResultOption
     ),
+    // #1946: `literate_access` plus the captured Markdown document; `None`
+    // is the same "not literate input" answer.
+    entry!(
+        Ordinary,
+        "rust/fslc/src/literate_access.rs",
+        344,
+        "literate_access_with_document",
+        ResultOption
+    ),
     // `None` is a document with no process form to rewrite; the reasons a
     // process cannot be rewritten are the error, not a verdict.
     entry!(

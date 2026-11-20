@@ -10,7 +10,7 @@ use fsl_core::{
     ModelWarningContext, ParamDef, TypeDef, TypeRef, finalize_model_warnings,
     insert_requirement_metadata, model_warnings, requirement_metadata,
 };
-use fslc_rust::literate_access::literate_access;
+use fslc_rust::literate_access::{literate_access, literate_access_with_document};
 use fslc_rust::outcome::{
     FAILURE_EXIT, OutcomeClass, RefineFailure, RefineOutcome, SUCCESS_EXIT, SweepCellClass,
     Verdict, error_exit, exit_status_matches, is_error_exit, normalized_exit_status, outcome_class,
@@ -1605,19 +1605,19 @@ fn command() -> Result<(Value, i32), String> {
                 display_path,
                 verify: options,
             } = VerifyCommandOptions::parse(&command, args)?;
-            let literate_guard = match literate_access(&command, &display_path) {
+            let literate_guard = match literate_access_with_document(&command, &display_path) {
                 Ok(guard) => guard,
                 Err(early_return) => return Ok(early_return),
             };
             let path = literate_guard
                 .as_ref()
-                .map_or_else(|| display_path.clone(), |state| state.path.clone());
+                .map_or_else(|| display_path.clone(), |(state, _)| state.path.clone());
             Ok(if command == "verify" {
                 // A literate root's cache identity is the Markdown document
                 // captured with its source, never a second read (#1946).
                 let (source, document) = match literate_guard.map_or_else(
                     || read_spec_source(&path).map(|source| (source, None)),
-                    |state| Ok((state.source, Some(state.document))),
+                    |(state, document)| Ok((state.source, Some(document))),
                 ) {
                     Ok(captured) => captured,
                     Err(error) => return Ok((spec_load_error_output(&error), 2)),
@@ -1635,7 +1635,7 @@ fn command() -> Result<(Value, i32), String> {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
                 }
                 let source = literate_guard
-                    .map_or_else(|| read_spec_source(&path), |state| Ok(state.source));
+                    .map_or_else(|| read_spec_source(&path), |(state, _)| Ok(state.source));
                 run_scenarios(&path, source, options.depth, &options.deadlock)
             })
         }

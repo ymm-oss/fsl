@@ -69,8 +69,11 @@ fn contains_selector(expression: &syn::Expr, selector: &str) -> bool {
     uses.1
 }
 
+/// The literate frontend takes the selected command as its registry key, not
+/// as a dispatch. `literate_access_with_document` is the same frontend that
+/// also returns the captured Markdown document (#1946).
 fn frontend_guard(expression: &syn::Expr) -> bool {
-    matches!(expression, syn::Expr::Call(call) if matches!(call.func.as_ref(), syn::Expr::Path(p) if p.path.is_ident("literate_access")))
+    matches!(expression, syn::Expr::Call(call) if matches!(call.func.as_ref(), syn::Expr::Path(p) if p.path.is_ident("literate_access") || p.path.is_ident("literate_access_with_document")))
 }
 
 impl<'ast> Visit<'ast> for Selectors {

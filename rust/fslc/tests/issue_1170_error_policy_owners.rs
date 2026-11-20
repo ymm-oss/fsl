@@ -53,8 +53,8 @@ const IO_OWNERS: &[(&str, &str)] = &[
     ("spec_loading.rs", "io_error_output"),
     ("spec_load.rs", "render_spec_load_error"),
     // Named exception: the library's literate capture cannot call the
-    // binary's owner.
-    ("literate_access.rs", "literate_access"),
+    // binary's owner. `literate_access` delegates to it (#1946).
+    ("literate_access.rs", "literate_access_with_document"),
 ];
 
 const RULES: &[Rule] = &[
