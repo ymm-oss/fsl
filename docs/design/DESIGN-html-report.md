@@ -11,14 +11,25 @@ evaluator, or verifier.
 
 ## Inputs
 
-- `explain_file(file, depth)` supplies the review skeleton: state, actions,
+The native report is built by `run_html_report_from_source_with_label` in
+`rust/fslc/src/main.rs`. It first runs `report_verification_from_source` (the
+shared native verify pipeline and its error gate, §"Shared verification and
+error precedence (#1417)"), then `run_explain_from_source` for the JSON (not
+`--readable`) explanation, and hands both envelopes, the model, and the source
+to `fsl_tools::render_html_report`. The frozen Python reference
+(`src/fslc/cli.py`, `src/fslc/html_report.py`) used `explain_file` and
+`run_verify` for the same two inputs; it is a compatibility reference only.
+
+- `run_explain_from_source(path, source, depth, witness_deadlock_mode, false)`
+  supplies the review skeleton: state, actions,
   properties, automatic checks, witnesses, counterfactuals, and — where the
   spec has them — KPI declarations, entity/domain instance counts, enum member
   lists, and derived stage-transition flows (`stage_flows`, reconstructed from
   enum-valued state plus guard/assignment shape; this is how a business
   `process` block compiles down, but the derivation itself is dialect-agnostic).
   Action `requires`/`ensures` text and property bodies are rendered from the
-  AST (`_expr_to_text`), not a single truncated source line, so multi-line
+  checked expression (`fsl_core::source_expr_text`; the frozen Python used
+  `_expr_to_text`), not a single truncated source line, so multi-line
   predicates show in full. Declarations synthesized by a dialect frontend (a
   `deadline`-derived invariant, the time-block-generated `tick` action) are
   tagged `"generated"` in the skeleton; the report routes them into the
@@ -26,7 +37,11 @@ evaluator, or verifier.
   By decision #1871, the witness section is always built as if `--deadlock warn`,
   regardless of the requested `--deadlock`: a detected `deadlock_terminal` witness
   appears even with `ignore`, and witnesses are still built with `error`.
-- `run_verify(file, depth, deadlock)` supplies the current verification result:
+  The report drops the envelope's `fsl` key and the reachable
+  counterfactuals' `faithfulness_class` and `recommended_action` before
+  rendering.
+- `report_verification_from_source(path, source, options, edition)` supplies
+  the current verification result:
   status, warnings, action coverage, reachable witnesses, counterexample traces,
   and boundedness metadata. This verification section follows the requested
   `--deadlock` policy, independently of the witness section.
@@ -51,7 +66,10 @@ fslc html spec.fsl --depth 8 [-o report.html] [--deadlock warn|error|ignore] [--
   `verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
   `verification.cost.solver.decisions`, and
   `verification.cost.solver.propagations` from presentation
-  copies before rendering, for both stdout and `-o`/`--output` files. Source,
+  copies before rendering, for both stdout and `-o`/`--output` files.
+  `explained.counterfactuals[].violation.cost.elapsed_s` times the whole
+  analysis of the entry's weakening, not that invariant alone
+  (`docs/design/DESIGN-explain.md` §1). Source,
   domain-state fields, `solver.checks`, and property `kind`/`name`/`checks` remain
   intact. Wall-clock timings and environment-dependent Z3 internal statistics
   are omitted for byte-stable comparison. The default report retains all timings

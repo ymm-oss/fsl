@@ -6403,6 +6403,9 @@ DESIGN-*.md).
   `verification.cost.solver.decisions`, and
   `verification.cost.solver.propagations` from presentation
   copies before rendering, on stdout and in `-o`/`--output` files alike.
+  A counterfactual's `violation.cost.elapsed_s` is the time of the whole
+  analysis of its weakening (every invariant's run for that weakening), not of
+  that invariant alone.
   Source and domain-state fields, `solver.checks`, and property
   `kind`/`name`/`checks` remain intact; ordinary verify JSON and exit codes are
   unchanged. Wall-clock timings and environment-dependent Z3 internal

@@ -16,16 +16,24 @@ verify are reused. The text prints no witness or counterfactual, so
 `--readable` does not compute them (#1839); only its `Implements:` section
 runs a refinement check. Its second line is still
 `Counterfactual scope: invariant/reachable (leadsTo liveness skipped; use verify)`
-(`rust/fslc/src/main.rs:10996-11000`). That line states the scope of the JSON
+(written by `run_explain_from_source` in `rust/fslc/src/main.rs`). That line states the scope of the JSON
 form's counterfactual analysis; the readable text computed none.
 
 ```json
 {"result":"explained",
  "skeleton":{"state":…, "actions":[{"name","actor?","requires_text","writes","ensures_text","requirement"}],
              "properties":[{"kind","name","body_text","requirement"}], "auto_checks":…},
- "counterfactuals":[{"invariant","weakening":{op,loc,target},"trace","requirement"}],
+ "counterfactuals":[{"invariant","weakening":{op,loc,target},"trace","requirement","violation"}],
  "witnesses":[…]}
 ```
+
+`counterfactuals[].violation.cost.elapsed_s` is the wall time of the whole
+analysis of the weakening that produced the entry (its screening runs and
+every per-invariant run, §4) plus building the entry's explanation; it is not
+the time of that invariant's own run. Entries from the same weakening
+therefore carry nearly the same value, and a `fair_remove` weakening whose
+outcomes were reused from an earlier fair removal reports little more than
+the explanation time.
 
 ## 2. The three artifacts
 
@@ -165,18 +173,19 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   before #1838, up to the last such outcome, and the solver-chosen outcomes
   are taken from them.
 - **Tests.** `shared_counterfactual_runs_print_the_unshared_output`
-  (`rust/fslc/src/main.rs:20108`) compares the JSON of `explain` at depth 4
+  (a unit test in `rust/fslc/src/main.rs`) compares the JSON of `explain` at depth 4
   on `examples/nfr/support_sla.fsl` and `examples/self/refinement_algebra.fsl`,
   without `cost.elapsed_s`, with a reference whose invariant phase makes each
   per-invariant run in order on one context: no screening, no fair-removal
   sharing, no fresh context and no replay (`unshared_counterfactual_runs`,
-  read at `main.rs:10344` and `10643`). The reachable phase has no such switch:
-  both sides skip weakenings without a reachable and share fair-removal runs
-  (`main.rs:9821-9841`), so the test does not check those shortcuts.
-  `explain_counterfactual_runs_are_pinned` (`main.rs:20056`) pins, on one
+  read in `invariant_outcomes` and `invariant_counterfactuals_from_source`).
+  The reachable phase has no such switch: both sides skip weakenings without
+  a reachable and share fair-removal runs (in
+  `reachable_counterfactuals_from_source`), so the test does not check those
+  shortcuts. `explain_counterfactual_runs_are_pinned` pins, on one
   small spec, the property and weakening operator of each entry of both
   phases and the number of bounded runs and concrete searches. `screening_keeps_counterfactuals_behind_a_preempting_bound`
-  (`main.rs:20150`) checks that a screening run stopped by a type bound
+  checks that a screening run stopped by a type bound
   screens nothing: the counterfactual and the preemption note remain.
 
 ## 5. Implementation / tests
@@ -185,42 +194,38 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
 frozen Python `src/fslc/explain.py` is a compatibility reference only.
 
 - **Entry.** `explain` parses with `mutate` and `typestate`
-  (`MutationFamilyOptions`) and calls `run_explain` (`main.rs:1329-1342`,
-  `10844`). `run_explain_from_source_with_names` (`main.rs:10890`) runs
-  `run_explain_lowering_from_source` for `--lowering` (`main.rs:10874`; its
+  (`MutationFamilyOptions`) and calls `run_explain` (from `command`).
+  `run_explain_from_source_with_names` runs
+  `run_explain_lowering_from_source` for `--lowering` (its
   output is `result`, `spec` and `lowering` only) and `run_explain_from_source`
-  (`main.rs:10923`) otherwise, then respells the output with
-  `name_display::respell`, glossary aliases unless `--names canonical`
-  (`main.rs:10903-10913`).
+  otherwise, then respells the output with
+  `name_display::respell`, glossary aliases unless `--names canonical`.
 - **JSON.** `run_explain_from_source` returns the trace gate's error for a
   spec whose acceptance/forbidden traces the gate refuses
-  (`main.rs:10933-10939`, #1242), then adds `counterfactual_scope`, the
-  `skeleton` from `model_skeleton` (`main.rs:9247`) and, for an `fsl 5`
-  requirements document, `readings` (`main.rs:10946-10958`). Without
-  `--readable` it adds `witnesses` (`witness_scenarios`, `explain_witnesses`;
-  `main.rs:6099`, `9406`), `counterfactuals`
-  (`invariant_counterfactuals_from_source`, `main.rs:10395`) and, when
+  (`require_trace_gate`, #1242), then adds `counterfactual_scope`, the
+  `skeleton` from `model_skeleton` and, for an `fsl 5`
+  requirements document, `readings` (`explain_readings::of_source`). Without
+  `--readable` it adds `witnesses` (`witness_scenarios`, `explain_witnesses`),
+  `counterfactuals` (`invariant_counterfactuals_from_source`) and, when
   non-empty, `reachable_counterfactuals`
-  (`reachable_counterfactuals_from_source`, `main.rs:9633`)
-  (`main.rs:10961-10994`). Both phases read their document through
-  `counterfactual_document` (`main.rs:9546`) and try the same weakenings,
-  `counterfactual_weakenings` (`main.rs:9564`): mutate's built-in
+  (`reachable_counterfactuals_from_source`). Both phases read their document through
+  `counterfactual_document` and try the same weakenings,
+  `counterfactual_weakenings`: mutate's built-in
   `assignment_remove`/`requires_remove`/`fair_remove` mutants in
   `fsl_tools::enumerate_builtin_mutants` order (#1169). `weakening_json`
-  (`main.rs:9583`) prints each as its `weakening` object; its `init`
+  prints each as its `weakening` object; its `init`
   argument is the one difference between the phases: the reachable phase
   marks a mutant of the `init` block (`BuiltinMutant::edits_init`), the
   invariant phase every mutant whose action is named `init`, which includes
   the mutants of an action named `init`.
-- **Readable text.** `main.rs:10995-11168` writes the header, `Verification
+- **Readable text.** The `readable` branch of `run_explain_from_source` writes the header, `Verification
   world:`, `State:`, `Lifecycles:`, `Implements:`, `Actions:`, `Properties:`
   and `Automatic checks:` (type bounds only) into `readable`. `Implements:`
-  comes from `readable_implements_text_from_source` (`main.rs:10826`), which
-  runs `implements_result_from_source` (`main.rs:18789`) bounded by `--depth`.
-- **Display names.** Names are printed through `model.names()` public
-  spellings (for example `main.rs:11014-11021`, `11141-11145`), and branch
-  actions recover their authored name from origin metadata
-  (`main.rs:11040-11047`, §6).
+  comes from `readable_implements_text_from_source`, which
+  runs `implements_result_from_source` bounded by `--depth`.
+- **Display names.** Names in that branch are printed through `model.names()`
+  public spellings, and branch actions recover their authored name from
+  origin metadata (§6).
 - **Tests.** `rust/fslc/tests/explain_cli.rs` (skeleton, branch display
   names, `spec_kind`, `auto_checks`, generated-declaration provenance,
   readable origins and counterfactual controls); the #1350 files
@@ -230,7 +235,7 @@ frozen Python `src/fslc/explain.py` is a compatibility reference only.
   concrete fallback search) and `issue_1350_shared_guard.rs` (one weakening
   credited to every affected invariant or reachable); `fsl5_implicit_readings.rs`
   (`readings`); and in `main.rs`
-  `readable_explain_runs_no_bounded_verification` (`main.rs:20027`, #1839)
+  `readable_explain_runs_no_bounded_verification` (#1839)
   plus the #1838 tests in §4. The frozen Python `tests/test_explain.py` covers
   the Python reference (cart_v1 skeleton, `ShippedWasPaid` via assignment
   removal, cancel_flow requirement text, compose, no raw

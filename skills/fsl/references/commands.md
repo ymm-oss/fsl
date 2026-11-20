@@ -251,7 +251,9 @@ HTML-only `--no-timing` (default false, no alias) omits only
 `verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
 `verification.cost.solver.decisions`, and
 `verification.cost.solver.propagations` from presentation copies
-before rendering, for stdout and `-o`/`--output` files. Default HTML retains
+before rendering, for stdout and `-o`/`--output` files. A counterfactual's
+`violation.cost.elapsed_s` times the whole analysis of its weakening (every
+invariant's run for it), not that invariant alone. Default HTML retains
 nondeterministic timings and solver statistics. Source/domain-state fields,
 `solver.checks`, property `kind`/`name`/`checks`, ordinary verify JSON, and exit
 codes are unchanged. Wall-clock timings and environment-dependent Z3 internal
