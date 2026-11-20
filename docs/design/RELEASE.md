@@ -150,8 +150,9 @@ It also rejects a dynamic dependency on `libz3`.
 7. Run the aggregator, which moves the current `[Unreleased]` body under
    `## [X.Y.Z] - YYYY-MM-DD` verbatim, appends every `changelog.d/` fragment
    sorted by the declared category/id order, verifies conservation (every
-   fragment's content reaches the section, byte for byte), and deletes the
-   consumed fragments in the same step, leaving `[Unreleased]` and
+   fragment's content reaches the section, byte for byte), refuses to write a
+   section that breaks the `check-section` rules (`changelog-release-section-invalid`),
+   and deletes the consumed fragments in the same step, leaving `[Unreleased]` and
    `changelog.d/` both empty:
 
    ```bash

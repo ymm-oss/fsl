@@ -85,14 +85,24 @@
 # Usage:
 #   aggregate_changelog.sh check
 #       Validates every fragment currently in changelog.d/: name shape and
-#       category membership (control 6), and duplicate (id, category) pairs
-#       (control 2).
+#       category membership (control 6), duplicate (id, category) pairs
+#       (control 2), body hygiene, and the body's lead (issue #1936): it
+#       must pass check-section's lead rules once rendered, its category
+#       must be the file name's, and the file name's id must be one of its
+#       own ids, not an id after `refs` (changelog-fragment-lead-invalid,
+#       changelog-fragment-lead-mismatch).
 #   aggregate_changelog.sh check-pr
 #       The merge-readiness pre-merge checks: everything `check` does, plus
 #       control 1 (a product-surface diff with no new, non-empty fragment)
 #       and control 4's direct-edit-forbidden half, both computed from
 #       BASE_SHA/HEAD_SHA in the environment (the same convention
-#       tools/check-product-gate-scope.sh uses).
+#       tools/check-product-gate-scope.sh uses). Last, it runs the command
+#       that will consume the pending fragments on a scratch copy of
+#       CHANGELOG.md -- `fold` into the newest section while that section is
+#       untagged and `[Unreleased]` is empty, `release` otherwise -- and
+#       fails if the section it writes would break check-section's rules,
+#       e.g. two fragments naming one id under one category
+#       (changelog-fragment-section-invalid; issue #1936).
 #   aggregate_changelog.sh check-stale
 #       Control 4's release-time half: fails if changelog.d/ still has any
 #       fragment at tag time.
@@ -116,10 +126,11 @@
 #       section (preceded by whatever the existing `[Unreleased]` body still
 #       holds, moved verbatim -- the migration pull request deliberately
 #       left it there, see docs/design/DESIGN-changelog-fragments.md), verifies
-#       conservation (control 5), rewrites CHANGELOG.md, and deletes the
-#       consumed fragments -- all before returning, so the authority
-#       handover from fragment to version section is a single atomic step
-#       for the caller to commit.
+#       conservation (control 5), checks the written section with
+#       check-section's rules (changelog-release-section-invalid; issue
+#       #1936), rewrites CHANGELOG.md, and deletes the consumed fragments --
+#       all before returning, so the authority handover from fragment to
+#       version section is a single atomic step for the caller to commit.
 #   aggregate_changelog.sh fold --version X.Y.Z [--changelog FILE]
 #                               [--fragments-dir DIR]
 #       Folds fragments that merged after the release commit into the
@@ -129,8 +140,9 @@
 #       (verify_fold). With no fragments it changes nothing (issue #1806).
 #   aggregate_changelog.sh selftest
 #       Executes the accepting and rejecting fixtures for all six controls,
-#       check-section (including its release-notes cross-check) and fold,
-#       printing each rejecting fixture's exit status.
+#       check-section (including its release-notes cross-check), fold, and
+#       the fragment-lead checks, printing each rejecting fixture's exit
+#       status.
 
 set -euo pipefail
 export LC_ALL=C
@@ -440,6 +452,66 @@ validate_fragment_hygiene_all() {
   [ "${#files[@]}" -eq 0 ] && return 0
   for f in "${files[@]}"; do
     validate_fragment_hygiene "$dir/$f"
+  done
+}
+
+# Rejects a fragment whose lead would break check-section once rendered, or
+# that does not name the fragment it is in (issue #1936). The first line of
+# the body, rendered as render_fragment renders it, goes through the same
+# lead_parse and lead_rules as a section bullet
+# (`changelog-fragment-lead-invalid`, naming the section rule it breaks); then
+# the lead's category must be the file name's category, and the file name's
+# id one of the lead's own ids -- not an id after `refs`, which
+# changelog.d/README.md defines as a cross-reference
+# (`changelog-fragment-lead-mismatch`). `Fixed (#691, #692):` in
+# 692-x.fixed.md is accepted. An empty body is left to the empty-fragment
+# checks, which name it more precisely.
+validate_fragment_lead() {
+  local dir="$1" f="$2" meta id cat body out lib
+  meta="$(parse_fragment_name "$f")"
+  id="${meta%%$'\t'*}"
+  cat="${meta##*$'\t'}"
+  body="$(trimmed_fragment_body "$dir/$f")"
+  [ -z "$body" ] && return 0
+  lib="$(lead_awk_lib)"
+  out="$(printf -- '- %s\n' "${body%%$'\n'*}" | awk -v cats="${DECLARED_CATEGORY_ORDER[*]}" \
+      -v file="$dir/$f" -v fid="$id" -v fcat="$cat" "$lib"'
+    function invalid(lines,    n, r, k, tab) {
+      n = split(lines, r, "\n")
+      for (k = 1; k <= n; k++) {
+        if (r[k] == "") continue
+        tab = index(r[k], "\t")
+        print "changelog-fragment-lead-invalid: " file ": " substr(r[k], 1, tab - 1) ": " substr(r[k], tab + 1)
+      }
+    }
+    BEGIN { lead_init(cats) }
+    NR == 1 {
+      err = lead_parse($0)
+      if (err != "") { invalid(err); exit }
+      invalid(lead_rules())
+      if (lead_cat != fcat)
+        print "changelog-fragment-lead-mismatch: " file ": the lead category `" lead_word "` is not the file name category `" fcat "`"
+      if (lead_n == 0) exit
+      own = ""
+      for (i = 1; i <= lead_n; i++) {
+        if (lead_id[i] == fid + 0) exit
+        own = own (i > 1 ? ", " : "") "#" lead_id[i]
+      }
+      print "changelog-fragment-lead-mismatch: " file ": the file name id #" fid " is not one of the lead'"'"'s own ids (" own "); an id after `refs` is a cross-reference"
+    }
+  ')" || fail "changelog-fragment-lead-invalid: $dir/$f (could not parse the lead)"
+  [ -z "$out" ] || fail "$out"
+}
+
+validate_fragment_leads_all() {
+  local dir="$1"
+  local -a files=()
+  local f listed
+  listed="$(list_fragment_files "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
+  [ "${#files[@]}" -eq 0 ] && return 0
+  for f in "${files[@]}"; do
+    validate_fragment_lead "$dir" "$f"
   done
 }
 
@@ -1000,7 +1072,8 @@ check() {
   validate_fragment_names "$dir"
   check_duplicates "$dir"
   validate_fragment_hygiene_all "$dir"
-  echo "aggregate_changelog: check PASS -- every fragment in '$dir' has a conforming name and no duplicate (id, category)"
+  validate_fragment_leads_all "$dir"
+  echo "aggregate_changelog: check PASS -- every fragment in '$dir' has a conforming name, no duplicate (id, category), and a lead that names its own category and id"
 }
 
 check_pr() {
@@ -1008,6 +1081,7 @@ check_pr() {
   validate_fragment_names "$dir"
   check_duplicates "$dir"
   validate_fragment_hygiene_all "$dir"
+  validate_fragment_leads_all "$dir"
   # Computed once, before either control that depends on it: control 4's own
   # fail-closed check (an invalid direct edit fails right here) and control
   # 1's release exclusion both consume this single classification, so they
@@ -1019,7 +1093,61 @@ check_pr() {
   set -e
   [ "$status" -eq 0 ] || exit 1
   check_missing_or_empty_fragment "$classification"
+  check_fragment_destination "$dir" "CHANGELOG.md"
   echo "aggregate_changelog: check-pr PASS"
+}
+
+# check-pr's fold simulation (issue #1936). Each fragment passing
+# validate_fragment_lead is not enough: two fragments can name the same id
+# under one category (`Fixed (#100, #200)` beside `Fixed (#200)`), or a
+# fragment's extra id can repeat an entry of the section it will be folded
+# into, and only the rendered section shows it. This runs the command that
+# will consume the pending fragments of $1 on a scratch copy of $2 and fails
+# when it would:
+#   - `fold --version X.Y.Z` when the newest section X.Y.Z is not tagged and
+#     `[Unreleased]` is empty -- the window between the release commit and
+#     the tag, when docs/design/RELEASE.md folds late fragments into X.Y.Z;
+#     version_is_tagged is fold's own fold-version-tagged predicate;
+#   - otherwise `release`, into a new section (scratch version 0.0.0), which
+#     now runs check_section_body on its own output.
+# A tagged section is never the destination: its fragments belong to the
+# next release, where an (id, category) pair the tagged section already has
+# is not a duplicate (the 5.2.0 section has `Unified (#1874)`, and #1874's
+# second `unified` fragment waits for the release after it).
+check_fragment_destination() {
+  local dir="$1" changelog="$2"
+  local -a files=()
+  local f listed
+  listed="$(list_fragment_files "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
+  [ "${#files[@]}" -eq 0 ] && return 0
+  [ -f "$changelog" ] || fail "changelog-fragment-section-invalid: '$changelog' not found, so the section the fragments of '$dir' go into cannot be checked"
+  local newest unreleased scratch status target
+  newest="$(released_section_versions "$changelog")"
+  newest="${newest%%$'\n'*}"
+  unreleased="$(unreleased_raw_body "$changelog" | trim_blank_edges)"
+  scratch="$(mktemp -d)" || fail "check-pr: could not create a scratch directory"
+  mkdir "$scratch/changelog.d"
+  cp "$changelog" "$scratch/CHANGELOG.md"
+  for f in "${files[@]}"; do cp "$dir/$f" "$scratch/changelog.d/$f"; done
+  set +e
+  if [ -n "$newest" ] && [ -z "$unreleased" ] && ! version_is_tagged "$changelog" "$newest"; then
+    target="## [$newest], as \`fold --version $newest\` would fold them (no local tag v$newest; if it is tagged, \`git fetch --tags\` and rerun)"
+    # The scratch copy is not in a repository; keep git from finding one
+    # above it (fold's own tag check) when TMPDIR is inside a work tree.
+    GIT_CEILING_DIRECTORIES="$(dirname "$scratch")" "$SELF" fold --version "$newest" \
+      --changelog "$scratch/CHANGELOG.md" --fragments-dir "$scratch/changelog.d" >/dev/null
+    status=$?
+  else
+    target="the next release's section, as \`release\` would write it (scratch version 0.0.0)"
+    "$SELF" release --version 0.0.0 --date 1970-01-01 \
+      --changelog "$scratch/CHANGELOG.md" --fragments-dir "$scratch/changelog.d" >/dev/null
+    status=$?
+  fi
+  set -e
+  rm -rf "$scratch"
+  [ "$status" -eq 0 ] \
+    || fail "changelog-fragment-section-invalid: the fragments of '$dir' would break the check-section rules in $target (see above)"
 }
 
 check_stale() {
@@ -1083,6 +1211,81 @@ released_section_versions() {
   ' "$1"
 }
 
+# The one parser for a bullet lead `- <Category> (<label>):` (issue #1936),
+# shared by check_section_body (a rendered section) and
+# validate_fragment_leads (a fragment, as render_fragment renders its first
+# line), so the pre-merge fragment check and the section check cannot drift.
+# Printed as awk source for the caller to put in front of its own program; a
+# function rather than a variable, so the selftest's `bash -c` children, which
+# see exported functions but not this script's variables, reach it too.
+#
+# lead_init(cats) declares the categories (DECLARED_CATEGORY_ORDER, space
+# separated) and their rank in lead_rank[]. lead_parse(line) parses the lead
+# of bullet line `line`: on success it returns "" and sets lead_word (as
+# written), lead_cat (lowercased), lead_paren (the label), lead_breaking
+# (0|1) and lead_n with lead_id[1..lead_n], the entry's own ids, folded like
+# fragment ids, in lead order, without the ids of a `refs` list; on failure
+# it returns "<code>\t<message>". lead_rules() returns the rules a parsed
+# lead must meet on its own (a breaking label only under `Changed`, at least
+# one own id) as "<code>\t<message>\n" lines, "" when it meets them.
+lead_awk_lib() {
+  cat <<'AWK'
+function lead_init(cats,    n, c, i) {
+  n = split(cats, c, " ")
+  for (i = 1; i <= n; i++) lead_rank[c[i]] = i
+}
+function lead_parse(line,    op, rest, cl, labels, m, item, j, s, ls, in_refs, t, tok, i) {
+  lead_word = ""; lead_cat = ""; lead_paren = ""; lead_breaking = 0; lead_n = 0
+  split("", lead_id)
+  if (line !~ /^- [A-Z][a-z]+ \(/)
+    return "changelog-section-lead-invalid\tbullet does not start with `- <Category> (`: " substr(line, 1, 60)
+  op = index(line, " (")
+  lead_word = substr(line, 3, op - 3)
+  rest = substr(line, op + 2)
+  cl = index(rest, "):")
+  lead_paren = substr(rest, 1, cl - 1)
+  if (cl == 0 || index(lead_paren, "(") || index(lead_paren, ")"))
+    return "changelog-section-lead-invalid\tbullet lead has no `(...)`: label: " substr(line, 1, 60)
+  lead_cat = tolower(lead_word)
+  if (!(lead_cat in lead_rank))
+    return "changelog-section-category-undeclared\t`" lead_word "` is not a declared category"
+  # The label is a comma-separated list of items. An item is a breaking
+  # label only when it starts with the word `breaking` (`breaking`,
+  # `breaking removal`), so `non-breaking` and `not breaking` are not.
+  # An item starting with `refs` opens a reference list: its ids, and
+  # those of the bare `#N` items that follow it (`refs #A, #B`), are
+  # cross-references, not ids of the entry itself.
+  labels = lead_paren
+  gsub(/;/, ",", labels)
+  m = split(labels, item, ",")
+  in_refs = 0
+  for (j = 1; j <= m; j++) {
+    s = item[j]
+    sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
+    ls = tolower(s)
+    if (ls ~ /^refs([ \t]|$)/) { in_refs = 1; continue }
+    if (in_refs && s ~ /^#[0-9]+$/) continue
+    in_refs = 0
+    if (ls ~ /^breaking([ \t]|$)/) lead_breaking = 1
+    t = split(s, tok, /[ \t]+/)
+    for (i = 1; i <= t; i++) {
+      if (tok[i] !~ /^#[0-9]+$/) continue
+      lead_id[++lead_n] = substr(tok[i], 2) + 0
+    }
+  }
+  return ""
+}
+function lead_rules(    out) {
+  out = ""
+  if (lead_breaking && lead_cat != "changed")
+    out = out "changelog-section-breaking-outside-changed\t`" lead_word " (" lead_paren ")` carries a breaking label outside `Changed`\n"
+  if (lead_n == 0)
+    out = out "changelog-section-id-missing\t`" lead_word " (" lead_paren ")` names no issue or pull-request id\n"
+  return out
+}
+AWK
+}
+
 # Prints one diagnostic line per violation in section $2 of $1; exits 1 if
 # there was any, 2 if the section does not exist. When $3 names a file, it
 # also writes one line per bullet whose lead parses, in section order:
@@ -1090,15 +1293,24 @@ released_section_versions() {
 # (ids exclude `refs` lists). fold and the release-notes cross-check read
 # these leads instead of parsing the section a second way.
 check_section_body() {
-  local changelog="$1" version="$2" leads_out="${3:-}"
-  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" -v leads_out="$leads_out" '
+  local changelog="$1" version="$2" leads_out="${3:-}" lib
+  lib="$(lead_awk_lib)"
+  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" -v leads_out="$leads_out" "$lib"'
     function report(code, msg) {
       printf "%s: [%s] %s:%d: %s\n", code, want, FILENAME, NR, msg
       bad++
     }
+    # Reports each "<code>\t<message>" line of $1.
+    function report_all(lines,    n, r, k, tab) {
+      n = split(lines, r, "\n")
+      for (k = 1; k <= n; k++) {
+        if (r[k] == "") continue
+        tab = index(r[k], "\t")
+        report(substr(r[k], 1, tab - 1), substr(r[k], tab + 1))
+      }
+    }
     BEGIN {
-      n = split(cats, c, " ")
-      for (i = 1; i <= n; i++) rank[c[i]] = i
+      lead_init(cats)
       heading = "## [" want "]"
     }
     /^## \[/ {
@@ -1110,69 +1322,27 @@ check_section_body() {
     /^[ \t]*$/ { next }
     /^- / {
       bullets++
-      line = $0
-      if (line !~ /^- [A-Z][a-z]+ \(/) {
-        report("changelog-section-lead-invalid", "bullet does not start with `- <Category> (`: " substr(line, 1, 60))
-        next
-      }
-      op = index(line, " (")
-      word = substr(line, 3, op - 3)
-      rest = substr(line, op + 2)
-      cl = index(rest, "):")
-      paren = substr(rest, 1, cl - 1)
-      if (cl == 0 || index(paren, "(") || index(paren, ")")) {
-        report("changelog-section-lead-invalid", "bullet lead has no `(...)`: label: " substr(line, 1, 60))
-        next
-      }
-      cat = tolower(word)
-      if (!(cat in rank)) {
-        report("changelog-section-category-undeclared", "`" word "` is not a declared category")
-        next
-      }
-      if (rank[cat] < last_rank) {
+      err = lead_parse($0)
+      if (err != "") { report_all(err); next }
+      word = lead_word; cat = lead_cat
+      if (lead_rank[cat] < last_rank) {
         report("changelog-section-order-invalid", "`" word "` after `" last_word "` breaks the declared category order")
       }
-      if (rank[cat] > last_rank) { last_rank = rank[cat]; last_word = word }
-      # The label is a comma-separated list of items. An item is a breaking
-      # label only when it starts with the word `breaking` (`breaking`,
-      # `breaking removal`), so `non-breaking` and `not breaking` are not.
-      # An item starting with `refs` opens a reference list: its ids, and
-      # those of the bare `#N` items that follow it (`refs #A, #B`), are
-      # cross-references, not ids of the entry itself.
-      labels = paren
-      gsub(/;/, ",", labels)
-      m = split(labels, item, ",")
-      ids = 0; breaking = 0; in_refs = 0; first = 0; idlist = ""
-      for (j = 1; j <= m; j++) {
-        s = item[j]
-        sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
-        ls = tolower(s)
-        if (ls ~ /^refs([ \t]|$)/) { in_refs = 1; continue }
-        if (in_refs && s ~ /^#[0-9]+$/) continue
-        in_refs = 0
-        if (ls ~ /^breaking([ \t]|$)/) breaking = 1
-        t = split(s, tok, /[ \t]+/)
-        for (i = 1; i <= t; i++) {
-          if (tok[i] !~ /^#[0-9]+$/) continue
-          id = substr(tok[i], 2) + 0
-          ids++
-          if (ids == 1) first = id
-          idlist = idlist (ids > 1 ? "," : "") id
-          key = id SUBSEP cat
-          if (key in seen) {
-            report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
-          } else {
-            seen[key] = NR
-          }
+      if (lead_rank[cat] > last_rank) { last_rank = lead_rank[cat]; last_word = word }
+      idlist = ""
+      for (i = 1; i <= lead_n; i++) {
+        id = lead_id[i]
+        idlist = idlist (i > 1 ? "," : "") id
+        key = id SUBSEP cat
+        if (key in seen) {
+          report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
+        } else {
+          seen[key] = NR
         }
       }
-      if (breaking && cat != "changed") {
-        report("changelog-section-breaking-outside-changed", "`" word " (" paren ")` carries a breaking label outside `Changed`")
-      }
-      if (ids == 0) {
-        report("changelog-section-id-missing", "`" word " (" paren ")` names no issue or pull-request id")
-      } else if (leads_out != "") {
-        printf "%d\t%s\t%d\t%d\t%d\t%s\n", bullets, cat, first, breaking, NR, idlist > leads_out
+      report_all(lead_rules())
+      if (lead_n > 0 && leads_out != "") {
+        printf "%d\t%s\t%d\t%d\t%d\t%s\n", bullets, cat, lead_id[1], lead_breaking, NR, idlist > leads_out
       }
       next
     }
@@ -1306,6 +1476,7 @@ release() {
   validate_fragment_names "$fragdir"
   check_duplicates "$fragdir"
   validate_fragment_hygiene_all "$fragdir"
+  validate_fragment_leads_all "$fragdir"
 
   local -a sorted=()
   local f listed
@@ -1358,6 +1529,12 @@ release() {
     printf '%s\n\n' "$combined"
     printf '%s\n' "$rest"
   } >"$changelog.new"
+  # As fold does (verify_fold): the written section must pass check-section
+  # before it replaces the changelog (issue #1936). Cross-fragment duplicate
+  # ids, and a pre-mechanism `[Unreleased]` body moved in verbatim, are seen
+  # only here.
+  check_section_body "$changelog.new" "$version" >&2 \
+    || { rm -f "$changelog.new"; fail "changelog-release-section-invalid: ## [$version] as release would write it breaks the check-section rules (see above); '$changelog' and '$fragdir' are unchanged"; }
   mv "$changelog.new" "$changelog"
 
   if [ "${#sorted[@]}" -gt 0 ]; then
@@ -1517,6 +1694,15 @@ verify_fold() {
     || fail "fold-conservation-failed: the folded ## [$version] breaks the check-section rules (see above)"
 }
 
+# Succeeds when tag v$2 names a commit in the repository holding changelog
+# $1. Only a tag ref present locally is seen: an unfetched tag, or a
+# changelog outside a Git work tree, is not. fold refuses a tagged version
+# with it, and check-pr's fold simulation reads it to tell the fold window
+# from the time after the tag.
+version_is_tagged() {
+  git -C "$(dirname "$1")" rev-parse -q --verify "refs/tags/v$2^{commit}" >/dev/null 2>&1
+}
+
 fold() {
   local version="" changelog="CHANGELOG.md" fragdir="changelog.d"
   while [ "$#" -gt 0 ]; do
@@ -1533,6 +1719,7 @@ fold() {
   validate_fragment_names "$fragdir"
   check_duplicates "$fragdir"
   validate_fragment_hygiene_all "$fragdir"
+  validate_fragment_leads_all "$fragdir"
   local -a sorted=()
   local f listed
   listed="$(sort_fragments "$fragdir")"
@@ -1560,7 +1747,7 @@ fold() {
   # After the tag, changelog.d/ holds the next release's fragments. Only a
   # tag ref present locally is seen: an unfetched tag, or a changelog outside
   # a Git work tree, is not.
-  if git -C "$(dirname "$changelog")" rev-parse -q --verify "refs/tags/v$version^{commit}" >/dev/null 2>&1; then
+  if version_is_tagged "$changelog" "$version"; then
     fail "fold-version-tagged: v$version is already tagged; its fragments belong to the next release"
   fi
 
@@ -2727,6 +2914,13 @@ selftest_section() {
 # the section, and compares the whole file with the expected one.
 selftest_fold() {
   local tmp; tmp="$(mktemp -d)"
+  # fold refuses a version tagged in the changelog's repository, and git looks
+  # for that repository upwards from the fixture. With TMPDIR inside a clone
+  # of this repository, which has v5.1.0, every fixture below would be refused
+  # as fold-version-tagged; stop the search at $tmp (the `tagged` fixture has
+  # its own .git).
+  local GIT_CEILING_DIRECTORIES="$tmp"
+  export GIT_CEILING_DIRECTORIES
   local -a head=('# Changelog' '' 'Intro.' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '')
   local -a tail=('' '## [5.0.0] - 2026-11-07' '' '- Added (#1): older.' '' '[Unreleased]: https://example.invalid/compare/v5.1.0...HEAD')
   local -a section=(
@@ -2846,7 +3040,14 @@ selftest_fold() {
   d="$tmp/badfrag"
   st_fold_fixture "$d" "${section[@]}"
   st_setup_frag "$d/changelog.d" "6-w.fixed.md" "Fixed #6 has no parenthesised label."
-  st_fold_refuses "a fragment whose bullet breaks the section rules" fold-conservation-failed "$d" --version 5.1.0
+  st_fold_refuses "a fragment whose lead breaks the section rules" changelog-fragment-lead-invalid "$d" --version 5.1.0
+  # Each lead names its own id, but together they repeat #51 under Fixed:
+  # only the folded section shows it, and verify_fold's check_section_body
+  # is what refuses it.
+  st_fold_fixture "$d" "${section[@]}"
+  st_setup_frag "$d/changelog.d" "50-v.fixed.md" "Fixed (#50, #51): two ids."
+  st_setup_frag "$d/changelog.d" "51-w.fixed.md" "Fixed (#51): #51 again."
+  st_fold_refuses "two fragments whose leads share an id" fold-conservation-failed "$d" --version 5.1.0
   st_fold_fixture "$d" "${section[@]}"
   printf '\n\n' >"$d/changelog.d/6-w.fixed.md"
   st_fold_refuses "an empty fragment" changelog-fragment-empty "$d" --version 5.1.0
@@ -2892,6 +3093,158 @@ selftest_fold() {
   rm -rf "$tmp"
 }
 
+# Fragment leads (issue #1936): check, check-pr, release and fold reject a
+# fragment whose lead would break check-section, or does not name its own
+# category and id; check-pr also runs the command that will consume the
+# pending fragments on a scratch copy, so leads that are each valid but
+# collide in the section are rejected before merge.
+selftest_fragment_lead() {
+  local tmp; tmp="$(mktemp -d)"
+  # Succeeds when command $2.. fails with a diagnostic line starting with $1.
+  # shellcheck disable=SC2329  # invoked through st_expect_pass
+  st_reports() {
+    local code="$1" out; shift
+    if out="$("$@" 2>&1)"; then return 1; fi
+    printf '%s\n' "$out" | grep -q "^$code"
+  }
+  # $1 = label, $2 = file name, $3.. = body lines: accepted alone.
+  st_lead_accepts() {
+    local label="$1" name="$2"; shift 2
+    rm -rf "$tmp/one"; mkdir -p "$tmp/one"
+    st_setup_frag "$tmp/one" "$name" "$@"
+    st_expect_pass "fragment lead accepting: $label ($name)" check "$tmp/one"
+  }
+  # $1 = label, $2 = expected diagnostic, $3 = file name, $4.. = body lines.
+  st_lead_rejects() {
+    local label="$1" code="$2" name="$3"; shift 3
+    rm -rf "$tmp/one"; mkdir -p "$tmp/one"
+    st_setup_frag "$tmp/one" "$name" "$@"
+    st_expect_fail "fragment lead rejecting: $label ($name)" check "$tmp/one"
+    st_expect_pass "fragment lead rejecting: $label -- reported as $code" st_reports "$code" check "$tmp/one"
+  }
+
+  st_lead_accepts "one id" "691-x.fixed.md" "Fixed (#691): a fix." "Continued on a second line."
+  st_lead_accepts "several own ids, the file's first" "691-x.fixed.md" "Fixed (#691, #692): two issues."
+  st_lead_accepts "several own ids, the file's second" "692-x.fixed.md" "Fixed (#691, #692): two issues."
+  st_lead_accepts "a refs list after the own id" "1678-x.fixed.md" "Fixed (#1678, refs #1281): a fix."
+  st_lead_accepts "breaking under Changed" "8-x.changed.md" "Changed (#8, breaking): a CLI change."
+  st_lead_accepts "breaking removal under Changed" "9-x.changed.md" "Changed (#9, breaking removal): a form is refused."
+  st_lead_accepts "a free-text label" "13-x.fixed.md" "Fixed (#13, representative decision 2026-10-26): a dated label."
+  st_lead_accepts "a zero-padded file id" "0691-x.fixed.md" "Fixed (#691): the file id folds to 691."
+  st_lead_accepts "a zero-padded lead id" "691-x.fixed.md" "Fixed (#0691): the lead id folds to 691."
+  st_lead_accepts "blank lines around the body" "691-x.fixed.md" "" "Fixed (#691): a fix." ""
+  rm -rf "$tmp/one"; mkdir -p "$tmp/one"; printf '\n\n' >"$tmp/one/7-x.fixed.md"
+  st_expect_pass "fragment lead accepting: an empty body is left to changelog-fragment-empty" \
+    validate_fragment_leads_all "$tmp/one"
+
+  # The issue's four reproductions, one fragment each.
+  st_lead_rejects "the lead names another issue (#1870 in a #9002 file)" changelog-fragment-lead-mismatch \
+    "9002-second-step.unified.md" "Unified (#1870, second step): something."
+  st_lead_rejects "no lead" changelog-fragment-lead-invalid "9001-docs-align.documented.md" "The docs now say X."
+  st_lead_rejects "the lead's category is not the file's" changelog-fragment-lead-mismatch \
+    "9003-x.added.md" "Fixed (#9003): x."
+  st_lead_rejects "the file's id only after refs" changelog-fragment-lead-mismatch \
+    "1281-x.fixed.md" "Fixed (#1678, refs #1281): a fix."
+  st_lead_rejects "the file's id only in a refs list of two" changelog-fragment-lead-mismatch \
+    "1282-x.fixed.md" "Fixed (#1678, refs #1281, #1282): a fix."
+  st_lead_rejects "the lead without a parenthesised label" changelog-fragment-lead-invalid \
+    "16-x.fixed.md" "Fixed #16: no label."
+  st_lead_rejects "an undeclared lead word" changelog-fragment-lead-invalid "15-x.fixed.md" "Removed (#15): undeclared."
+  st_lead_rejects "a lead without an id" changelog-fragment-lead-invalid "17-x.fixed.md" "Fixed (no id): x."
+  st_lead_rejects "a lead whose ids are all references" changelog-fragment-lead-invalid "18-x.fixed.md" "Fixed (refs #18): x."
+  st_lead_rejects "breaking outside Changed" changelog-fragment-lead-invalid "14-x.fixed.md" "Fixed (#14, breaking): x."
+  st_lead_rejects "the lead on the second line" changelog-fragment-lead-invalid "19-x.fixed.md" "A sentence first." "Fixed (#19): x."
+  st_lead_rejects "a lowercase lead word" changelog-fragment-lead-invalid "20-x.fixed.md" "fixed (#20): x."
+
+  # release refuses the same fragment before writing anything.
+  local d="$tmp/rel"
+  mkdir -p "$d/changelog.d"
+  printf '%s\n' '# Changelog' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '' '- Added (#1): older.' >"$d/CHANGELOG.md"
+  st_setup_frag "$d/changelog.d" "9001-docs-align.documented.md" "The docs now say X."
+  cp -R "$d" "$d.snapshot"
+  st_expect_pass "fragment lead rejecting: release refuses a fragment with no lead -- reported as changelog-fragment-lead-invalid" \
+    st_reports changelog-fragment-lead-invalid release --version 5.2.0 --date 2026-12-02 --changelog "$d/CHANGELOG.md" --fragments-dir "$d/changelog.d"
+  st_expect_pass "fragment lead rejecting: ... CHANGELOG.md and changelog.d/ untouched" diff -r "$d.snapshot" "$d"
+  # Each lead valid, but #51 twice under Fixed: release now checks its own section.
+  rm -f "$d/changelog.d/9001-docs-align.documented.md"
+  st_setup_frag "$d/changelog.d" "50-v.fixed.md" "Fixed (#50, #51): two ids."
+  st_setup_frag "$d/changelog.d" "51-w.fixed.md" "Fixed (#51): #51 again."
+  rm -rf "$d.snapshot"; cp -R "$d" "$d.snapshot"
+  st_expect_pass "release rejecting: a section with a duplicate id -- reported as changelog-release-section-invalid" \
+    st_reports changelog-release-section-invalid release --version 5.2.0 --date 2026-12-02 --changelog "$d/CHANGELOG.md" --fragments-dir "$d/changelog.d"
+  st_expect_pass "release rejecting: ... CHANGELOG.md and changelog.d/ untouched" diff -r "$d.snapshot" "$d"
+  rm -f "$d/changelog.d/51-w.fixed.md"
+  st_expect_pass "release accepting: the same section without the duplicate" \
+    release --version 5.2.0 --date 2026-12-02 --changelog "$d/CHANGELOG.md" --fragments-dir "$d/changelog.d"
+
+  # check-pr end to end, in a throwaway repository whose newest section is
+  # 5.1.0 with `Unified (#70)` and `Fixed (#71)`. $1 = repository; the rest
+  # are "file=body" fragments added with a product change. Prints the base sha.
+  st_lead_repo() {
+    local r="$1" kv; shift
+    rm -rf "$r"; mkdir -p "$r/changelog.d" "$r/rust"
+    (
+      cd "$r"
+      git init -q
+      git config user.email "selftest@example.invalid"
+      git config user.name "selftest"
+      printf '%s\n' '# Changelog' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '' \
+        '- Fixed (#71): a fix.' '- Unified (#70): a first step.' '' '## [5.0.0] - 2026-11-07' '' '- Added (#1): older.' >CHANGELOG.md
+      printf 'fn main() {}\n' >rust/lib.rs
+      git add -A
+      git commit -q -m base
+      git rev-parse HEAD
+      printf 'fn main() { /* changed */ }\n' >rust/lib.rs
+      for kv in "$@"; do printf '%s\n' "${kv#*=}" >"changelog.d/${kv%%=*}"; done
+      git add -A
+      git commit -q -m change
+    )
+  }
+  # shellcheck disable=SC2329  # invoked through st_expect_pass/st_expect_fail
+  st_lead_check_pr() {  # $1 = repository, $2 = base sha
+    local head
+    head="$(git -C "$1" rev-parse HEAD)"
+    ( cd "$1" && BASE_SHA="$2" HEAD_SHA="$head" "$SELF" check-pr )
+  }
+  local r="$tmp/pr" base
+  base="$(st_lead_repo "$r" "9002-second-step.unified.md=Unified (#70, second step): something.")"
+  st_expect_pass "check-pr rejecting: a lead naming another issue -- reported as changelog-fragment-lead-mismatch" \
+    st_reports changelog-fragment-lead-mismatch st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "9001-docs-align.documented.md=The docs now say X.")"
+  st_expect_pass "check-pr rejecting: a fragment with no lead -- reported as changelog-fragment-lead-invalid" \
+    st_reports changelog-fragment-lead-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "9003-x.added.md=Fixed (#9003): x.")"
+  st_expect_pass "check-pr rejecting: a lead in another category -- reported as changelog-fragment-lead-mismatch" \
+    st_reports changelog-fragment-lead-mismatch st_lead_check_pr "$r" "$base"
+
+  # 5.1.0 untagged: the fragments are folded into it.
+  base="$(st_lead_repo "$r" "72-x.unified.md=Unified (#72, #70): a second step of #70.")"
+  st_expect_pass "check-pr rejecting: an extra id repeating an entry of the untagged newest section -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "72-x.unified.md=Unified (#72, refs #70): a second step of #70.")"
+  st_expect_pass "check-pr accepting: the same fragment with #70 as a reference" st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "72-x.fixed.md=Fixed (#72, #73): two ids." "73-y.fixed.md=Fixed (#73): #73 again.")"
+  st_expect_pass "check-pr rejecting: two fragments sharing an id, folded -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  # 5.1.0 tagged: the fragments go to the next release's section.
+  base="$(st_lead_repo "$r" "72-x.fixed.md=Fixed (#72, #73): two ids." "73-y.fixed.md=Fixed (#73): #73 again.")"
+  ( cd "$r" && git tag v5.1.0 "$base" )
+  st_expect_pass "check-pr rejecting: two fragments sharing an id, released -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "70-x.unified.md=Unified (#70, second step): the rest of #70.")"
+  ( cd "$r" && git tag v5.1.0 "$base" )
+  st_expect_pass "check-pr accepting: an (id, category) of the tagged section repeated for the next release" \
+    st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "70-x.unified.md=Unified (#70, second step): the rest of #70.")"
+  st_expect_pass "check-pr rejecting: ... but not while that section is untagged -- reported as changelog-fragment-section-invalid" \
+    st_reports changelog-fragment-section-invalid st_lead_check_pr "$r" "$base"
+  base="$(st_lead_repo "$r" "72-x.fixed.md=Fixed (#72): a fix." "73-y.changed.md=Changed (#73, #74, breaking): a change.")"
+  st_expect_pass "check-pr accepting: valid fragments folded into the untagged section" st_lead_check_pr "$r" "$base"
+
+  unset -f st_reports st_lead_accepts st_lead_rejects st_lead_repo st_lead_check_pr
+  rm -rf "$tmp"
+}
+
 selftest() {
   # Several fixtures below invoke `bash -c '... | classify_product_diff'`
   # (control 1) or `bash -c "... '$SELF' check-pr"` (the control 1/4b
@@ -2926,9 +3279,10 @@ selftest() {
   selftest_control6
   selftest_section
   selftest_fold
+  selftest_fragment_lead
   echo
   if [ "$ST_FAILURES" -eq 0 ]; then
-    echo "aggregate_changelog: selftest PASS -- all six controls', check-section's (with the release-notes cross-check) and fold's accepting and rejecting fixtures behaved as expected"
+    echo "aggregate_changelog: selftest PASS -- all six controls', check-section's (with the release-notes cross-check), fold's and the fragment-lead checks' accepting and rejecting fixtures behaved as expected"
   else
     echo "aggregate_changelog: selftest FAIL -- $ST_FAILURES assertion(s) failed" >&2
     exit 1

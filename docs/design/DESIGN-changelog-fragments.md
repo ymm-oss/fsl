@@ -854,6 +854,30 @@ script could drift from it. It also already runs on every pull request, so a fol
 that adds a breaking entry fails before merge rather than in the release
 workflow. The 5.0.0 section has 61 breaking entries carrying 67 ids, all listed.
 
+**Amendment (#1936, fragment leads before merge).** `check` and `check-pr`
+validated a fragment's name, (id, category) uniqueness and body hygiene, but
+not its lead, so a fragment that would fail `check-section` once rendered still
+merged. At 5.2.0 two such fragments had to be corrected by hand in the release
+commit (#1926): one led with another issue's id, `Unified (#1870, second
+step):` in a `1899-…` file, which repeated the section's `Unified (#1870)`, and
+one had no lead. `check`, `check-pr`, `release` and `fold` now parse the first
+line of each fragment with the lead parser `check-section` uses
+(`lead_awk_lib`, one copy for both). The lead must pass `check-section`'s lead
+rules. Its category word must be the file name's category, and the file name's
+id must be one of the lead's own ids; an id after `refs` is a cross-reference,
+as `changelog.d/README.md` defines it. A fragment may still name several own
+ids (`Fixed (#691, #692):`). Two valid leads can still collide in the section,
+for example `Fixed (#100, #200)` and `Fixed (#200)`. So `check-pr` also runs
+the command that will consume the pending fragments on a scratch copy of
+`CHANGELOG.md`: `fold` into the newest section while that section is untagged
+and `[Unreleased]` is empty, and `release` otherwise. It fails when that
+command refuses. A tagged section is never the destination. Its fragments
+belong to the next release, where repeating one of its (id, category) pairs
+is not a duplicate: at this amendment 5.2.0 has `Unified (#1874)`, and #1874's
+second `unified` fragment is pending for the release after it. `release` now
+checks its own section with `check-section`'s rules before writing it, as
+`fold` already did.
+
 ## Migration: six named sites
 
 1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all six controls,

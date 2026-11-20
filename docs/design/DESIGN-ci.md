@@ -420,7 +420,7 @@ readers keep the coverage this decision requires of every exempt path:
   (`stale-fragments-present`) rather than silently shipping notes with a missing entry.
 - `.github/workflows/merge-readiness.yml`'s `automation contracts` job reads it unfiltered, on
   every pull request and merge-group event, via `tools/aggregate_changelog.sh check-pr`: a
-  fragment's name and (id, category) uniqueness are validated regardless of the exemption
+  fragment's name, (id, category) uniqueness and lead are validated regardless of the exemption
   above, and a product-surface change with no corresponding fragment fails closed
   (`changelog-fragment-missing`) even when every other changed path is exempt.
 
