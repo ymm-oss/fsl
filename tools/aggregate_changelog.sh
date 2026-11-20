@@ -467,14 +467,15 @@ validate_fragment_hygiene_all() {
 # 692-x.fixed.md is accepted. An empty body is left to the empty-fragment
 # checks, which name it more precisely.
 validate_fragment_lead() {
-  local dir="$1" f="$2" meta id cat body out
+  local dir="$1" f="$2" meta id cat body out lib
   meta="$(parse_fragment_name "$f")"
   id="${meta%%$'\t'*}"
   cat="${meta##*$'\t'}"
   body="$(trimmed_fragment_body "$dir/$f")"
   [ -z "$body" ] && return 0
+  lib="$(lead_awk_lib)"
   out="$(printf -- '- %s\n' "${body%%$'\n'*}" | awk -v cats="${DECLARED_CATEGORY_ORDER[*]}" \
-      -v file="$dir/$f" -v fid="$id" -v fcat="$cat" "$(lead_awk_lib)"'
+      -v file="$dir/$f" -v fid="$id" -v fcat="$cat" "$lib"'
     function invalid(lines,    n, r, k, tab) {
       n = split(lines, r, "\n")
       for (k = 1; k <= n; k++) {
@@ -1292,8 +1293,9 @@ AWK
 # (ids exclude `refs` lists). fold and the release-notes cross-check read
 # these leads instead of parsing the section a second way.
 check_section_body() {
-  local changelog="$1" version="$2" leads_out="${3:-}"
-  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" -v leads_out="$leads_out" "$(lead_awk_lib)"'
+  local changelog="$1" version="$2" leads_out="${3:-}" lib
+  lib="$(lead_awk_lib)"
+  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" -v leads_out="$leads_out" "$lib"'
     function report(code, msg) {
       printf "%s: [%s] %s:%d: %s\n", code, want, FILENAME, NR, msg
       bad++
@@ -3200,7 +3202,9 @@ selftest_fragment_lead() {
   }
   # shellcheck disable=SC2329  # invoked through st_expect_pass/st_expect_fail
   st_lead_check_pr() {  # $1 = repository, $2 = base sha
-    ( cd "$1" && BASE_SHA="$2" HEAD_SHA="$(git rev-parse HEAD)" "$SELF" check-pr )
+    local head
+    head="$(git -C "$1" rev-parse HEAD)"
+    ( cd "$1" && BASE_SHA="$2" HEAD_SHA="$head" "$SELF" check-pr )
   }
   local r="$tmp/pr" base
   base="$(st_lead_repo "$r" "9002-second-step.unified.md=Unified (#70, second step): something.")"
