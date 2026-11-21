@@ -14,7 +14,8 @@ state: on every state of a step in which no action instance is enabled, at
 each step until the first recorded deadlock, after the action partial
 operations of that step's own steps (#1961). An instance whose guard reaches a
 partial read is not enabled for this purpose (the symbolic read is
-unconstrained, so the guard can be false): below the depth that guard's own
+unconstrained, so the guard can be false; a guard that divides by zero is read
+with the totalized quotient instead): below the depth that guard's own
 `_partial_<action>` is reported first, and at the depth, where no action of
 the last step is checked, the state's terminal is consulted. A `reachable` is
 checked for `partial_op` on the states of each step until the step that

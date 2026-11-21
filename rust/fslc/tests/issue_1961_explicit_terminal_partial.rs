@@ -272,3 +272,33 @@ fn partial_guard_state_is_a_deadlock_at_depth_one() {
         assert_eq!(value["violated_at_step"], 1, "{engine}: {value:#}");
     }
 }
+
+/// A partial guard that BMC's encoding reads as `true` (division totalized)
+/// keeps its state alive at the depth: no terminal evaluation, no deadlock.
+#[test]
+fn totalized_partial_guard_keeps_the_state_alive_at_the_depth() {
+    let name = "issue_1961_partial_guard_totalized.fsl";
+    for engine in ["explicit", "auto", "bmc"] {
+        let output = fslc_cli::command()
+            .arg("verify")
+            .arg(fixture(name))
+            .args(["--engine", engine, "--depth", "0", "--deadlock", "error"])
+            .output()
+            .expect("run fslc verify");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let value: Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|error| panic!("{name} {engine}: not JSON ({error}): {stdout}"));
+        assert_eq!(output.status.code(), Some(0), "{engine}: {value:#}");
+        assert_eq!(value["result"], "verified", "{engine}: {value:#}");
+        assert_eq!(value["deadlock"]["found"], false, "{engine}: {value:#}");
+    }
+    for engine in ["explicit", "auto", "bmc"] {
+        assert_partial_at(
+            name,
+            Some("1"),
+            engine,
+            ("_partial_a", 1),
+            &json!({"x": 0, "q": []}),
+        );
+    }
+}

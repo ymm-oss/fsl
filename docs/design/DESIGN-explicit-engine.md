@@ -244,10 +244,13 @@ remaining differences are listed after the list.
   A `reachable` witnessed at an earlier level is not evaluated again (#1961).
 - **Deadlock** — a state with no enabled action instance, honoring
   `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior. An instance
-  whose guard reaches a partial operation does not keep a state alive: BMC
-  reads that partial read as an unconstrained value, so its deadlock query
-  can disable the guard. The checks of one level follow BMC's order at one
-  step (#1961):
+  whose guard reaches a partial operation keeps a state alive only if that
+  guard holds under BMC's encoding of the operation: `/` and `%` by zero are
+  totalized to zero there, and a partial Seq read is an unconstrained value
+  that BMC's deadlock query may choose. Explicit re-evaluates such a guard
+  with division totalized; `true` keeps the state alive, and `false` or a
+  partial Seq read leaves it dead. The checks of one level follow BMC's order
+  at one step (#1961):
   1. the state properties of the level (bounds and invariants, `trans` and
      `ensures` of the steps into it, and the partial operations of the
      `reachable`s still unwitnessed when the level starts);
@@ -267,8 +270,9 @@ remaining differences are listed after the list.
   reported. A terminal failure is therefore held until the level's stepping
   has found no action partial operation; while it is held the stepping
   expands no successor, so a state-budget stop cannot replace it. At the
-  depth there is no step 2, so a dead state whose only candidate is a
-  partial guard reports its terminal's partial operation, or its deadlock.
+  depth there is no step 2, so a dead state whose only candidates are
+  partial guards reports its terminal's partial operation, or its deadlock;
+  below the depth the guard's own `partial_op` comes first.
   Once a deadlock is recorded, neither engine evaluates the terminal at a
   later level.
 - **Vacuity/coverage** — an action never enabled anywhere explored, honoring
@@ -295,11 +299,12 @@ Known remaining differences from BMC (#1961):
   reports that error even when a later dead state of the level has a
   partial terminal; BMC asks for the partial terminal first and reports
   `partial_op`.
-- **A partial guard that cannot be disabled.** Explicit treats a state whose
-  only candidates are partial guards as dead. BMC does so only when some
-  value of the partial read disables every guard; for a guard such as
-  `q.head() == q.head()` it does not, and at the depth it reports nothing
-  where explicit reports the terminal's `partial_op` or the deadlock.
+- **A partial Seq read in a guard that cannot be false.** Explicit treats
+  such a guard as disabled. BMC's query disables it only when some value of
+  the read makes it false; for `requires done and q.head() == q.head()` with
+  `q` empty it does not, so at the depth BMC reports nothing where explicit
+  reports the terminal's `partial_op` or the deadlock. A stale value in a
+  Seq slot beyond the live prefix can also fix the guard in BMC.
 - **Where every engine is silent.** A terminal that is undefined only at a
   level after the first recorded deadlock (a `term_later` shape: a deadlock
   at step 1, an undefined terminal on a dead state at step 2) and a

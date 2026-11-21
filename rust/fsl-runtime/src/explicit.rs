@@ -264,15 +264,13 @@ pub fn verify_explicit_selected(
         // So at this level the terminal is evaluated on every dead state until
         // the first one whose evaluation fails, and that failure is held back
         // until the stepping below has found no action partial operation. A
-        // state is dead here when no instance is enabled: an instance whose
-        // guard reaches a partial operation does not keep it alive. BMC reads
-        // such a guard's partial operation as an unconstrained value (an
-        // unobservable Seq slot, DESIGN-seq-partial-operations.md), so its
-        // deadlock query can choose the value that disables the guard. Below
-        // the depth that guard's own `partial_op` is an action partial
-        // operation of the level and is reported first in both engines; at the
-        // depth, where BMC checks no action partial operation, the state is
-        // dead for its terminal and for its deadlock.
+        // state is dead here when no instance is enabled and no instance whose
+        // guard reaches a partial operation is enabled under BMC's reading of
+        // that guard (`partial_guard_may_be_disabled`). Below the depth such a
+        // guard's own `partial_op` is an action partial operation of the level
+        // and is reported first in both engines; at the depth, where BMC checks
+        // no action partial operation, the reading decides whether the state
+        // is dead for its terminal and for its deadlock.
         // Once a deadlock is recorded neither engine evaluates the terminal at
         // a later level.
         let check_terminals = result.deadlock_step.is_none();
@@ -304,7 +302,11 @@ pub fn verify_explicit_selected(
                     .expect("enabled action belongs to the model")
                     .enabled += 1;
             }
-            if enabled.is_empty() && check_terminals && terminal_failure.is_none() {
+            if enabled.is_empty()
+                && check_terminals
+                && terminal_failure.is_none()
+                && every_partial_guard_may_be_disabled(&scratch.model, state, &candidates)?
+            {
                 match terminal_holds_at(&scratch.model, state) {
                     Ok(true) => {}
                     Ok(false) => {
@@ -439,6 +441,41 @@ pub fn verify_explicit_selected(
 
     result.states_explored = seen.len();
     Ok(result)
+}
+
+/// Whether BMC's deadlock query can find every instance in `candidates`
+/// disabled, for a state where none is enabled. Each candidate is then a
+/// guard that reaches a partial operation, and BMC reads that guard with its
+/// symbolic encoding of the operation: `/` and `%` by zero are totalized to
+/// zero (DESIGN-divmod.md), and a partial Seq read is an unconstrained value
+/// (DESIGN-seq-partial-operations.md). So the guard is re-evaluated with
+/// division totalized: `true` keeps the state alive, `false` disables the
+/// instance, and a guard that still reaches a partial operation counts as
+/// disabled, the value BMC's query may choose. That last case is exact when
+/// some value of the read disables the guard, and otherwise reports a dead
+/// state that BMC does not (DESIGN-explicit-engine.md §4).
+fn every_partial_guard_may_be_disabled(
+    model: &KernelModel,
+    state: &State,
+    candidates: &[super::ActionCandidate],
+) -> Result<bool, RuntimeError> {
+    for candidate in candidates {
+        let instance = candidate.instance();
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == instance.action)
+            .expect("candidate action belongs to the model");
+        match with_total_division(|| {
+            super::evaluate_action_guards(action, &instance.params, state, model)
+        }) {
+            Ok(Some(_)) => return Ok(false),
+            Ok(None) => {}
+            Err(error) if super::is_partial_operation_error(&error) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(true)
 }
 
 /// The first failed terminal evaluation of a level, held back until the
