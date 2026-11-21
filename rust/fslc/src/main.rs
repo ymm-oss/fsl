@@ -21607,10 +21607,10 @@ mod mutate_explicit_first_tests {
     /// bounds-only model is not tried explicitly, so its BMC runs.
     #[test]
     fn wide_state_space_keeps_bounds_only_bmc() {
-        // 1 + 101 * 101 states through depth 1; the full-model attempt finds
+        // 16 * 16 * 16 states through depth 3; the full-model attempt finds
         // `Low` violated after the first step.
-        let wide = "spec Wide { type N = 0..100 state { a: N, b: N } init { a = 0 b = 0 } action set(x: N, y: N) { a = x b = y } invariant Low { a <= 99 } }";
-        let (main, calls, attempts) = main_route_attempts(wide, 1, MUTATION_EXPLICIT_BUDGET);
+        let wide = "spec Wide { type N = 0..15 state { a: N, b: N, c: N } init { a = 0 b = 0 c = 0 } action set_a(x: N) { a = x } action set_b(x: N) { b = x } action set_c(x: N) { c = x } invariant Low { a <= 14 } }";
+        let (main, calls, attempts) = main_route_attempts(wide, 3, MUTATION_EXPLICIT_BUDGET);
         assert_eq!(main.engine, "bmc");
         assert_eq!(main.outcome.killed_by(), Some("Low"));
         assert!(main.boundary_killer.is_none(), "{main:?}");
