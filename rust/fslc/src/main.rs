@@ -11488,7 +11488,10 @@ const BOUNDS_ONLY_EXPLICIT_PROBE_STATES: usize = 3_000;
 /// - full attempt complete with no violation (only a reachable left
 ///   unwitnessed): it already checked every bounds-only property on every
 ///   state within `depth`, so it certifies the bounds-only model as is.
-/// - otherwise (a violation, or unsupported, e.g. because of `leadsTo`,
+/// - full attempt stopped at an obligation the bounds-only model keeps
+///   ([`is_bounds_only_obligation`]): the attempt would reach the same
+///   violation at the same point, so it is not made.
+/// - otherwise (another violation, or unsupported, e.g. because of `leadsTo`,
 ///   which the bounds-only model drops): one budgeted attempt on the
 ///   bounds-only model when the probe walked at most
 ///   [`BOUNDS_ONLY_EXPLICIT_PROBE_STATES`] states, certifying only when it is
@@ -11511,6 +11514,10 @@ fn explicit_certifies_bounds_only(
         verification::ExplicitFirst::Ran(Err(_)) => false,
         verification::ExplicitFirst::Ran(Ok(result)) if result.budget_exceeded => false,
         verification::ExplicitFirst::Ran(Ok(result)) if certifies(result) => true,
+        verification::ExplicitFirst::Ran(Ok(fsl_runtime::ExplicitResult {
+            violation: Some(found),
+            ..
+        })) if is_bounds_only_obligation(&found.violation) => false,
         _ if explicit.probe_states > BOUNDS_ONLY_EXPLICIT_PROBE_STATES => false,
         _ => {
             #[cfg(test)]
@@ -11520,6 +11527,25 @@ fn explicit_certifies_bounds_only(
                 verification::ExplicitFirst::Ran(Ok(ref result)) if certifies(result)
             )
         }
+    }
+}
+
+/// Whether `violation` is one the bounds-only model also checks: an
+/// `ensures`, a type bound, or a partial operation in an action step or in
+/// the `terminal` condition (not one in an invariant, transition or
+/// reachable, which that model drops). A misread name only ever makes the
+/// caller attempt, or not attempt, an explicit run; it never certifies.
+fn is_bounds_only_obligation(violation: &fsl_runtime::Violation) -> bool {
+    match violation.kind.as_str() {
+        "ensures" | "type_bound" => true,
+        "partial_op" => matches!(
+            fsl_core::SyntheticName::parse_internal(&violation.name),
+            Some(
+                fsl_core::SyntheticName::PartialAction { .. }
+                    | fsl_core::SyntheticName::PartialTerminal
+            )
+        ),
+        _ => false,
     }
 }
 
@@ -21568,6 +21594,9 @@ mod mutate_explicit_first_tests {
     /// `leadsTo` keeps the full model out of the explicit engine; the
     /// bounds-only model drops it.
     const LEADS_TO: &str = "spec LeadsBack { type Small = 0..1 state { x: Small } init { x = 0 } action flip() { x = 1 - x } leadsTo Back { x == 1 ~> x == 0 } }";
+    /// Killed by the terminal condition, partial on the empty queue of the
+    /// one dead state; the boundary probe does not evaluate `terminal`.
+    const TERMINAL_PARTIAL_KILL: &str = "spec TerminalPartialKill { type J = 0..1 state { x: J, q: Seq<J, 2> } init { x = 0 q = Seq { } } action go() { requires x == 0 x = 1 } terminal { q.head() == 1 } }";
     /// Killed by `set`'s ensures, which the bounds-only model keeps; the
     /// boundary probe does not look at ensures.
     const ENSURES_KILL: &str = "spec EnsuresKill { type Small = 0..1 state { x: Small } init { x = 0 } action set() { requires x == 0 x = 1 ensures x == 0 } }";
@@ -21595,6 +21624,9 @@ mod mutate_explicit_first_tests {
 
     /// #1892: explicit certifies clean only. A violation on the bounds-only
     /// model leaves the bounds-only BMC to decide the kill and its label.
+    /// The full-model attempt already stopped at that obligation (`set`'s
+    /// ensures, the terminal condition's partial `q.head()`), so the
+    /// bounds-only model is not tried explicitly.
     #[test]
     fn bounds_only_violation_keeps_its_bmc() {
         let (main, calls, attempts) =
@@ -21605,7 +21637,16 @@ mod mutate_explicit_first_tests {
             matches!(main.boundary_killer, Some(BoundaryKiller::Violation { .. })),
             "{main:?}"
         );
-        assert_eq!((calls, attempts), (1, 1));
+        assert_eq!((calls, attempts), (1, 0));
+        let (main, calls, attempts) =
+            main_route_attempts(TERMINAL_PARTIAL_KILL, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("_partial_property_terminal"));
+        assert!(
+            matches!(main.boundary_killer, Some(BoundaryKiller::Violation { .. })),
+            "{main:?}"
+        );
+        assert_eq!((calls, attempts), (1, 0));
     }
 
     /// #1892: past [`BOUNDS_ONLY_EXPLICIT_PROBE_STATES`] probe states the
