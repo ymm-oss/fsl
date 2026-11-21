@@ -21444,6 +21444,58 @@ mod mutate_explicit_first_tests {
         assert!(main.outcome.is_clean());
         assert_eq!(calls, 0);
     }
+
+    /// #1961: `CZero` holds, and the terminal is undefined on the second dead
+    /// state of step 1 (`make_b` leaves `q` empty; the `make_a` state comes
+    /// first in frontier order). The boundary probe does not evaluate the
+    /// terminal, so the explicit run is what decides whether the route stops
+    /// at a clean certificate.
+    const TERM_MUT: &str = "spec TermMut {
+  type Job = 0..1
+  type Small = 0..1
+  state { a_first: Bool, c: Small, done: Bool, q: Seq<Job, 2> }
+  init { a_first = true c = 0 done = false q = Seq { } }
+  action make_a() {
+    requires not done
+    a_first = false
+    done = true
+    q = q.push(0)
+  }
+  action make_b() {
+    requires not done
+    done = true
+  }
+  invariant CZero { c == 0 }
+  terminal { q.head() == 1 }
+}";
+
+    /// `fslc mutate`'s mutant 12 of `TERM_MUT` (`integer_literal_plus1` on
+    /// the init `c = 0`): explicit-first runs, finds `CZero` violated, and
+    /// does not certify clean, so the bounds-only BMC model kills the mutant
+    /// with the partial terminal. A routing pin only: it passes before #1961
+    /// as well, because the `CZero` violation alone keeps the explicit run
+    /// from certifying clean. The discriminating test is
+    /// `issue_1961_partial_terminal_is_not_certified_clean`.
+    #[test]
+    fn issue_1961_mutant_12_is_killed_by_the_partial_terminal() {
+        let mutant = TERM_MUT.replace("c = 0 done", "c = 1 done");
+        assert_ne!(mutant, TERM_MUT);
+        let (main, calls) = main_route(&mutant, 8, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("_partial_property_terminal"));
+        assert_eq!(calls, 1);
+    }
+
+    /// A mutant on which `CZero` still holds: before #1961 the explicit run
+    /// closed without a violation and the route certified it clean
+    /// (`engine: explicit`) although its terminal is undefined at step 1.
+    #[test]
+    fn issue_1961_partial_terminal_is_not_certified_clean() {
+        let (main, calls) = main_route(TERM_MUT, 8, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("_partial_property_terminal"));
+        assert_eq!(calls, 1);
+    }
 }
 
 #[cfg(test)]

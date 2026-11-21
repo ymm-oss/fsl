@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 re-review): at step 1 the `k = 2` state's only candidate
+// is `g`, whose guard reads `q.head()` on an empty `q`; the `k = 1` state
+// steps into four new states. With `--explicit-budget 3` the explicit run
+// stops at the budget before stepping `g`. Below the depth that state is not
+// a deadlock (its guard's `_partial_g` comes first), so explicit reports
+// `unknown_budget` and auto falls back to BMC, which reports `_partial_g` at
+// step 2 under `--deadlock error`.
+spec BudgetDead {
+  type Job = 0..1
+  type K = 0..3
+  type N = 0..3
+  state { k: K, n: N, q: Seq<Job, 2> }
+  init { k = 0 n = 0 q = Seq { } }
+  action toA() { requires k == 0 k = 2 }
+  action toB() { requires k == 0 k = 1 }
+  action grow(v: N) { requires k == 1 n = v k = 3 }
+  action g() { requires k == 2 and q.head() == 0 k = 3 }
+}

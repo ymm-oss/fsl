@@ -222,8 +222,11 @@ obligation; expanding diagnostic sites does not change acceptance or verdicts.
 
 ## 4. Property semantics
 
-The engine checks the same property surface as `bmc.verify`, with identical
-verdict semantics:
+The engine checks the same property surface as `bmc.verify`. For every
+property below it reaches the same verdict as BMC at the same depth, except
+in the cases listed under "Known remaining differences" after the list, and
+it reports the failures of one level in BMC's order (see **Deadlock**), so
+the violation kind, name and step agree as well outside those cases.
 
 - **Invariants** — evaluated on every visited state (including initial
   states, level 0).
@@ -232,9 +235,58 @@ verdict semantics:
   unreached goals are reported exactly as BMC reports them at depth
   exhaustion. Under `proved` (closure), an unreached `reachable` is
   *definitively* unreachable — stronger than BMC's bounded "not reached within
-  depth" — and is reported as `reachable_failed`.
+  depth" — and is reported as `reachable_failed`. A `reachable` still
+  unwitnessed when a level starts is evaluated on every state of that
+  level, as BMC checks it over every state of a step before recording the
+  step's witnesses: a partial operation in it on any state of the level is a
+  `partial_op` (`_partial_property_<name>`), even when another state of the
+  same level witnesses it. The witness is the first state in frontier order.
+  A `reachable` witnessed at an earlier level is not evaluated again (#1961).
 - **Deadlock** — a state with no enabled action instance, honoring
-  `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior.
+  `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior. Below the
+  depth a state is dead when it has no candidate: an instance whose guard
+  reaches a partial operation is stepped into its action's `partial_op`,
+  which step 2 below reports first. At the depth such an instance keeps the
+  state alive only if its guard holds for every valuation BMC's deadlock
+  query can choose (`∃ v. ∀ i. ¬guard_i(v)` over the free terms of the
+  state's partial reads, one guard conjunction per instance): `/` and `%` by
+  zero are totalized to zero there, so they are not free, and a partial Seq
+  read is an unconstrained value of the solver sort, for an integer range
+  the unbounded integers rather than the element type. Explicit reads each
+  `requires` in three values with division totalized: the connectives,
+  `not` and conditionals combine their operands' values (Kleene's strong
+  logic), a comparison of an expression with itself is decided when both
+  sides read the same slots of a state Seq of positive capacity, and any
+  other expression is evaluated, a partial read making it unknown. A guard
+  shown true for every value keeps the state alive; otherwise the state is
+  dead. The checks of one level follow BMC's order at one step (#1961):
+  1. the state properties of the level (bounds and invariants, `trans` and
+     `ensures` of the steps into it, and the partial operations of the
+     `reachable`s still unwitnessed when the level starts);
+  2. below the depth, the action partial operations of the steps out of the
+     level (guards, bodies, `ensures`): explicit reports the first one found
+     in frontier order, then action declaration order; BMC goes action by
+     action in declaration order, each over all states of the step, so when
+     two actions have partial operations on different states the reported
+     name can differ (the kind and step agree);
+  3. while no deadlock is recorded, the terminal of every dead state of the
+     level, in frontier order, until the first evaluation that fails: a
+     partial operation is a `partial_op` (`_partial_property_terminal`) at
+     the level, any other failure is an error, and either wins over a
+     deadlock on another state of the level; otherwise the first dead
+     non-terminal state in frontier order is recorded as the deadlock;
+  4. the other violations of the steps out of the level (bounds, invariants,
+     `trans`, `ensures` of the next level), the first in frontier order.
+
+  Evaluation stops at the first partial operation or error that is
+  reported. A terminal failure is therefore held until the level's stepping
+  has found no action partial operation; while it is held the stepping
+  expands no successor, so a state-budget stop cannot replace it. At the
+  depth there is no step 2, so a dead state whose only candidates are
+  partial guards reports its terminal's partial operation, or its deadlock;
+  below the depth the guard's own `partial_op` comes first.
+  Once a deadlock is recorded, neither engine evaluates the terminal at a
+  later level.
 - **Vacuity/coverage** — an action never enabled anywhere explored, honoring
   `--vacuity` the same way BMC does. Under closure this too is definitive.
 - **Action execution profile** — records how often enabled action instances
@@ -245,6 +297,68 @@ verdict semantics:
   fail-closed (kind `semantics`) unless the property is excluded from the run;
   the error steers the user to `--engine bmc` for the bounded lasso/stutter
   check.
+
+Known remaining differences from BMC (#1961):
+
+- **Order within one check.** Where one check finds several failures in
+  one level, explicit reports the first in frontier order and BMC the first
+  in its query order, which goes by property kind (bounds, then invariants,
+  then `trans` and `ensures`) and then by solver choice. The verdict agrees;
+  the name can differ. The same holds for an unchecked Seq overflow beside a
+  violation (see "Selected bounds and witness replay").
+- **A non-partial terminal error.** If the first failing terminal in
+  frontier order fails for a reason other than a partial operation, explicit
+  reports that error even when a later dead state of the level has a
+  partial terminal; BMC asks for the partial terminal first and reports
+  `partial_op`.
+- **A partial-guard state at the depth that BMC keeps alive.** The
+  three-valued reading counts a state as dead unless one guard is shown true
+  for every value of its reads, and it stops at an instance's first
+  `requires` that is not `True` or its first partial `let`. BMC keeps the
+  state alive also when a guard is true for every value but the reading
+  cannot show it. At the depth explicit then reports the terminal's
+  `partial_op` or the deadlock and BMC reports nothing, for example:
+  - a partial `let` read later in a tautology (a `letpartial` shape:
+    `let h = q.head()` then `requires h == h`, after a `pop` empties `q`);
+  - a division over a partial read (a `divread` shape: `q.head() / z == 0`
+    at `z = 0`, which BMC's totalized quotient makes `0 == 0`);
+  - a conditional whose branches agree only per value (a `condg2` shape:
+    `if q.head() == 1 then q.head() == 1 else q.head() != 1`);
+  - guards that are each falsifiable but never all false together (a
+    `twoinst` shape: `q.head() == 1` on one action, `q.head() != 1` on
+    another), or a disjunction such as `q.head() >= 0 or q.head() < 0`.
+
+  This is the one remaining difference in the dead-state decision, and it
+  errs toward reporting; no finite enumeration of the read is exact, because
+  BMC's read ranges over the unbounded integers.
+- **The default BMC route's boundary pre-pass.** `--engine bmc` (and the
+  default engine) first runs the concrete boundary probe
+  (`probe_bmc_boundary` in `rust/fslc/src/verification.rs`), which reports
+  the first successor `partial_op` or `type_bound` it reaches in its own
+  breadth-first order, before BMC proper and so before BMC's per-step order
+  of action partial operations and terminals. With the bound of a Seq
+  checked, explicit can then name a different violation: in an `h6` shape
+  without `--property`, explicit reports `_partial_crash` at step 2 and the
+  BMC route `type_bound` `_bounds_q` at step 2 (base explicit agreed with
+  the BMC route there); in an `h4` shape explicit reports the terminal's
+  `partial_op` at step 1 and the BMC route `_bounds_q` at step 2, as on
+  base. The verdict is `violated` in every engine.
+- **An unchecked Seq overflow while expanding** (seed). When nothing is
+  held, an unchecked Seq overflow on a successor fails the run (exit 2,
+  `model sequence length exceeds capacity`) as soon as it is met, even if a
+  later state of the level has an action partial operation that BMC reports
+  first (an `h6` shape: `_partial_crash` at step 2 in BMC). Not green.
+- **Coverage at the depth** (seed). Action coverage and `--vacuity` use the
+  concrete enabledness, not the totalized guard: for `requires done and
+  5 / z == 0` at `z = 0` (a `div_true` shape, `--depth 1 --vacuity error`)
+  explicit reports `never_enabled_action` (exit 2) where BMC, whose guard
+  reads the totalized quotient, reports `verified`.
+- **Where every engine is silent.** A terminal that is undefined only at a
+  level after the first recorded deadlock (a `term_later` shape: a deadlock
+  at step 1, an undefined terminal on a dead state at step 2) and a
+  `reachable` that is undefined only on a state after the level that
+  witnessed it (a `witnessed` shape) are reported by no engine, by the rules
+  above.
 
 ### Selected bounds and witness replay (#1531)
 

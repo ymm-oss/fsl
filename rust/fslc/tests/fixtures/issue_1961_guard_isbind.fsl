@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 third pass): `g`'s first `requires` reads `q.head()` on an
+// empty `q` and binds `v` through `o is some(v)`; the second reads `v`. The
+// first is undecided under explicit's three-valued reading and binds nothing,
+// so the reading stops there instead of evaluating `v == 0`. At `--depth 1`
+// every engine reports `_partial_property_terminal` at step 1.
+spec IsBind {
+  type Job = 0..1
+  state { done: Bool, o: Option<Job>, q: Seq<Job, 2> }
+  init { done = false o = some(0) q = Seq { } }
+  action a() { requires not done done = true }
+  action g() { requires done and q.head() == 1 and o is some(v) requires v == 0 done = true }
+  terminal { q.head() == 1 }
+}

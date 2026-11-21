@@ -623,3 +623,164 @@ fn explicit_violation_trace_replays_through_the_monitor() {
     assert_eq!(violation.violation.step, 2);
     fsl_runtime::replay_trace(model, &violation.trace).expect("replay explicit trace");
 }
+
+fn issue_1961_fixture(name: &str) -> fsl_core::KernelModel {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fslc/tests/fixtures")
+        .join(name);
+    let source = std::fs::read_to_string(&path).expect("read #1961 fixture");
+    build_model(parse_kernel_source(&source, &FsResolver::new(".")).expect("parse kernel"))
+        .expect("build model")
+}
+
+fn last_state(trace: &[fsl_core::TraceStep]) -> &fsl_core::FslValue {
+    trace
+        .last()
+        .and_then(|step| step.state.get("q"))
+        .expect("trace ends in a state with q")
+}
+
+/// #1961: a dead state whose terminal is undefined is a `partial_op` even
+/// when a dead non-terminal state comes before it in the same level. Before
+/// the fix the first dead state recorded the deadlock and the later one was
+/// never evaluated, so the run closed as `proved` with a deadlock.
+#[test]
+fn issue_1961_partial_terminal_on_a_later_dead_state_of_the_level() {
+    for name in [
+        "issue_1961_terminal_partial_second.fsl",
+        "issue_1961_terminal_partial_first.fsl",
+    ] {
+        let result = fsl_runtime::verify_explicit(issue_1961_fixture(name), 8, 100)
+            .expect("explicit verification");
+        let violation = result
+            .violation
+            .unwrap_or_else(|| panic!("{name}: expected a partial terminal"));
+        assert_eq!(violation.violation.kind, "partial_op", "{name}");
+        assert_eq!(
+            violation.violation.name, "_partial_property_terminal",
+            "{name}"
+        );
+        assert_eq!(violation.violation.step, 1, "{name}");
+        assert_eq!(
+            last_state(&violation.trace),
+            &FslValue::Seq(Vec::new()),
+            "{name}: the reported state is the one with the undefined terminal"
+        );
+        // BMC records no deadlock at the step whose terminal is partial.
+        assert_eq!(result.deadlock_step, None, "{name}");
+        assert_eq!(result.deadlock_trace, None, "{name}");
+    }
+}
+
+/// #1961 control: when every dead state of the level has a defined terminal,
+/// the deadlock is still the first dead non-terminal state in frontier order.
+#[test]
+fn issue_1961_deadlock_trace_is_still_the_first_dead_state() {
+    let model = model(
+        "spec TwoDead { type Job = 0..1 \
+         state { a_first: Bool, done: Bool, q: Seq<Job, 2> } \
+         init { a_first = true done = false q = Seq { } } \
+         action make_a() { requires not done a_first = false done = true q = q.push(0) } \
+         action make_b() { requires not done done = true q = q.push(1) } \
+         terminal { q.size() == 2 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 8, 100).expect("explicit verification");
+    assert!(result.violation.is_none(), "{result:?}");
+    assert_eq!(result.deadlock_step, Some(1));
+    let trace = result.deadlock_trace.expect("deadlock trace");
+    assert_eq!(
+        last_state(&trace),
+        &FslValue::Seq(vec![FslValue::Int(0)]),
+        "the a_first = false state comes first in frontier order"
+    );
+}
+
+/// #1961, `reachable`: a witness on the first state of a level does not stop
+/// the reachable from being checked for a partial operation on the later
+/// states of that level, as BMC checks every unwitnessed reachable over all
+/// states of a step before it records the step's witnesses.
+#[test]
+fn issue_1961_partial_reachable_after_a_witness_in_the_same_level() {
+    let result = fsl_runtime::verify_explicit(
+        issue_1961_fixture("issue_1961_reachable_partial_second.fsl"),
+        8,
+        100,
+    )
+    .expect("explicit verification");
+    let violation = result.violation.expect("expected a partial reachable");
+    assert_eq!(violation.violation.kind, "partial_op");
+    assert_eq!(violation.violation.name, "_partial_property_R");
+    assert_eq!(violation.violation.step, 1);
+    assert_eq!(
+        last_state(&violation.trace),
+        &FslValue::Seq(vec![FslValue::Int(1)])
+    );
+}
+
+/// #1961 control: a reachable witnessed at an earlier level is not evaluated
+/// again (BMC drops it from its pending set), so a later state where it is
+/// undefined is not a violation, and its witness stays the first one.
+#[test]
+fn issue_1961_reachable_witnessed_at_an_earlier_level_is_not_rechecked() {
+    let model = model(
+        "spec Witnessed { type Job = 0..1 type Idx = 0..1 \
+         state { i: Idx, q: Seq<Job, 2> } init { i = 0 q = Seq { 0 } } \
+         action move() { requires i == 0 i = 1 } \
+         action stay() { requires i == 1 i = 1 } \
+         reachable R { q.at(i) == 0 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 8, 100).expect("explicit verification");
+    assert!(result.violation.is_none(), "{result:?}");
+    let witness = result.reachables["R"].as_ref().expect("R witnessed");
+    assert_eq!(witness.step, 0);
+}
+
+/// #1961 (#1962 review): a terminal failure held back for the level's
+/// stepping is still reported when that stepping would reach the state
+/// budget. At step 1 the `b` state's terminal is undefined and the `c` state
+/// steps to a fifth state; with a budget of four states the run must report
+/// the partial terminal, not stop at the budget.
+#[test]
+fn issue_1961_held_terminal_failure_is_reported_at_the_state_budget() {
+    let source = "spec TermBudget { type Job = 0..1 type K = 0..3 \
+         state { done: Bool, k: K, q: Seq<Job, 2> } \
+         init { done = false k = 0 q = Seq { } } \
+         action a() { requires not done k = 1 done = true q = q.push(0) } \
+         action b() { requires not done k = 2 done = true } \
+         action c() { requires not done k = 3 done = true q = q.push(1) } \
+         action grow() { requires done and k == 3 k = 0 } \
+         terminal { q.head() == 1 } }";
+    let unbounded = fsl_runtime::verify_explicit(model(source), 8, 100).expect("explicit");
+    assert!(unbounded.violation.is_some(), "{unbounded:?}");
+    let result = fsl_runtime::verify_explicit(model(source), 8, 4).expect("explicit");
+    assert!(!result.budget_exceeded, "{result:?}");
+    let violation = result.violation.expect("partial terminal");
+    assert_eq!(violation.violation.kind, "partial_op");
+    assert_eq!(violation.violation.name, "_partial_property_terminal");
+    assert_eq!(violation.violation.step, 1);
+}
+
+/// #1961 (#1962 review): a reachable still pending at a level is evaluated
+/// on every state of the level, and its witness is the first state in
+/// frontier order that satisfies it, not a later one of the same level.
+/// At step 1 the states are `k = 1`, `k = 2`, `k = 3` in that order.
+#[test]
+fn issue_1961_reachable_witness_is_the_first_state_of_the_level() {
+    let model = model(
+        "spec TwoWitness { type K = 0..3 state { done: Bool, k: K } \
+         init { done = false k = 0 } \
+         action a() { requires not done k = 1 done = true } \
+         action b() { requires not done k = 2 done = true } \
+         action c() { requires not done k = 3 done = true } \
+         action idle() { requires done done = true } \
+         reachable R { k >= 1 } reachable S { k >= 2 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 8, 100).expect("explicit verification");
+    assert!(result.violation.is_none(), "{result:?}");
+    for (name, k) in [("R", 1), ("S", 2)] {
+        let witness = result.reachables[name].as_ref().expect("witnessed");
+        assert_eq!(witness.step, 1, "{name}");
+        let last = witness.trace.last().expect("witness trace");
+        assert_eq!(last.state.get("k"), Some(&FslValue::Int(k)), "{name}");
+    }
+}

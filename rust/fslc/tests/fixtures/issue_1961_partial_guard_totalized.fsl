@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 review): in the initial state `a`'s guard divides by
+// zero. BMC reads the guard with division totalized (`2 / 0 == 0` holds), so
+// at `--depth 0` the state is alive: no engine evaluates its undefined
+// terminal or reports a deadlock. At `--depth 1` the guard's own `_partial_a`
+// at step 1 is reported.
+spec DivideTerm {
+  type Job = 0..1
+  type Small = 0..3
+  state { x: Small, q: Seq<Job, 2> }
+  init { x = 0 q = Seq { } }
+  action a() { requires 2 / x == 0 x = 1 }
+  terminal { q.head() == 1 }
+}

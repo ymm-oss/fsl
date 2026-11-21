@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961: both successors of the initial state are dead at step 1.
+// After `make_a` the terminal is defined and false (`q == [0]`); after
+// `make_b` `q` is empty and `q.head()` is undefined. `a_first` puts the
+// `make_a` state first in the explicit engine's frontier order, so the
+// partial terminal is on the second dead state of the level. Every engine
+// must report `partial_op` `_partial_property_terminal` at step 1.
+spec TermPartial {
+  type Job = 0..1
+  state { a_first: Bool, done: Bool, q: Seq<Job, 2> }
+  init { a_first = true done = false q = Seq { } }
+  action make_a() {
+    requires not done
+    a_first = false
+    done = true
+    q = q.push(0)
+  }
+  action make_b() {
+    requires not done
+    done = true
+  }
+  terminal { q.head() == 1 }
+}

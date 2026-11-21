@@ -10,7 +10,22 @@ prefix, every engine reports `partial_op`. Action context names
 `_partial_<action>`; invariant, transition, reachable, and `leadsTo` property
 context names `_partial_property_<property>`. An undefined `terminal`
 predicate is `_partial_property_terminal` when it is consulted for a deadlock
-state.
+state: on every state of a step in which no action instance is enabled, at
+each step until the first recorded deadlock, after the action partial
+operations of that step's own steps (#1961). Below the depth an instance whose
+guard reaches a partial read is stepped into its own `_partial_<action>`, which
+is reported first. At the depth, where no action of the last step is checked,
+BMC reads the partial read as an unconstrained value (and a division by zero
+as the totalized quotient), so such an instance keeps the state alive exactly
+when its guard is true for every value of the read; the state's terminal is
+consulted only when the read can make every guard false at once. Explicit
+decides this with a three-valued reading of the guard and consults the
+terminal also in the cases it cannot show a guard true for every value
+([DESIGN-explicit-engine.md](DESIGN-explicit-engine.md) §4). A `reachable` is
+checked for `partial_op` on the states of each step until the step that
+witnesses it, and a `terminal` is not consulted after the first recorded
+deadlock, so a partial read only beyond those points is reported by no
+engine ([DESIGN-explicit-engine.md](DESIGN-explicit-engine.md) §4).
 
 This is distinct from the existing `/` and `%` contract: division and
 remainder by zero remain totalized to zero in property context and remain

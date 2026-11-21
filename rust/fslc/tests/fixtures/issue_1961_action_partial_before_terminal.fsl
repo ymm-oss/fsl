@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 review): at step 1 the `a` state is dead with a defined
+// false terminal, the `b` state is dead with an undefined terminal
+// (`q.head()` on an empty `q`), and from the `c` state `crash` reaches
+// `q.head()` on an empty `q`. BMC checks the action partial operations of a
+// step before its terminal, so every engine reports `partial_op` `_partial_crash`
+// at step 2; at `--depth 1`, where no action of step 1 is checked, every engine
+// reports `_partial_property_terminal` at step 1.
+spec Order3 {
+  type Job = 0..1
+  type K = 0..3
+  state { done: Bool, k: K, q: Seq<Job, 2> }
+  init { done = false k = 0 q = Seq { } }
+  action a() { requires not done k = 1 done = true q = q.push(0) }
+  action b() { requires not done k = 2 done = true }
+  action c() { requires not done k = 3 done = true }
+  action crash() { requires done and k == 3 q = q.push(q.head()) }
+  terminal { q.head() == 1 }
+}

@@ -213,6 +213,17 @@ pub fn verify_explicit_selected(
         result.depth_reached = level;
         result.max_frontier_width = result.max_frontier_width.max(frontier.len());
 
+        // The reachables still unwitnessed when the level starts. BMC checks
+        // each of them for a partial operation over every state of the step
+        // before it records the step's witnesses (`check_state_properties_in`,
+        // then `record_reachables`), so a witness on one state of this level
+        // does not stop the others from being checked.
+        let pending = scratch
+            .model
+            .reachables
+            .iter()
+            .map(|property| result.reachables[&property.name].is_none())
+            .collect::<Vec<_>>();
         for (state, id) in &frontier {
             if (*id == root || !admits_stored)
                 && let Some(violation) =
@@ -224,9 +235,14 @@ pub fn verify_explicit_selected(
                 });
                 return Ok(result);
             }
-            if let Some(violation) =
-                record_reachables(&scratch.model, state, *id, level, &seen, &mut result)?
-            {
+            if let Some(violation) = record_reachables(
+                &scratch.model,
+                &pending,
+                (state, *id),
+                level,
+                &seen,
+                &mut result,
+            )? {
                 result.violation = Some(ExplicitViolation {
                     trace: seen.trace(*id),
                     violation,
@@ -235,11 +251,34 @@ pub fn verify_explicit_selected(
             }
         }
 
+        // BMC's order at one step k (`bmc.rs`, `verify_bounded_config`, #1961):
+        // the state properties of k, then the action partial operations of
+        // the instances leaving k (guards, bodies, `ensures`; only when
+        // k < depth), then, while no deadlock is recorded, the `deadlock`
+        // query: a dead state whose terminal reaches a partial operation, then
+        // one whose terminal is otherwise undefined (an error), then a dead
+        // non-terminal state, which is recorded as the deadlock. The other
+        // checks of a step from k (bounds, invariants, `trans`, `ensures`)
+        // belong to the state properties of k + 1, after all of that.
+        //
+        // So at this level the terminal is evaluated on every dead state until
+        // the first one whose evaluation fails, and that failure is held back
+        // until the stepping below has found no action partial operation.
+        // Below the depth a state is dead when it has no candidate; at the
+        // depth, where BMC checks no action partial operation, a state whose
+        // only candidates are guards reaching a partial operation is dead when
+        // BMC's reading of those guards can disable them all
+        // (`every_partial_guard_may_be_disabled`).
+        // Once a deadlock is recorded neither engine evaluates the terminal at
+        // a later level.
+        let check_terminals = result.deadlock_step.is_none();
+        let mut level_deadlock = None;
+        let mut terminal_failure = None;
         let mut enabled_by_state = Vec::with_capacity(frontier.len());
         for (state, id) in &frontier {
             // A guard that reaches a partial operation is neither enabled nor
             // disabled: it is stepped below into that action's `partial_op`
-            // (#1191), and it keeps this state from being a deadlock.
+            // (#1191).
             let candidates = scratch.candidates_at(state)?;
             let enabled = candidates
                 .iter()
@@ -261,53 +300,75 @@ pub fn verify_explicit_selected(
                     .expect("enabled action belongs to the model")
                     .enabled += 1;
             }
-            if candidates.is_empty() && result.deadlock_step.is_none() {
-                let terminal = match terminal_holds_at(&scratch.model, state) {
-                    Ok(value) => value,
-                    Err(error) if super::is_partial_operation_error(&error) => {
-                        result.violation = Some(ExplicitViolation {
-                            trace: seen.trace(*id),
-                            violation: Violation {
-                                kind: "partial_op".to_owned(),
-                                name: fsl_core::SyntheticName::PartialTerminal.internal(),
-                                step: level,
-                            },
-                        });
-                        return Ok(result);
+            // Below the depth a partial-guard candidate is stepped into its
+            // action's `partial_op`, which is reported before anything this
+            // state's terminal or deadlock could give, unless a state-budget
+            // stop comes first; so there only a state without candidates is
+            // dead, as before #1961. At the depth BMC's reading decides.
+            let dead = if level < depth {
+                candidates.is_empty()
+            } else {
+                enabled.is_empty()
+                    && every_partial_guard_may_be_disabled(&scratch.model, state, &candidates)?
+            };
+            if dead && check_terminals && terminal_failure.is_none() {
+                match terminal_holds_at(&scratch.model, state) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        if level_deadlock.is_none() {
+                            level_deadlock = Some(*id);
+                        }
                     }
-                    Err(error) => return Err(error),
-                };
-                if !terminal {
-                    result.deadlock_step = Some(level);
-                    result.deadlock_trace = Some(seen.trace(*id));
+                    Err(error) if super::is_partial_operation_error(&error) => {
+                        terminal_failure = Some(TerminalFailure::Partial(*id));
+                    }
+                    Err(error) => terminal_failure = Some(TerminalFailure::Error(error)),
                 }
             }
             enabled_by_state.push(candidates);
         }
 
         if level == depth {
+            if let Some(failure) = terminal_failure {
+                return report_terminal_failure(result, failure, &seen, level);
+            }
+            record_deadlock(&mut result, level_deadlock, &seen, level);
             break;
         }
 
+        // After a held terminal failure or a stepped violation that is not an
+        // action partial operation, the stepping only looks for an action
+        // partial operation of this level: it expands no successor, and an
+        // error or an unchecked Seq overflow on a later instance belongs to a
+        // later check than the one already held.
+        let mut held_violation = None;
+        let mut expanding = terminal_failure.is_none();
         let mut next = Vec::new();
         for ((state, id), candidates) in frontier.iter().zip(&enabled_by_state) {
             for candidate in candidates {
                 let instance = candidate.instance();
-                let stepped = scratch.step_enumerated(
+                let stepped = match scratch.step_enumerated(
                     state,
                     level,
                     candidate,
                     checked_bounds,
                     &mut |next| admits_stored && seen.id_of(next).is_some_and(|id| id != root),
-                )?;
+                ) {
+                    Ok(stepped) => stepped,
+                    Err(_) if !expanding => continue,
+                    Err(error) => return Err(error),
+                };
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.
                 let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
                 for (name, ty) in &scratch.model.state {
-                    if checked_bounds.is_some_and(|selected| {
-                        !selected
-                            .contains(&fsl_core::SyntheticName::Bounds { state: name }.internal())
-                    }) && let TypeRef::Seq(_, capacity) = ty
+                    if expanding
+                        && checked_bounds.is_some_and(|selected| {
+                            !selected.contains(
+                                &fsl_core::SyntheticName::Bounds { state: name }.internal(),
+                            )
+                        })
+                        && let TypeRef::Seq(_, capacity) = ty
                         && let Some(Value::Seq(values)) = after.get(name)
                         && values.len() > *capacity
                     {
@@ -317,12 +378,22 @@ pub fn verify_explicit_selected(
                 if let Some(violation) = stepped.violation {
                     // The Monitor rolls back on violation (`state` is the pre-step
                     // state); the trace must show the attempted post-state.
-                    let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
                     let mut trace = seen.trace(*id);
                     trace.push(edge_trace_step(level + 1, state, instance, after));
-                    result.depth_reached = level + 1;
-                    result.violation = Some(ExplicitViolation { violation, trace });
-                    return Ok(result);
+                    let found = ExplicitViolation { violation, trace };
+                    if is_action_partial(&found.violation, &instance.action) {
+                        result.depth_reached = level + 1;
+                        result.violation = Some(found);
+                        return Ok(result);
+                    }
+                    if expanding {
+                        held_violation = Some(found);
+                        expanding = false;
+                    }
+                    continue;
+                }
+                if !expanding {
+                    continue;
                 }
                 let child_state = stepped.state;
                 // A frontier state is unique and `Monitor::enabled` enumerates
@@ -346,6 +417,7 @@ pub fn verify_explicit_selected(
                 ) {
                     Admission::Stored => {}
                     Admission::Full => {
+                        record_deadlock(&mut result, level_deadlock, &seen, level);
                         result.states_explored = seen.len();
                         result.budget_exceeded = true;
                         return Ok(result);
@@ -353,6 +425,15 @@ pub fn verify_explicit_selected(
                     Admission::New(child) => next.push((child_state, child)),
                 }
             }
+        }
+        if let Some(failure) = terminal_failure {
+            return report_terminal_failure(result, failure, &seen, level);
+        }
+        record_deadlock(&mut result, level_deadlock, &seen, level);
+        if let Some(found) = held_violation {
+            result.depth_reached = level + 1;
+            result.violation = Some(found);
+            return Ok(result);
         }
         result.states_explored = seen.len();
         if next.is_empty() {
@@ -367,17 +448,301 @@ pub fn verify_explicit_selected(
     Ok(result)
 }
 
-fn record_reachables(
+/// Whether BMC's deadlock query can find every instance in `candidates`
+/// disabled, for a state at the depth where none is enabled. Each candidate
+/// is then a guard that reaches a partial operation.
+///
+/// BMC's query (`bmc.rs`, the `deadlock` query over `enabled_terms`, whose
+/// terms are each instance's guard conjunction from `action_guards_in`) asks
+/// whether some valuation of its free terms makes every instance's guard
+/// false: `∃ v. ∀ i. ¬guard_i(v)`. For a fixed state the free terms are the
+/// values its partial reads produce: `/` and `%` by zero are totalized to zero
+/// (DESIGN-divmod.md), so they are not free, and a partial Seq read is an
+/// unconstrained value of the solver sort (an unobservable slot,
+/// DESIGN-seq-partial-operations.md; for an integer range that sort is the
+/// unbounded integers, so the read is not limited to the element type).
+///
+/// So each guard is read in three values ([`guard_truth`]), with division
+/// totalized and every partial Seq read unknown: a guard that is `true` for
+/// every value of its reads keeps the state alive, as it does in BMC
+/// (`∀ v. guard_i(v)` implies `∀ v. ∃ i. guard_i(v)`). Every other state
+/// counts as dead. That is exact when the reads can disable every guard at
+/// once, and otherwise reports a dead state that BMC does not: a guard that
+/// is true for every value but not shown to be so by the three-valued
+/// reading, or instances that are each falsifiable but never all false
+/// together (DESIGN-explicit-engine.md §4).
+fn every_partial_guard_may_be_disabled(
     model: &KernelModel,
     state: &State,
-    id: usize,
+    candidates: &[super::ActionCandidate],
+) -> Result<bool, RuntimeError> {
+    for candidate in candidates {
+        let instance = candidate.instance();
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == instance.action)
+            .expect("candidate action belongs to the model");
+        let truth =
+            with_total_division(|| instance_guard_truth(action, &instance.params, state, model))?;
+        if truth == Truth::True {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// A guard's value for every value of its partial Seq reads: always true,
+/// always false, or not decided by the three-valued reading.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Truth {
+    True,
+    False,
+    Unknown,
+}
+
+impl Truth {
+    fn from_bool(value: bool) -> Self {
+        if value { Self::True } else { Self::False }
+    }
+
+    fn not(self) -> Self {
+        match self {
+            Self::True => Self::False,
+            Self::False => Self::True,
+            Self::Unknown => Self::Unknown,
+        }
+    }
+
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::False, _) | (_, Self::False) => Self::False,
+            (Self::True, Self::True) => Self::True,
+            _ => Self::Unknown,
+        }
+    }
+
+    fn or(self, other: Self) -> Self {
+        self.not().and(other.not()).not()
+    }
+}
+
+/// An instance's guards, in order, as BMC's conjunction reads them: a `let`
+/// whose value is a partial read, or a `requires` that is not `True`, ends the
+/// reading (a later guard can read names only an undecided guard binds).
+fn instance_guard_truth(
+    action: &fsl_core::ActionDef,
+    params: &Bindings,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Truth, RuntimeError> {
+    let mut bindings = params.clone();
+    for guard in &action.guards {
+        match guard {
+            fsl_core::ActionGuard::Let(name, expression) => {
+                match eval(expression, state, &mut bindings, model, None) {
+                    Ok(value) => {
+                        bindings.insert(name.clone(), value);
+                    }
+                    Err(error) if super::is_partial_operation_error(&error) => {
+                        return Ok(Truth::Unknown);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            fsl_core::ActionGuard::Requires(expression) => {
+                match guard_truth(expression, state, &mut bindings, model)? {
+                    Truth::True => {}
+                    // An undecided `requires` may not have bound the pattern
+                    // names a later guard reads, so the instance stays
+                    // undecided there; only `True` keeps a state alive.
+                    undecided => return Ok(undecided),
+                }
+            }
+        }
+    }
+    Ok(Truth::True)
+}
+
+/// One `requires` expression read in three values. The connectives, `not`
+/// and conditionals combine their operands' values (Kleene's strong logic),
+/// so an operand that does not decide the result may be unknown; a
+/// comparison of an expression with itself is decided when both sides read
+/// the same slots, as BMC's terms then are equal ([`reads_the_same_slots`]);
+/// any other expression is evaluated, and a partial operation makes it
+/// unknown. A connective that may bind a pattern name is evaluated whole.
+fn guard_truth(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+) -> Result<Truth, RuntimeError> {
+    match expr {
+        Expr::Binary { op, left, right }
+            if super::is_connective(op) && !super::connective_may_bind(expr) =>
+        {
+            let left = guard_truth(left, state, bindings, model)?;
+            match (op.as_str(), left) {
+                ("and", Truth::False) => return Ok(Truth::False),
+                ("or", Truth::True) | ("=>", Truth::False) => return Ok(Truth::True),
+                _ => {}
+            }
+            let right = guard_truth(right, state, bindings, model)?;
+            Ok(match op.as_str() {
+                "and" => left.and(right),
+                "or" => left.or(right),
+                _ => left.not().or(right),
+            })
+        }
+        Expr::Not(inner) => Ok(guard_truth(inner, state, bindings, model)?.not()),
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => match guard_truth(condition, state, bindings, model)? {
+            Truth::True => guard_truth(then_expr, state, bindings, model),
+            Truth::False => guard_truth(else_expr, state, bindings, model),
+            Truth::Unknown => {
+                let then_truth = guard_truth(then_expr, state, bindings, model)?;
+                let else_truth = guard_truth(else_expr, state, bindings, model)?;
+                Ok(if then_truth == else_truth {
+                    then_truth
+                } else {
+                    Truth::Unknown
+                })
+            }
+        },
+        Expr::Binary { op, left, right }
+            if matches!(op.as_str(), "==" | "!=" | "<=" | ">=")
+                && left == right
+                && reads_the_same_slots(left, bindings, model) =>
+        {
+            match eval(left, state, bindings, model, None) {
+                Err(error) if super::is_partial_operation_error(&error) => {
+                    Ok(Truth::from_bool(op != "!="))
+                }
+                _ => guard_leaf(expr, state, bindings, model),
+            }
+        }
+        _ => guard_leaf(expr, state, bindings, model),
+    }
+}
+
+fn guard_leaf(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+) -> Result<Truth, RuntimeError> {
+    match super::eval_with_bindings(expr, state, bindings, model, None) {
+        Ok(value) => super::as_bool(value).map(Truth::from_bool),
+        Err(error) if super::is_partial_operation_error(&error) => Ok(Truth::Unknown),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether two evaluations of `expr` read the same symbolic slots in BMC, so
+/// that `expr == expr` holds there whatever the slots hold. That holds for
+/// reads of state Seqs with a positive capacity, whose slots are state
+/// terms; a capacity-zero Seq and a Seq literal have no slot to read and get
+/// a fresh unconstrained term for each read (DESIGN-seq-partial-operations.md,
+/// "Capacity-zero Seqs"). Only a narrow syntax is accepted; anything else
+/// answers `false`, and the comparison is then evaluated like any other.
+fn reads_the_same_slots(expr: &Expr, bindings: &Bindings, model: &KernelModel) -> bool {
+    match expr {
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => true,
+        Expr::Var(name) => match bindings.get(name) {
+            Some(value) => !matches!(value, Value::Seq(_)),
+            None => model.state.iter().any(|(state, ty)| {
+                state == name
+                    && (matches!(ty, TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _))
+                        || matches!(ty, TypeRef::Seq(_, capacity) if *capacity > 0))
+            }),
+        },
+        Expr::Some(inner) | Expr::Neg(inner) | Expr::Not(inner) | Expr::Field(inner, _) => {
+            reads_the_same_slots(inner, bindings, model)
+        }
+        Expr::Index(left, right) | Expr::Binary { left, right, .. } => {
+            reads_the_same_slots(left, bindings, model)
+                && reads_the_same_slots(right, bindings, model)
+        }
+        Expr::Method { receiver, args, .. } => {
+            reads_the_same_slots(receiver, bindings, model)
+                && args
+                    .iter()
+                    .all(|arg| reads_the_same_slots(arg, bindings, model))
+        }
+        _ => false,
+    }
+}
+
+/// The first failed terminal evaluation of a level, held back until the
+/// level's stepping has found no action partial operation.
+enum TerminalFailure {
+    /// The terminal reached a partial operation on the dead state stored as this id.
+    Partial(usize),
+    /// The terminal could not be evaluated for another reason.
+    Error(RuntimeError),
+}
+
+fn report_terminal_failure(
+    mut result: ExplicitResult,
+    failure: TerminalFailure,
+    seen: &StateStore,
+    level: usize,
+) -> Result<ExplicitResult, RuntimeError> {
+    match failure {
+        TerminalFailure::Partial(id) => {
+            result.depth_reached = level;
+            result.violation = Some(ExplicitViolation {
+                trace: seen.trace(id),
+                violation: Violation {
+                    kind: "partial_op".to_owned(),
+                    name: fsl_core::SyntheticName::PartialTerminal.internal(),
+                    step: level,
+                },
+            });
+            Ok(result)
+        }
+        TerminalFailure::Error(error) => Err(error),
+    }
+}
+
+/// Record the level's first dead non-terminal state as the deadlock.
+fn record_deadlock(
+    result: &mut ExplicitResult,
+    level_deadlock: Option<usize>,
+    seen: &StateStore,
+    level: usize,
+) {
+    if let Some(id) = level_deadlock {
+        result.deadlock_step = Some(level);
+        result.deadlock_trace = Some(seen.trace(id));
+    }
+}
+
+/// Whether a stepped violation is the stepped action's own partial operation
+/// (guard, body or `ensures`), which BMC checks before the level's terminal.
+fn is_action_partial(violation: &Violation, action: &str) -> bool {
+    violation.kind == "partial_op"
+        && violation.name == fsl_core::SyntheticName::PartialAction { action }.internal()
+}
+
+/// Evaluate each reachable in `pending` (parallel to `model.reachables`) on
+/// `state`: a partial operation is that reachable's `partial_op`, and the
+/// first state of the level on which it holds is its witness.
+fn record_reachables(
+    model: &KernelModel,
+    pending: &[bool],
+    (state, id): (&State, usize),
     level: usize,
     seen: &StateStore,
     result: &mut ExplicitResult,
 ) -> Result<Option<Violation>, RuntimeError> {
     with_total_division(|| {
-        for property in &model.reachables {
-            if result.reachables[&property.name].is_some() {
+        for (property, pending) in model.reachables.iter().zip(pending) {
+            if !pending {
                 continue;
             }
             let value = match eval(&property.expr, state, &mut Bindings::new(), model, None) {
@@ -395,7 +760,9 @@ fn record_reachables(
                 Err(error) => return Err(error),
             };
             match value {
-                Value::Bool(true) => {
+                // A reachable already witnessed earlier in this level keeps
+                // that witness: the first state in frontier order.
+                Value::Bool(true) if result.reachables[&property.name].is_none() => {
                     result.reachables.insert(
                         property.name.clone(),
                         Some(ExplicitReachableWitness {
@@ -404,7 +771,7 @@ fn record_reachables(
                         }),
                     );
                 }
-                Value::Bool(false) => {}
+                Value::Bool(_) => {}
                 _ => return Err(runtime_error("reachable expression must be Boolean")),
             }
         }

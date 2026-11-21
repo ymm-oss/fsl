@@ -1,9 +1,9 @@
 diff --git a/rust/fsl-runtime/src/explicit.rs b/rust/fsl-runtime/src/explicit.rs
 --- a/rust/fsl-runtime/src/explicit.rs
 +++ b/rust/fsl-runtime/src/explicit.rs
-@@ -313,7 +313,7 @@ pub fn verify_explicit_selected(
-                     result.violation = Some(ExplicitViolation { violation, trace });
-                     return Ok(result);
+@@ -395,7 +395,7 @@ pub fn verify_explicit_selected(
+                 if !expanding {
+                     continue;
                  }
 -                let child_state = stepped.state;
 +                let child_state = state.clone();

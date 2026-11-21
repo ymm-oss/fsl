@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 re-review): with the totalized quotient `5 / z == 1` is
+// false, so the state is dead: at `--depth 1` every engine reports
+// `_partial_property_terminal`.
+spec G_div_false {
+  type Job = 0..1
+  type Z = 0..1
+  state { done: Bool, z: Z, q: Seq<Job, 2> }
+  init { done = false z = 0 q = Seq { } }
+  action a() { requires not done done = true  }
+  action g() { requires done and 5 / z == 1 z = 0 }
+  terminal { q.head() == 1 }
+}
