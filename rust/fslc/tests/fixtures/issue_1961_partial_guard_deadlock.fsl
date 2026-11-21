@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 review): after `a` no action is enabled and `g`'s guard
+// reaches `q.head()` on an empty `q`. At `--depth 1` BMC's deadlock query
+// treats the state as dead (the partial read is unconstrained), so every
+// engine reports the deadlock at step 1 under `--deadlock error`.
+spec GuardDead {
+  type Job = 0..1
+  state { done: Bool, q: Seq<Job, 2> }
+  init { done = false q = Seq { } }
+  action a() { requires not done done = true }
+  action g() { requires done and q.head() == 0 done = true }
+}

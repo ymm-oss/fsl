@@ -220,3 +220,55 @@ fn action_partial_before_a_later_invariant_violation() {
         );
     }
 }
+
+const PARTIAL_GUARD_TERMINAL: &str = "issue_1961_partial_guard_terminal.fsl";
+
+/// A state whose only candidate is a partial guard is dead for its terminal
+/// at the depth, where BMC checks no action partial operation.
+#[test]
+fn partial_guard_state_terminal_at_depth_one() {
+    for engine in ["explicit", "auto", "bmc"] {
+        assert_partial_at(
+            PARTIAL_GUARD_TERMINAL,
+            Some("1"),
+            engine,
+            ("_partial_property_terminal", 1),
+            &json!({"done": true, "k": 3, "q": []}),
+        );
+    }
+}
+
+/// Below the depth the guard's own partial operation comes first.
+#[test]
+fn partial_guard_state_terminal_at_depth_two() {
+    for engine in ["explicit", "auto", "bmc"] {
+        assert_partial_at(
+            PARTIAL_GUARD_TERMINAL,
+            Some("2"),
+            engine,
+            ("_partial_g", 2),
+            &json!({"done": true, "k": 3, "q": []}),
+        );
+    }
+}
+
+/// The same state is a deadlock at the depth.
+#[test]
+fn partial_guard_state_is_a_deadlock_at_depth_one() {
+    let name = "issue_1961_partial_guard_deadlock.fsl";
+    for engine in ["explicit", "auto", "bmc"] {
+        let output = fslc_cli::command()
+            .arg("verify")
+            .arg(fixture(name))
+            .args(["--engine", engine, "--depth", "1", "--deadlock", "error"])
+            .output()
+            .expect("run fslc verify");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let value: Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|error| panic!("{name} {engine}: not JSON ({error}): {stdout}"));
+        assert_eq!(output.status.code(), Some(1), "{engine}: {value:#}");
+        assert_eq!(value["result"], "violated", "{engine}: {value:#}");
+        assert_eq!(value["violation_kind"], "deadlock", "{engine}: {value:#}");
+        assert_eq!(value["violated_at_step"], 1, "{engine}: {value:#}");
+    }
+}

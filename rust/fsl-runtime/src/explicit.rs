@@ -263,7 +263,16 @@ pub fn verify_explicit_selected(
         //
         // So at this level the terminal is evaluated on every dead state until
         // the first one whose evaluation fails, and that failure is held back
-        // until the stepping below has found no action partial operation.
+        // until the stepping below has found no action partial operation. A
+        // state is dead here when no instance is enabled: an instance whose
+        // guard reaches a partial operation does not keep it alive. BMC reads
+        // such a guard's partial operation as an unconstrained value (an
+        // unobservable Seq slot, DESIGN-seq-partial-operations.md), so its
+        // deadlock query can choose the value that disables the guard. Below
+        // the depth that guard's own `partial_op` is an action partial
+        // operation of the level and is reported first in both engines; at the
+        // depth, where BMC checks no action partial operation, the state is
+        // dead for its terminal and for its deadlock.
         // Once a deadlock is recorded neither engine evaluates the terminal at
         // a later level.
         let check_terminals = result.deadlock_step.is_none();
@@ -273,7 +282,7 @@ pub fn verify_explicit_selected(
         for (state, id) in &frontier {
             // A guard that reaches a partial operation is neither enabled nor
             // disabled: it is stepped below into that action's `partial_op`
-            // (#1191), and it keeps this state from being a deadlock.
+            // (#1191).
             let candidates = scratch.candidates_at(state)?;
             let enabled = candidates
                 .iter()
@@ -295,7 +304,7 @@ pub fn verify_explicit_selected(
                     .expect("enabled action belongs to the model")
                     .enabled += 1;
             }
-            if candidates.is_empty() && check_terminals && terminal_failure.is_none() {
+            if enabled.is_empty() && check_terminals && terminal_failure.is_none() {
                 match terminal_holds_at(&scratch.model, state) {
                     Ok(true) => {}
                     Ok(false) => {
