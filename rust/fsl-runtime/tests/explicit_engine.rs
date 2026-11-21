@@ -759,3 +759,28 @@ fn issue_1961_held_terminal_failure_is_reported_at_the_state_budget() {
     assert_eq!(violation.violation.name, "_partial_property_terminal");
     assert_eq!(violation.violation.step, 1);
 }
+
+/// #1961 (#1962 review): a reachable still pending at a level is evaluated
+/// on every state of the level, and its witness is the first state in
+/// frontier order that satisfies it, not a later one of the same level.
+/// At step 1 the states are `k = 1`, `k = 2`, `k = 3` in that order.
+#[test]
+fn issue_1961_reachable_witness_is_the_first_state_of_the_level() {
+    let model = model(
+        "spec TwoWitness { type K = 0..3 state { done: Bool, k: K } \
+         init { done = false k = 0 } \
+         action a() { requires not done k = 1 done = true } \
+         action b() { requires not done k = 2 done = true } \
+         action c() { requires not done k = 3 done = true } \
+         action idle() { requires done done = true } \
+         reachable R { k >= 1 } reachable S { k >= 2 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 8, 100).expect("explicit verification");
+    assert!(result.violation.is_none(), "{result:?}");
+    for (name, k) in [("R", 1), ("S", 2)] {
+        let witness = result.reachables[name].as_ref().expect("witnessed");
+        assert_eq!(witness.step, 1, "{name}");
+        let last = witness.trace.last().expect("witness trace");
+        assert_eq!(last.state.get("k"), Some(&FslValue::Int(k)), "{name}");
+    }
+}
