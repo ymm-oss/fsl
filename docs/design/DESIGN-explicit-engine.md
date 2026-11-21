@@ -232,9 +232,22 @@ verdict semantics:
   unreached goals are reported exactly as BMC reports them at depth
   exhaustion. Under `proved` (closure), an unreached `reachable` is
   *definitively* unreachable — stronger than BMC's bounded "not reached within
-  depth" — and is reported as `reachable_failed`.
+  depth" — and is reported as `reachable_failed`. A `reachable` still
+  unwitnessed when a level starts is evaluated on every state of that
+  level, as BMC checks it over every state of a step before recording the
+  step's witnesses: a partial operation in it on any state of the level is a
+  `partial_op` (`_partial_property_<name>`), even when another state of the
+  same level witnesses it. The witness is the first state in frontier order.
+  A `reachable` witnessed at an earlier level is not evaluated again (#1961).
 - **Deadlock** — a state with no enabled action instance, honoring
-  `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior.
+  `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior. At each
+  level until a deadlock is recorded, the terminal is evaluated on every
+  dead state of the level, which is BMC's rule: a dead state whose terminal
+  reaches a partial operation is a `partial_op` (`_partial_property_terminal`)
+  at that level and wins over a deadlock on another state of the level;
+  otherwise the deadlock is the first dead non-terminal state in frontier
+  order. Once a deadlock is recorded, neither engine evaluates the terminal
+  at a later level (#1961).
 - **Vacuity/coverage** — an action never enabled anywhere explored, honoring
   `--vacuity` the same way BMC does. Under closure this too is definitive.
 - **Action execution profile** — records how often enabled action instances
