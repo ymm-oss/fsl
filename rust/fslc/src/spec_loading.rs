@@ -232,7 +232,7 @@ pub(crate) fn reject_refuted_requirements(
     let options = crate::process::parse_options();
     if !matches!(
         fsl_syntax::edition_header(source, options),
-        Ok(Some(header)) if header.edition == fsl_syntax::Edition::Fsl5
+        Ok(Some(header)) if header.edition.family_fsl5()
     ) {
         return Ok(());
     }

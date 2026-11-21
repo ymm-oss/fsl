@@ -433,9 +433,10 @@ const FSL5_SKILL_DIRECTORIES: [&str; 7] = [
     "skills/fsl-verify",
 ];
 
-/// The opt-in variable #1434 removed; naming it in a skill would be a stale
-/// instruction (the half of the former `skills_next_unpackaged.rs` that
-/// still applies after the move).
+/// The opt-in variable #1434 removed for `fsl 5` and #1818 D1 brought back
+/// only for an unpublished minor; naming it in a skill would be a stale or
+/// premature instruction (the half of the former `skills_next_unpackaged.rs`
+/// that still applies after the move).
 const REMOVED_GATE_VARIABLE: &str = "FSLC_UNSTABLE";
 
 fn every_file(dir: &Path, out: &mut Vec<PathBuf>) {

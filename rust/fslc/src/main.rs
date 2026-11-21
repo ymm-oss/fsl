@@ -411,8 +411,10 @@ fn read_edition(source: &str, edition: fsl_syntax::Edition) -> ReadEdition {
 /// #1757: a `lint`, `migrate` or `fmt --check` report publishes the edition
 /// its documents were read in, as `check` does for its one document, not the
 /// requested `--edition`: `edition` is `next` when every document was read in
-/// the next edition and `current` otherwise, and `fsl_edition` is the header
-/// number when every document declares the same one. Unlike `check`, these
+/// the next edition (the `fsl 5` family) and `current` otherwise, and
+/// `fsl_edition` is the header number when every document declares the same
+/// edition (major and minor; `fsl_edition_minor` beside it for a minor other
+/// than `0`, #1818 D1). Unlike `check`, these
 /// reports keep `"edition": "current"`, as 4.12 published it. An error
 /// envelope, and a report that read no document (an empty `lint` directory),
 /// keep what they carry.
@@ -424,9 +426,7 @@ fn publish_read_edition((mut output, status): (Value, i32), read: &[ReadEdition]
         return (output, status);
     }
     if let Value::Object(envelope) = &mut output {
-        let next = read
-            .iter()
-            .all(|&(edition, _)| edition == fsl_syntax::Edition::Fsl5);
+        let next = read.iter().all(|&(edition, _)| edition.family_fsl5());
         let edition = if next {
             fsl_syntax::Edition::Fsl5
         } else {
@@ -436,7 +436,7 @@ fn publish_read_edition((mut output, status): (Value, i32), read: &[ReadEdition]
         if let Some(declared) = first_declared
             .filter(|&declared| read.iter().all(|&(_, other)| other == Some(declared)))
         {
-            envelope.insert("fsl_edition".to_owned(), json!(declared.number()));
+            fslc_rust::migration::insert_declared_edition(envelope, declared);
         }
     }
     (output, status)

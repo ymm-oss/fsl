@@ -73,9 +73,10 @@ pub use domain::{
     REPEATED_DOMAIN_CLAUSE, parse_domain,
 };
 pub use edition::{
-    CURRENT_EDITION_MIGRATION_CODES, EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED,
-    EDITIONLESS_DECLARATIONS, Edition, EditionHeader, EditionRequest, MISSING_EDITION_HEADER,
-    UNSUPPORTED_EDITION, document_edition, edition_header, first_significant_offset,
+    CURRENT_EDITION_MIGRATION_CODES, DEV_MINOR, EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED,
+    EDITIONLESS_DECLARATIONS, Edition, EditionHeader, EditionRequest, Feature,
+    MISSING_EDITION_HEADER, UNSUPPORTED_EDITION, document_edition, edition_header,
+    first_significant_offset,
 };
 pub use glossary::{
     ALIAS_COLLISION, ALIAS_IN_IMPLEMENTS, ALIAS_SHADOWS_KEYWORD, ALIAS_SHADOWS_NAME,
@@ -97,7 +98,7 @@ pub use lossless::{
     canonical_rewrites_with, format_source, format_source_respelled, format_source_with,
     lossless_document, lossless_document_with, source_position, source_span,
 };
-pub use parse_options::ParseOptions;
+pub use parse_options::{ParseOptions, UnstableFeature, UnstableFeatures};
 pub use parser::{
     IdSpelling, ParseError, parse_expr, parse_surface_document, parse_surface_document_with,
     parse_surface_spec,

@@ -164,7 +164,7 @@ pub fn convert_process_forms(
     edition: Edition,
     options: &ParseOptions,
 ) -> ProcessFormOutcome {
-    if edition != Edition::Fsl5 {
+    if !edition.family_fsl5() {
         return ProcessFormOutcome::Unchanged;
     }
     let shared = shared_requirement_ids(original, *options);
@@ -193,7 +193,7 @@ pub fn convert_process_forms(
         Ok(None) => return ProcessFormOutcome::Unchanged,
         Err(findings) => return manual(findings),
     };
-    let converted = conversion.render(migrated, options);
+    let converted = conversion.render_in(migrated, edition, options);
     let derived_terminal = match process_form_contract(migrated, &converted, path, options) {
         Ok(derived_terminal) => derived_terminal,
         Err((reason, message)) => {
@@ -576,9 +576,16 @@ pub fn plan_process_conversion(
 
 impl ProcessFormConversion {
     /// `source` with each process replaced by its members, an `actor` line
-    /// before the first, and the edition header.
+    /// before the first, and the edition header (`fsl 5`).
     #[must_use]
     pub fn render(&self, source: &str, options: &ParseOptions) -> String {
+        self.render_in(source, Edition::Fsl5, options)
+    }
+
+    /// [`Self::render`] with the header of `edition`, a member of the `fsl 5`
+    /// family: `fsl 5.N` for a gated `migrate --edition 5.N` (#1818 D1).
+    #[must_use]
+    pub fn render_in(&self, source: &str, edition: Edition, options: &ParseOptions) -> String {
         let mut actors = Vec::<&str>::new();
         for event in self.processes.iter().flat_map(|process| &process.events) {
             if !actors.contains(&event.actor.as_str()) {
@@ -611,7 +618,7 @@ impl ProcessFormConversion {
         }
         // Not formatted: the formatter does not lay out this edition's
         // members yet, and the other migrations already formatted the rest.
-        if let Some(header) = missing_edition_header(&output, Edition::Fsl5, options)
+        if let Some(header) = missing_edition_header(&output, edition, options)
             && let Ok(headed) = fsl_syntax::apply_source_edits(&output, header.edits)
         {
             output = headed;

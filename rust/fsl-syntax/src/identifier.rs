@@ -68,11 +68,11 @@ pub enum IdentifierRule {
 
 impl IdentifierRule {
     /// The rule for `source` under `options`: [`Self::Unicode`] only when the
-    /// document opens with `fsl 5`.
+    /// document opens with a header of the `fsl 5` family.
     #[must_use]
     pub fn for_source(source: &str, options: &ParseOptions) -> Self {
         match crate::edition_header(source, options) {
-            Ok(Some(header)) if header.edition == crate::Edition::Fsl5 => Self::Unicode,
+            Ok(Some(header)) if header.edition.family_fsl5() => Self::Unicode,
             _ => Self::Ascii,
         }
     }

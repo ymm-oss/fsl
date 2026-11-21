@@ -94,7 +94,7 @@ impl ParseError {
         options: &crate::ParseOptions,
     ) -> Self {
         if self.code() == "FSL-PARSE"
-            && edition == Edition::Fsl5
+            && edition.family_fsl5()
             && let Some(error) = crate::legacy_expression_operator_error(source, options)
         {
             return error;
@@ -220,7 +220,7 @@ pub(crate) fn parse_shared_tokens(
     } else if parser.peek_ident("governance") {
         SurfaceDocument::Governance(parser.surface_governance()?)
     } else if parser.peek_ident("requirements")
-        || (edition == Edition::Fsl5 && parser.peek_ident(Kw::Requirements.japanese()))
+        || (edition.family_fsl5() && parser.peek_ident(Kw::Requirements.japanese()))
     {
         SurfaceDocument::Requirements(parser.surface_requirements()?)
     } else if parser.peek_ident("compose") {
@@ -595,7 +595,7 @@ impl<'a> Parser<'a> {
     }
 
     fn surface_requirements(&mut self) -> Result<SurfaceRequirements, ParseError> {
-        let next_edition = self.edition == Edition::Fsl5;
+        let next_edition = self.edition.family_fsl5();
         self.keywords = next_edition;
         self.expect_kw(Kw::Requirements)?;
         let name_start = self.cursor;
@@ -635,7 +635,7 @@ impl<'a> Parser<'a> {
         let mut next = next_requirements::Pending::default();
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
-            if self.edition == Edition::Fsl5
+            if self.edition.family_fsl5()
                 && self.next_requirements_member(&mut next, items.len())?
             {
                 self.expect_no_pending_annotations()?;
@@ -699,7 +699,7 @@ impl<'a> Parser<'a> {
     }
 
     fn requirements_item(&mut self) -> Result<RequirementsItem, ParseError> {
-        if self.edition == Edition::Fsl5 && self.peek_kw(Kw::Glossary) {
+        if self.edition.family_fsl5() && self.peek_kw(Kw::Glossary) {
             return Err(ParseError::coded(
                 crate::glossary::MISPLACED_GLOSSARY,
                 "glossary must be the first item of requirements, and a document has one",

@@ -158,6 +158,53 @@ fn every_next_edition_fixture_is_indexed_in_full() {
     }
 }
 
+/// #1818 D1: behind the gate a fixture headed `fsl 5.N` is indexed through
+/// the next-edition lexicon exactly as its `fsl 5` original: the same
+/// declarations and uses, the same glossary, every word indexed. Without the
+/// gate the minor header is not read, so the next-edition lexicon is not
+/// used.
+#[test]
+fn a_development_minor_document_is_indexed_as_its_fsl_5_original() {
+    let gated = ParseOptions::with_unstable(
+        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5Minor),
+    );
+    let header = format!("fsl 5.{}", fsl_syntax::DEV_MINOR);
+    for file in SPELLINGS {
+        let (source, five) = index(file);
+        let body = source.strip_prefix("fsl 5\n").expect("headed fixture");
+        // `fsl 5` padded to the minor header's length, so ranges match.
+        let padded = format!("{:width$}\n{body}", "fsl 5", width = header.len());
+        let five_padded =
+            DocumentIndex::build(&padded, Some(file), &gated).unwrap_or_else(|e| panic!("{e}"));
+        let minor_source = format!("{header}\n{body}");
+        let minor = DocumentIndex::build(&minor_source, Some(file), &gated)
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        assert_eq!(minor.lexicon(), fsl_lsp::Lexicon::Next, "{file}");
+        assert_eq!(minor.completion_names(), five.completion_names(), "{file}");
+        assert_eq!(minor.glossary(), five_padded.glossary(), "{file}");
+        assert_eq!(
+            minor.unindexed_identifiers(),
+            Vec::<String>::new(),
+            "{file}"
+        );
+        assert_eq!(
+            minor.misprojected_declarations(),
+            Vec::<String>::new(),
+            "{file}"
+        );
+        assert!(
+            !minor.glossary().is_empty() || file == "fsl5_en.fsl",
+            "{file}"
+        );
+        let ungated = DocumentIndex::build(&minor_source, Some(file), &ParseOptions::stable());
+        assert!(
+            ungated.is_err()
+                || ungated.is_ok_and(|index| index.lexicon() != fsl_lsp::Lexicon::Next),
+            "{file}: without the gate the minor header is not the next edition"
+        );
+    }
+}
+
 /// #1815: a decision table `for Claim in Submitted` / `対象 申請 段階 提出済み`
 /// indexes like `for Submitted Claim`: the same declarations, its entity and
 /// stage are uses of theirs, the name has as many references, and `in` /

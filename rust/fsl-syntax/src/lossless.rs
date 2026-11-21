@@ -177,7 +177,7 @@ pub fn lossless_document(source: &str) -> LosslessDocument {
 }
 
 /// [`lossless_document`] under explicit [`ParseOptions`]. An edition header
-/// stays in the tree as its two tokens.
+/// stays in the tree as its tokens (`fsl` and the number).
 #[must_use]
 pub fn lossless_document_with(source: &str, options: &ParseOptions) -> LosslessDocument {
     let tokens = match crate::lexer::lex_with_header(source, *options) {
@@ -354,7 +354,7 @@ pub fn format_source_with(
         .flat_map(|id| id.hyphens.iter().copied())
         .collect();
     // The edition's layout applies to a document read in it.
-    let next_edition = edition == Edition::Fsl5 && parsed.edition == Edition::Fsl5;
+    let next_edition = edition.family_fsl5() && parsed.edition.family_fsl5();
     let (continuations, spaced_opens, statement_ends) = if next_edition {
         (
             continuation_offsets(&tree, &parsed.surface),
@@ -402,7 +402,7 @@ pub fn format_source_respelled(
         return format_source_with(source, edition, options);
     }
     let spaced = crate::space_particles(source, options);
-    let respelled = if edition == Edition::Fsl5 {
+    let respelled = if edition.family_fsl5() {
         crate::respell_source(&spaced, options, respelling)?
     } else {
         return Err(crate::respell::not_applicable(source));
@@ -1307,6 +1307,37 @@ mod tests {
                 once,
                 "the entry without explicit options reads the header too"
             );
+        }
+    }
+
+    /// #1818 D1: the formatter keeps a minor header byte for byte (`fsl 5.0`
+    /// is not rewritten to `fsl 5`) and lays the body out as under `fsl 5`.
+    #[test]
+    fn formatter_keeps_a_minor_header_byte_for_byte() {
+        let gated = ParseOptions::with_unstable(
+            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5Minor),
+        );
+        let minor = format!("fsl 5.{}", crate::DEV_MINOR);
+        let japanese = include_str!("../../../examples/fsl5/leave_request.ja.fsl")
+            .strip_prefix("fsl 5\n")
+            .expect("headed example");
+        for body in ["domain D {   type Status = Draft | Done; }", japanese] {
+            let five = format_source_with(&format!("fsl 5\n{body}"), Edition::Fsl5, &gated)
+                .expect("format fsl 5");
+            for header in [minor.as_str(), "fsl 5.0"] {
+                let edition = if header == "fsl 5.0" {
+                    Edition::Fsl5
+                } else {
+                    Edition::Fsl5Dev
+                };
+                let once = format_source_with(&format!("{header}\n{body}"), edition, &gated)
+                    .expect("format minor");
+                assert_eq!(once, five.replacen("fsl 5", header, 1), "{header}: {body}");
+                assert_eq!(
+                    format_source_with(&once, edition, &gated).expect("format twice"),
+                    once
+                );
+            }
         }
     }
 

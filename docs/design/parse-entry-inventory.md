@@ -8,6 +8,14 @@ still `fsl 4`. User documentation of the edition is in `docs/manual/LANGUAGE.md`
 
 ## Parse options (after #1434)
 
+> #1818 D1 brought the feature set back for an unpublished minor of the
+> edition: `ParseOptions` carries `UnstableFeatures` again (feature
+> `fsl5-minor`), `FSLC_UNSTABLE` is read once per process by
+> `rust/fslc/src/unstable_gate.rs`, and the Worker reads
+> `options.unstable`. Published editions read as below with or without it;
+> see [DESIGN-migration.md](DESIGN-migration.md), "Edition minors". The
+> bullets below describe #1434 and are kept as its record.
+
 - `fsl-syntax` owns `ParseOptions`, which no longer carries a feature set:
   `UnstableFeature` / `UnstableFeatures`, `ParseOptions::with_unstable(..)` and
   `ParseOptions::unstable()` are gone. `ParseOptions::stable()` (also
