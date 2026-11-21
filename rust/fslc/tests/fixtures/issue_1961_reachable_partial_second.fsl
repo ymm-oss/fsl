@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961, the same pattern for `reachable`: at step 1 the `make_a`
+// state (first in the explicit engine's frontier order) witnesses `R`
+// (`q.at(1) == 0`), and on the `make_b` state `q.at(1)` is out of range.
+// BMC checks every unwitnessed reachable for a partial operation over all
+// states of a step before it records the step's witnesses, so every engine
+// must report `partial_op` `_partial_property_R` at step 1.
+spec ReachPartial {
+  type Job = 0..1
+  type Idx = 0..1
+  state { a_first: Bool, done: Bool, i: Idx, q: Seq<Job, 2> }
+  init { a_first = true done = false i = 0 q = Seq { 1 } }
+  action make_a() {
+    requires not done
+    a_first = false
+    done = true
+    i = 1
+    q = q.push(0)
+  }
+  action make_b() {
+    requires not done
+    done = true
+    i = 1
+  }
+  action idle() {
+    requires done
+    done = true
+  }
+  reachable R { q.at(i) == 0 }
+}

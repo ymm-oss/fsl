@@ -213,6 +213,17 @@ pub fn verify_explicit_selected(
         result.depth_reached = level;
         result.max_frontier_width = result.max_frontier_width.max(frontier.len());
 
+        // The reachables still unwitnessed when the level starts. BMC checks
+        // each of them for a partial operation over every state of the step
+        // before it records the step's witnesses (`check_state_properties_in`,
+        // then `record_reachables`), so a witness on one state of this level
+        // does not stop the others from being checked.
+        let pending = scratch
+            .model
+            .reachables
+            .iter()
+            .map(|property| result.reachables[&property.name].is_none())
+            .collect::<Vec<_>>();
         for (state, id) in &frontier {
             if (*id == root || !admits_stored)
                 && let Some(violation) =
@@ -224,9 +235,14 @@ pub fn verify_explicit_selected(
                 });
                 return Ok(result);
             }
-            if let Some(violation) =
-                record_reachables(&scratch.model, state, *id, level, &seen, &mut result)?
-            {
+            if let Some(violation) = record_reachables(
+                &scratch.model,
+                &pending,
+                (state, *id),
+                level,
+                &seen,
+                &mut result,
+            )? {
                 result.violation = Some(ExplicitViolation {
                     trace: seen.trace(*id),
                     violation,
@@ -382,17 +398,20 @@ pub fn verify_explicit_selected(
     Ok(result)
 }
 
+/// Evaluate each reachable in `pending` (parallel to `model.reachables`) on
+/// `state`: a partial operation is that reachable's `partial_op`, and the
+/// first state of the level on which it holds is its witness.
 fn record_reachables(
     model: &KernelModel,
-    state: &State,
-    id: usize,
+    pending: &[bool],
+    (state, id): (&State, usize),
     level: usize,
     seen: &StateStore,
     result: &mut ExplicitResult,
 ) -> Result<Option<Violation>, RuntimeError> {
     with_total_division(|| {
-        for property in &model.reachables {
-            if result.reachables[&property.name].is_some() {
+        for (property, pending) in model.reachables.iter().zip(pending) {
+            if !pending {
                 continue;
             }
             let value = match eval(&property.expr, state, &mut Bindings::new(), model, None) {
@@ -410,7 +429,9 @@ fn record_reachables(
                 Err(error) => return Err(error),
             };
             match value {
-                Value::Bool(true) => {
+                // A reachable already witnessed earlier in this level keeps
+                // that witness: the first state in frontier order.
+                Value::Bool(true) if result.reachables[&property.name].is_none() => {
                     result.reachables.insert(
                         property.name.clone(),
                         Some(ExplicitReachableWitness {
@@ -419,7 +440,7 @@ fn record_reachables(
                         }),
                     );
                 }
-                Value::Bool(false) => {}
+                Value::Bool(_) => {}
                 _ => return Err(runtime_error("reachable expression must be Boolean")),
             }
         }

@@ -694,3 +694,43 @@ fn issue_1961_deadlock_trace_is_still_the_first_dead_state() {
         "the a_first = false state comes first in frontier order"
     );
 }
+
+/// #1961, `reachable`: a witness on the first state of a level does not stop
+/// the reachable from being checked for a partial operation on the later
+/// states of that level, as BMC checks every unwitnessed reachable over all
+/// states of a step before it records the step's witnesses.
+#[test]
+fn issue_1961_partial_reachable_after_a_witness_in_the_same_level() {
+    let result = fsl_runtime::verify_explicit(
+        issue_1961_fixture("issue_1961_reachable_partial_second.fsl"),
+        8,
+        100,
+    )
+    .expect("explicit verification");
+    let violation = result.violation.expect("expected a partial reachable");
+    assert_eq!(violation.violation.kind, "partial_op");
+    assert_eq!(violation.violation.name, "_partial_property_R");
+    assert_eq!(violation.violation.step, 1);
+    assert_eq!(
+        last_state(&violation.trace),
+        &FslValue::Seq(vec![FslValue::Int(1)])
+    );
+}
+
+/// #1961 control: a reachable witnessed at an earlier level is not evaluated
+/// again (BMC drops it from its pending set), so a later state where it is
+/// undefined is not a violation, and its witness stays the first one.
+#[test]
+fn issue_1961_reachable_witnessed_at_an_earlier_level_is_not_rechecked() {
+    let model = model(
+        "spec Witnessed { type Job = 0..1 type Idx = 0..1 \
+         state { i: Idx, q: Seq<Job, 2> } init { i = 0 q = Seq { 0 } } \
+         action move() { requires i == 0 i = 1 } \
+         action stay() { requires i == 1 i = 1 } \
+         reachable R { q.at(i) == 0 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 8, 100).expect("explicit verification");
+    assert!(result.violation.is_none(), "{result:?}");
+    let witness = result.reachables["R"].as_ref().expect("R witnessed");
+    assert_eq!(witness.step, 0);
+}

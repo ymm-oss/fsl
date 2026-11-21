@@ -2,7 +2,9 @@
 
 //! Issue #1961: `verify --engine explicit` and `--engine auto` evaluate the
 //! terminal on every dead state of the level where BMC asks for a partial
-//! terminal, so all three engines report the same `partial_op`.
+//! terminal, so all three engines report the same `partial_op`. The same
+//! holds for a `reachable` that one state of a level witnesses and another
+//! state of that level cannot evaluate.
 //!
 //! Before #1961 the first dead non-terminal state of a level recorded the
 //! deadlock and later dead states of that level skipped the terminal, so
@@ -37,6 +39,10 @@ fn verify(name: &str, engine: &str) -> (Value, i32) {
 
 /// Each engine reports the same verdict, kind, name, step and state.
 fn assert_partial_terminal(name: &str, engine: &str, last_state: &Value) {
+    assert_partial(name, engine, "_partial_property_terminal", last_state);
+}
+
+fn assert_partial(name: &str, engine: &str, property: &str, last_state: &Value) {
     let (output, status) = verify(name, engine);
     assert_eq!(status, 1, "{name} {engine}: {output:#}");
     assert_eq!(output["result"], "violated", "{name} {engine}: {output:#}");
@@ -44,10 +50,7 @@ fn assert_partial_terminal(name: &str, engine: &str, last_state: &Value) {
         output["violation_kind"], "partial_op",
         "{name} {engine}: {output:#}"
     );
-    assert_eq!(
-        output["invariant"], "_partial_property_terminal",
-        "{name} {engine}: {output:#}"
-    );
+    assert_eq!(output["invariant"], property, "{name} {engine}: {output:#}");
     assert_eq!(output["violated_at_step"], 1, "{name} {engine}: {output:#}");
     let trace = output["trace"].as_array().expect("trace");
     assert_eq!(
@@ -100,4 +103,30 @@ fn first_dead_state_auto() {
 #[test]
 fn first_dead_state_bmc() {
     assert_partial_terminal(FIRST, "bmc", &first_state());
+}
+
+const REACHABLE: &str = "issue_1961_reachable_partial_second.fsl";
+
+fn reachable_state() -> Value {
+    json!({"a_first": true, "done": true, "i": 1, "q": [1]})
+}
+
+#[test]
+fn reachable_witnessed_earlier_in_the_level_explicit() {
+    assert_partial(
+        REACHABLE,
+        "explicit",
+        "_partial_property_R",
+        &reachable_state(),
+    );
+}
+
+#[test]
+fn reachable_witnessed_earlier_in_the_level_auto() {
+    assert_partial(REACHABLE, "auto", "_partial_property_R", &reachable_state());
+}
+
+#[test]
+fn reachable_witnessed_earlier_in_the_level_bmc() {
+    assert_partial(REACHABLE, "bmc", "_partial_property_R", &reachable_state());
 }
