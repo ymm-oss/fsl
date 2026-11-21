@@ -1208,3 +1208,133 @@ fn migrate_to_the_development_minor_writes_its_header() {
     }
     let _ = std::fs::remove_dir_all(&directory);
 }
+
+/// `fslc <arguments> doc.fsl` on `source` headed `fsl 5` (padded to the
+/// minor header's length, so locations and offsets match) without the gate,
+/// and headed `fsl 5.N` behind it: the outputs must be the same but for
+/// `fsl_edition_minor`. Returns the `fsl 5` output, for the caller to check
+/// the case is not vacuous.
+fn minor_reads_as_fsl_5(label: &str, source: &str, arguments: &[&str]) -> (String, i32) {
+    let header = minor_header();
+    let five = scratch(&format!("{label}-5"));
+    let minor = scratch(&format!("{label}-minor"));
+    write(
+        &five,
+        "doc.fsl",
+        &with_minor_header(source, &format!("{:width$}", "fsl 5", width = header.len())),
+    );
+    write(&minor, "doc.fsl", &with_minor_header(source, &header));
+    let arguments = [arguments, &["doc.fsl"]].concat();
+    let (expected, expected_exit) = fslc(&five, &arguments);
+    let (actual, actual_exit) = fslc_gated(&minor, &arguments);
+    assert_eq!(actual_exit, expected_exit, "{label}: {actual}");
+    match (
+        serde_json::from_str::<Value>(&expected),
+        serde_json::from_str::<Value>(&actual),
+    ) {
+        (Ok(_), Ok(_)) => assert_eq!(
+            without_minor(comparable(&actual, &minor)),
+            Ok(comparable(&expected, &five)),
+            "{label}"
+        ),
+        // A formatted document: the bytes but for the header line.
+        _ => assert_eq!(
+            actual.replacen(&header, "fsl 5", 1),
+            expected.replacen(
+                &format!("{:width$}", "fsl 5", width = header.len()),
+                "fsl 5",
+                1
+            ),
+            "{label}"
+        ),
+    }
+    let _ = std::fs::remove_dir_all(&five);
+    let _ = std::fs::remove_dir_all(&minor);
+    (expected, expected_exit)
+}
+
+/// Review of #1963: the family predicate where a next-edition document that
+/// is not requirements rejects non-ASCII names (dispatch.rs) holds for the
+/// minor.
+#[test]
+fn a_development_minor_spec_rejects_non_ascii_names_as_fsl_5_does() {
+    let (output, exit) = minor_reads_as_fsl_5(
+        "minor-non-ascii",
+        "spec 経費 {\n  state { x: 0..1 = 0 }\n}\n",
+        &["check"],
+    );
+    assert_eq!(exit, 2, "{output}");
+    assert!(output.contains("canonical_name_not_ascii"), "{output}");
+}
+
+/// Review of #1963: the family predicate of `ParseError::for_edition` holds
+/// for the minor. A headed document's parser reports a legacy expression
+/// operator itself; `for_edition` diagnoses it for a header-less document
+/// read under an explicit `--edition`, so `--edition 5.N` (gated) must
+/// report what `--edition 5` reports.
+#[test]
+fn a_development_minor_diagnoses_legacy_operators_as_fsl_5_does() {
+    let source = "spec S {\n  state { flag: Bool = false }\n  invariant I { true || false }\n}\n";
+    for command in [vec!["check"], vec!["fmt"], vec!["lint"]] {
+        let (output, exit) = minor_reads_as_fsl_5("minor-legacy-op", source, &command);
+        assert_eq!(exit, 2, "{command:?}: {output}");
+        assert!(output.contains("use 'or'"), "{command:?}: {output}");
+    }
+    let directory = scratch("minor-legacy-op-request");
+    write(&directory, "doc.fsl", source);
+    let number = minor_header().trim_start_matches("fsl ").to_owned();
+    for command in ["check", "verify", "fmt"] {
+        let (expected, expected_exit) = fslc(&directory, &[command, "doc.fsl", "--edition", "5"]);
+        let (actual, actual_exit) =
+            fslc_gated(&directory, &[command, "doc.fsl", "--edition", &number]);
+        assert_eq!(expected_exit, 2, "{command}: {expected}");
+        assert!(expected.contains("use 'or'"), "{command}: {expected}");
+        assert_eq!(actual_exit, expected_exit, "{command}: {actual}");
+        assert_eq!(
+            comparable(&actual, &directory),
+            comparable(&expected, &directory),
+            "{command}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// Review of #1963: the family predicate of `fmt --lang` / `--names`
+/// (lossless.rs) holds for the minor: the Japanese example respells as its
+/// `fsl 5` original does.
+#[test]
+fn a_development_minor_is_respelled_as_fsl_5_is() {
+    let example = std::fs::read_to_string(root().join("examples/fsl5/leave_request.ja.fsl"))
+        .expect("read example");
+    for options in [
+        vec!["fmt", "--lang", "en"],
+        vec!["fmt", "--names", "canonical"],
+    ] {
+        let (output, exit) = minor_reads_as_fsl_5("minor-respell", &example, &options);
+        assert_eq!(exit, 0, "{options:?}: {output}");
+        assert_ne!(output, example, "{options:?}: not vacuous");
+    }
+}
+
+/// Review of #1963: the family predicate of the ID policy over a
+/// next-edition requirements document's declarations (lint) holds for the
+/// minor.
+#[test]
+fn a_development_minor_is_linted_for_its_ids_as_fsl_5_is() {
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fsl5_outputs/returns_en.fsl"),
+    )
+    .expect("read fixture")
+    .replacen("REQ-RET-001", "REQ-1", 1)
+    .replacen("AC-RET-001", "AC-1", 1);
+    let (output, exit) = minor_reads_as_fsl_5("minor-id-policy", &source, &["lint"]);
+    assert_eq!(exit, 1, "{output}");
+    let output = json(&output);
+    let codes = output["files"][0]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|finding| finding["code"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, ["non_canonical_id", "non_canonical_id"], "{output}");
+}
