@@ -95,6 +95,65 @@ exits 1 where it exited 0: 11 of the 651 corpus forms, for example
 `examples/annotations/annotated_claims.fsl`. `--edition current` keeps the
 former result.
 
+### Edition minors (#1818 D1)
+
+An edition is a `(major, minor)` value (`fsl_syntax::Edition`). The header
+grammar is `fsl MAJOR[.MINOR]`: `fsl`, blanks, a decimal major, and optionally
+`.` and a decimal minor (`0`, or digits without a leading zero), then only
+blanks to the end of the line. `fsl 5.0` is `fsl 5` (and `fsl 4.0` is
+`fsl 4`) everywhere, gate or not; outputs and messages spell it `5`.
+
+A line that starts like a header but is not one (`fsl`, blanks, a major, then
+`.` or a blank followed by anything other than the grammar above: `fsl 5.`,
+`fsl 5.01`, `fsl 5.x`, `fsl 5 next`, `fsl 5 spec S {}`) is
+`unsupported_edition`, not a header-less document read as `fsl 4`. A major run
+followed directly by another character (`fsl 5x`) is still an ordinary line.
+
+**The development minor.** `fsl_syntax::DEV_MINOR` is the one constant naming
+the minor under development; the release that publishes it renumbers it (the
+number is chosen at release, #1818 survey). `fsl 5.DEV_MINOR` and
+`--edition 5.DEV_MINOR` are read only behind the unstable gate, feature
+`fsl5-minor`: `FSLC_UNSTABLE=fsl5-minor` for the native CLI and the language
+server (read once per process, `fslc_rust::unstable_gate`), and
+`options.unstable: ["fsl5-minor"]` in a browser Worker request. This is the
+shape #1434 removed for `fsl 5` (`UnstableFeature` / `UnstableFeatures` in
+`ParseOptions`). Without the gate the header is `unsupported_edition`, whose
+message lists the published editions (`4, 5`), and `--edition 5.N` is the
+usual usage error. The gate is not advertised: `cli-contract.json`, the help
+text and the usage message do not list `5.N`; the contract check accepts it
+only when the gate's parser does. A parse entry that does not receive the
+process's options (an old convenience name under `ParseOptions::stable()`)
+refuses a minor header instead of misreading it.
+
+**Predicates.** Code that asks whether a document is in the next edition asks
+`Edition::family_fsl5()` (identifier rule, keywords and glossary, layout,
+requirements checks, migration severity, `missing_edition_header`,
+process-form conversion, the language server's lexicon and diagnostics).
+Code that asks for an addition of one minor asks `Edition::has(Feature)`,
+where each `Feature` names the edition it arrives in (`since`). No feature
+exists yet; one test-only placeholder exercises `has`. Comparing with
+`Edition::Fsl5` matches only `5.0`, so no product code does.
+
+**Requests and outputs.** `--edition current`, `next`, `4` and `5` are
+unchanged, and `next` stays `5.0`. A conflict between a header and
+`--edition` compares major and minor, and echoes both spellings
+(`the document declares 'fsl 5.1' but --edition 5 was requested`). JSON keeps
+`fsl_edition` as the header's major and `edition` as `current` / `next` (a
+minor of `fsl 5` is `next`); `fsl_edition_minor` is added only for a minor
+other than `0`. A `lint`, `migrate` or `fmt --check` report over several
+documents publishes them only when every document declares the same
+`(major, minor)`. The verify cache key adds `edition_request_minor` for a
+gated `--edition 5.N` and the gate's feature names (`unstable`) when it is on;
+a published run's key is unchanged. `migrate` still inserts `fsl 5` by
+default.
+
+**What the minor reads today.** Nothing new: until a feature lands, a
+document headed `fsl 5.DEV_MINOR` reads exactly as the `fsl 5` document.
+`rust/fslc/tests/edition_header.rs` pins that over the corpus (`kernel` and
+`check`, every field but `fsl_edition_minor`) and for `fmt`, `lint`,
+`migrate` and the solver-deferred requirements checks; fsl-lsp and fsl-wasm
+pin the index, the served diagnostics and the Worker's admission.
+
 ## Rewrite table
 
 | Legacy form | Canonical form | Automatic boundary |
