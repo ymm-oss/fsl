@@ -353,6 +353,7 @@ fn partial_guard_reading_at_depth_one_agrees_with_bmc() {
         ("issue_1961_guard_geq0.fsl", terminal),
         ("issue_1961_guard_div_false.fsl", terminal),
         ("issue_1961_partial_guard_terminal.fsl", terminal),
+        ("issue_1961_guard_isbind.fsl", terminal),
     ];
     for (name, expected) in cases {
         for engine in ["explicit", "auto", "bmc"] {

@@ -528,7 +528,8 @@ impl Truth {
 }
 
 /// An instance's guards, in order, as BMC's conjunction reads them: a `let`
-/// whose value is a partial read leaves the instance undecided.
+/// whose value is a partial read, or a `requires` that is not `True`, ends the
+/// reading (a later guard can read names only an undecided guard binds).
 fn instance_guard_truth(
     action: &fsl_core::ActionDef,
     params: &Bindings,
@@ -536,7 +537,6 @@ fn instance_guard_truth(
     model: &KernelModel,
 ) -> Result<Truth, RuntimeError> {
     let mut bindings = params.clone();
-    let mut truth = Truth::True;
     for guard in &action.guards {
         match guard {
             fsl_core::ActionGuard::Let(name, expression) => {
@@ -551,14 +551,17 @@ fn instance_guard_truth(
                 }
             }
             fsl_core::ActionGuard::Requires(expression) => {
-                truth = truth.and(guard_truth(expression, state, &mut bindings, model)?);
-                if truth == Truth::False {
-                    return Ok(Truth::False);
+                match guard_truth(expression, state, &mut bindings, model)? {
+                    Truth::True => {}
+                    // An undecided `requires` may not have bound the pattern
+                    // names a later guard reads, so the instance stays
+                    // undecided there; only `True` keeps a state alive.
+                    undecided => return Ok(undecided),
                 }
             }
         }
     }
-    Ok(truth)
+    Ok(Truth::True)
 }
 
 /// One `requires` expression read in three values. The connectives, `not`
