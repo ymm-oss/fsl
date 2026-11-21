@@ -158,7 +158,7 @@ fn document_tokens(
             crate::EDITION_HEADER_NOT_ACCEPTED,
             format!(
                 "a '{keyword}' document has no syntax edition; remove the 'fsl {}' header",
-                header.edition.number()
+                header.edition
             ),
             header.span,
         ));
@@ -238,7 +238,7 @@ pub(crate) fn parse_document_with_ids(
     // A requirements document checks its names against its glossary itself;
     // every other document read in the next edition has no glossary. The
     // frontend's own errors come first, as they do in requirements.
-    let names = if edition == Edition::Fsl5 && registration.keyword != "requirements" {
+    let names = if edition.family_fsl5() && registration.keyword != "requirements" {
         crate::glossary::reject_non_ascii_names(&tokens[cursor..], registration.keyword)
     } else {
         Ok(())
@@ -265,7 +265,7 @@ fn select_frontend(
 ) -> Result<&'static FrontendRegistration, ParseError> {
     let token = &tokens[cursor];
     let mut keyword = declaration_identifier(tokens, cursor)?;
-    if edition == Edition::Fsl5 && keyword == crate::keywords::Kw::Requirements.japanese() {
+    if edition.family_fsl5() && keyword == crate::keywords::Kw::Requirements.japanese() {
         keyword = crate::keywords::Kw::Requirements.english();
     }
     FRONTENDS
@@ -326,7 +326,7 @@ fn parse_shared(
         tokens,
         cursor,
         source.edition(),
-        source.edition() == Edition::Fsl5,
+        source.edition().family_fsl5(),
     )
 }
 
@@ -536,6 +536,67 @@ mod tests {
                 assert_eq!(token.span.start.column, original.span.start.column);
             }
         }
+    }
+
+    /// #1818 D1: behind the gate a `fsl 5.N` document is read as the `fsl 5`
+    /// document with the same body: the whole header (minor included) leaves
+    /// the token stream, the identifier rule is the `fsl 5` one and the parse
+    /// differs only in the recorded edition. Without the gate every entry
+    /// refuses it as an unsupported edition.
+    #[test]
+    fn a_development_minor_header_reads_as_the_fsl_5_document() {
+        let gated = ParseOptions::with_unstable(
+            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5Minor),
+        );
+        let minor = format!("fsl 5.{}", crate::DEV_MINOR);
+        for body in [
+            "spec S { const fsl = 1 state { x: Int } init { x = fsl } }",
+            include_str!("../../../examples/fsl5/leave_request.ja.fsl")
+                .strip_prefix("fsl 5\n")
+                .expect("headed example"),
+        ] {
+            // `fsl 5` padded to the minor header's length, so positions match.
+            let five = format!("{:width$}\n{body}", "fsl 5", width = minor.len());
+            let headed = format!("{minor}\n{body}");
+            let expected = parse_document_with(SourceFile::new(&five), &gated).unwrap();
+            let parsed = parse_document_with(SourceFile::new(&headed), &gated).unwrap();
+            assert_eq!(parsed.edition, Edition::Fsl5Dev);
+            assert_eq!(expected.edition, Edition::Fsl5);
+            assert_eq!(
+                ParsedDocument {
+                    edition: Edition::Fsl5,
+                    ..parsed
+                },
+                expected,
+                "{body}"
+            );
+            assert_eq!(
+                crate::lex_with(&headed, &gated).unwrap(),
+                crate::lex_with(&five, &gated).unwrap(),
+                "{body}: the header's tokens leave the stream"
+            );
+            assert_eq!(
+                dialect_keyword_with(&headed, &gated),
+                dialect_keyword_with(&five, &gated)
+            );
+            for error in [
+                parse_document_with(SourceFile::new(&headed), &ParseOptions::stable()).unwrap_err(),
+                parse_document(SourceFile::new(&headed)).unwrap_err(),
+                dialect_keyword_with(&headed, &ParseOptions::stable()).unwrap_err(),
+            ] {
+                assert_eq!(error.code(), crate::UNSUPPORTED_EDITION, "{body}");
+            }
+        }
+        let error = parse_document_with(SourceFile::new(&format!("{minor}\nagent A {{}}")), &gated)
+            .unwrap_err();
+        assert_eq!(error.code(), crate::EDITION_HEADER_NOT_ACCEPTED);
+        assert!(
+            error
+                .message
+                .contains(&format!("remove the '{minor}' header")),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

@@ -628,7 +628,7 @@ fn expect_ident(tokens: &[Token], cursor: &mut usize) -> Result<(String, Span), 
 #[must_use]
 pub fn document_glossary(source: &str, options: &crate::ParseOptions) -> Option<Glossary> {
     let header = crate::edition_header(source, options).ok()??;
-    if header.edition != crate::Edition::Fsl5 {
+    if !header.edition.family_fsl5() {
         return None;
     }
     let tokens = crate::lex_with(source, options).ok()?;

@@ -34,9 +34,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::keywords::{Kw, Position};
 use crate::{
-    Edition, FormatError, Glossary, ParseError, ParseOptions, PhraseKind, PhraseSpelling,
-    RequirementsItem, SourceEdit, SourceFile, SourceSpellings, Span, SurfaceDocument, Token,
-    TokenKind, UnsafeFormatKind, apply_source_edits, parse_document_with,
+    FormatError, Glossary, ParseError, ParseOptions, PhraseKind, PhraseSpelling, RequirementsItem,
+    SourceEdit, SourceFile, SourceSpellings, Span, SurfaceDocument, Token, TokenKind,
+    UnsafeFormatKind, apply_source_edits, parse_document_with,
 };
 
 /// `--lang`: the language keywords are written in.
@@ -71,7 +71,7 @@ pub const RESPELL_NOT_APPLICABLE: &str = "respell_not_applicable";
 /// `options`; any other document as it is.
 #[must_use]
 pub fn space_particles(source: &str, options: &ParseOptions) -> String {
-    if !matches!(crate::edition_header(source, options), Ok(Some(header)) if header.edition == Edition::Fsl5)
+    if !matches!(crate::edition_header(source, options), Ok(Some(header)) if header.edition.family_fsl5())
     {
         return source.to_owned();
     }

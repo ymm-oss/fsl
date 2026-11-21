@@ -84,19 +84,24 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
 
 /// [`lex`] under explicit [`crate::ParseOptions`], with the identifier rule
 /// [`IdentifierRule::for_source`] selects. The tokens of an edition header
-/// ([`crate::edition_header`]) are not part of the stream.
+/// ([`crate::edition_header`]): `fsl` and the number, its minor included,
+/// are not part of the stream.
 ///
 /// # Errors
 ///
 /// Returns [`LexError`] for characters or literals the lexer rejects.
 pub fn lex_with(source: &str, options: &crate::ParseOptions) -> Result<Vec<Token>, LexError> {
     let mut tokens = lex_with_header(source, *options)?;
-    if matches!(crate::edition_header(source, options), Ok(Some(_))) {
+    if let Ok(Some(header)) = crate::edition_header(source, options) {
         debug_assert!(
             matches!(&tokens[0].kind, TokenKind::Ident(name) if name == "fsl")
                 && matches!(tokens[1].kind, TokenKind::Int(_))
         );
-        tokens.drain(..2);
+        let header_tokens = tokens
+            .iter()
+            .take_while(|token| token.span.end.offset <= header.span.end.offset)
+            .count();
+        tokens.drain(..header_tokens);
     }
     Ok(tokens)
 }
