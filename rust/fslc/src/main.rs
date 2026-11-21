@@ -11463,9 +11463,9 @@ struct FullExplicit {
 /// not: a mutant of `examples/named_predicate.fsl` (23,409 probe states)
 /// spends about 14 s certifying a bounds-only model whose BMC call takes
 /// under 1 s. Calibrated on the 115 corpus specs that `mutate` accepts (the
-/// survey of #1849): every bound from 1,000 to 4,000 leaves no spec slower,
-/// 5,000 makes one slower, and 3,000 keeps 95% of the BMC time the skip
-/// saves without a limit.
+/// survey of #1849) from per-mutant stage times: with any bound from 1,000 to
+/// 4,000 no spec loses more than 0.3 s, at 5,000 one loses 2.5 s, and 3,000
+/// keeps 95% of the BMC time the skip saves without a bound.
 const BOUNDS_ONLY_EXPLICIT_PROBE_STATES: usize = 3_000;
 
 /// Whether the explicit engine certifies the bounds-only model `automatic`
