@@ -263,14 +263,12 @@ pub fn verify_explicit_selected(
         //
         // So at this level the terminal is evaluated on every dead state until
         // the first one whose evaluation fails, and that failure is held back
-        // until the stepping below has found no action partial operation. A
-        // state is dead here when no instance is enabled and no instance whose
-        // guard reaches a partial operation is enabled under BMC's reading of
-        // that guard (`partial_guard_may_be_disabled`). Below the depth such a
-        // guard's own `partial_op` is an action partial operation of the level
-        // and is reported first in both engines; at the depth, where BMC checks
-        // no action partial operation, the reading decides whether the state
-        // is dead for its terminal and for its deadlock.
+        // until the stepping below has found no action partial operation.
+        // Below the depth a state is dead when it has no candidate; at the
+        // depth, where BMC checks no action partial operation, a state whose
+        // only candidates are guards reaching a partial operation is dead when
+        // BMC's reading of those guards can disable them all
+        // (`every_partial_guard_may_be_disabled`).
         // Once a deadlock is recorded neither engine evaluates the terminal at
         // a later level.
         let check_terminals = result.deadlock_step.is_none();
@@ -302,11 +300,18 @@ pub fn verify_explicit_selected(
                     .expect("enabled action belongs to the model")
                     .enabled += 1;
             }
-            if enabled.is_empty()
-                && check_terminals
-                && terminal_failure.is_none()
-                && every_partial_guard_may_be_disabled(&scratch.model, state, &candidates)?
-            {
+            // Below the depth a partial-guard candidate is stepped into its
+            // action's `partial_op`, which is reported before anything this
+            // state's terminal or deadlock could give, unless a state-budget
+            // stop comes first; so there only a state without candidates is
+            // dead, as before #1961. At the depth BMC's reading decides.
+            let dead = if level < depth {
+                candidates.is_empty()
+            } else {
+                enabled.is_empty()
+                    && every_partial_guard_may_be_disabled(&scratch.model, state, &candidates)?
+            };
+            if dead && check_terminals && terminal_failure.is_none() {
                 match terminal_holds_at(&scratch.model, state) {
                     Ok(true) => {}
                     Ok(false) => {

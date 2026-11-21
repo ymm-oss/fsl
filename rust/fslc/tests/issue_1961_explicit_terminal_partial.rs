@@ -302,3 +302,38 @@ fn totalized_partial_guard_keeps_the_state_alive_at_the_depth() {
         );
     }
 }
+
+fn verify_args(name: &str, engine: &str, args: &[&str]) -> (Value, i32) {
+    let output = fslc_cli::command()
+        .arg("verify")
+        .arg(fixture(name))
+        .args(["--engine", engine])
+        .args(args)
+        .output()
+        .expect("run fslc verify");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("{name} {engine}: not JSON ({error}): {stdout}"));
+    (value, output.status.code().expect("exit code"))
+}
+
+/// A state-budget stop below the depth does not record a state whose only
+/// candidate is a partial guard as the deadlock: that guard's `partial_op`
+/// would come first.
+#[test]
+fn budget_stop_records_no_deadlock_for_a_partial_guard_state() {
+    let name = "issue_1961_budget_partial_guard.fsl";
+    let args = ["--explicit-budget", "3", "--deadlock", "error"];
+    let (output, _) = verify_args(name, "explicit", &args);
+    assert_eq!(output["result"], "unknown_budget", "explicit: {output:#}");
+    for engine in ["auto", "bmc"] {
+        let (output, status) = verify_args(name, engine, &args);
+        assert_eq!(status, 1, "{engine}: {output:#}");
+        assert_eq!(
+            output["violation_kind"], "partial_op",
+            "{engine}: {output:#}"
+        );
+        assert_eq!(output["invariant"], "_partial_g", "{engine}: {output:#}");
+        assert_eq!(output["violated_at_step"], 2, "{engine}: {output:#}");
+    }
+}
