@@ -189,10 +189,11 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   `fsl_verifier::verify_bounded_without_coverage`: they ask no
   `action_coverage` probe and no vacuity lane. The counterfactual code reads a
   run's violation (kind, name, step, last action and, in a run that re-solves,
-  its trace), its reachables and its `leadsTo` verdict, never its
-  `action_coverage`, `vacuity` or deadlock trace, and those probes were most of
-  the phase's solver time (on `examples/agentic_rag/agentic_rag_design.fsl`,
-  `html` at depth 8 spent about two thirds of its wall time in the
+  its trace) and its reachables, never its `action_coverage`, `vacuity` or
+  deadlock trace (its `leadsTo` verdict is always empty: both phases clear the
+  weakened model's `leadsTo` properties, as the scope note above says), and
+  those probes were most of the phase's solver time (on
+  `examples/agentic_rag/agentic_rag_design.fsl`, `html` at depth 8 spent about two thirds of its wall time in the
   `action_coverage` probes of counterfactual runs). The output is unchanged:
   the coverage probes and the vacuity lanes each ask inside a push/pop scope,
   and the check that gates the lanes (`session_satisfiable`) is a bare check

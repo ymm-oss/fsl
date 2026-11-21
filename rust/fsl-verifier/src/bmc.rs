@@ -284,6 +284,11 @@ pub async fn verify_bounded_selected<S: SmtSolver>(
 /// vacuity lanes are skipped with the coverage because their `requires`
 /// finding is filtered by it.
 ///
+/// Do not render or read this result's `action_coverage`: its `false` does not
+/// mean "never enabled", which is how the `verify` envelope, its warnings and
+/// `scenarios` read a `false` from [`verify_bounded`]. Nor does an empty
+/// `vacuity` mean that no vacuity lane fires.
+///
 /// The coverage probes and the vacuity lanes each ask inside a push/pop
 /// scope, and the check that gates the lanes (`session_satisfiable`) is a
 /// bare check with no assertion. None of them leaves an assertion behind, so

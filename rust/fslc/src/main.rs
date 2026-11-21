@@ -5801,12 +5801,13 @@ fn explain_bounded_run(
 
 /// One bounded verifier run of a weakened model in the invariant or reachable
 /// counterfactual phase of `explain`. The counterfactual code reads the run's
-/// verdicts (`violation`, the reachables, `leadsTo` through
-/// [`unreached_after`]) and, from a [`CounterfactualTraces::Printed`] run, the
-/// violation's trace; never its `action_coverage`, `vacuity` or deadlock
-/// trace. So the run asks no `action_coverage` or vacuity probe (#1868). A
-/// printed trace does not change with that: it is re-solved from the
-/// assertions, which those scoped probes leave as they were (#1940).
+/// verdicts (`violation` and the reachables, through [`unreached_after`]; the
+/// weakened models have no `leadsTo`, both phases clear it) and, from a
+/// [`CounterfactualTraces::Printed`] run, the violation's trace; never its
+/// `action_coverage`, `vacuity` or deadlock trace. So the run asks no
+/// `action_coverage` or vacuity probe (#1868). A printed trace does not change
+/// with that: it is re-solved from the assertions, which those probes leave as
+/// they were (#1940).
 fn counterfactual_bounded_run(
     model: &KernelModel,
     solver: &mut fsl_solver_z3::Z3Solver,
