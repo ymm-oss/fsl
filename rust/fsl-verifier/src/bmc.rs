@@ -288,8 +288,14 @@ pub async fn verify_bounded_selected<S: SmtSolver>(
 /// scope, and the check that gates the lanes (`session_satisfiable`) is a
 /// bare check with no assertion. None of them leaves an assertion behind, so
 /// the verdicts (`violation`, `reachables`, `deadlock_step`,
-/// `leadsto_violation`) are the ones [`verify_bounded`] returns, unless one of
-/// the skipped probes would have answered `unknown`, which fails that run. A
+/// `leadsto_violation`) are the ones [`verify_bounded`] returns whenever both
+/// return. Where a skipped question fails, [`verify_bounded`] fails and this
+/// function does not: a coverage probe that answers `unknown`, a failed push
+/// or pop, an error evaluating a vacuity lane, or a backend error on the
+/// lanes' gating check. A vacuity lane that answers `unknown` reports no
+/// finding and fails nothing. A query this function still asks follows a
+/// different solver history, so in principle its `sat` or `unsat` can turn
+/// into `unknown` (or back) and fail (or rescue) the run. A
 /// trace is the one [`verify_bounded`] prints when the solver re-solves its
 /// output models ([`SmtSolver::resolve_output_model`], #1940): the re-solved
 /// model depends on the assertions, not on the queries asked before. A
