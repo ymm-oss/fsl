@@ -75,3 +75,22 @@ fn the_worker_reads_the_development_minor_only_behind_its_request_gate() {
         );
     }
 }
+
+/// Review of #1963: a source that is only its header, without a newline, is
+/// the empty document in the Worker too, never a panic.
+#[test]
+fn the_worker_reads_a_document_that_ends_at_its_header_as_empty() {
+    let minor = format!("fsl 5.{}", fsl_syntax::DEV_MINOR);
+    for (source, options) in [
+        ("fsl 5", json!({})),
+        ("fsl 5.0", json!({})),
+        (minor.as_str(), json!({"unstable":["fsl5-minor"]})),
+    ] {
+        let output = check(source, &options, None);
+        assert_eq!(output["result"], "error", "{source:?}: {output:#}");
+        assert_eq!(
+            output["diagnostic_code"], "FSL-DIALECT-EMPTY",
+            "{source:?}: {output:#}"
+        );
+    }
+}

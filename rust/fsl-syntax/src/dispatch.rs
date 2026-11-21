@@ -599,6 +599,46 @@ mod tests {
         );
     }
 
+    /// Review of #1963: a document that ends right after its header (no
+    /// newline) keeps its `Eof` token, so every entry reports the empty
+    /// document instead of indexing past the end of the stream.
+    #[test]
+    fn a_document_that_ends_at_its_header_is_empty() {
+        let gated = ParseOptions::with_unstable(
+            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5Minor),
+        );
+        let minor = format!("fsl 5.{}", crate::DEV_MINOR);
+        for (source, options) in [
+            ("fsl 5", ParseOptions::stable()),
+            ("fsl 4", ParseOptions::stable()),
+            ("fsl 5.0", ParseOptions::stable()),
+            ("// c\nfsl 4", ParseOptions::stable()),
+            ("fsl 5\t \r", ParseOptions::stable()),
+            (minor.as_str(), gated),
+        ] {
+            let tokens = crate::lex_with(source, &options).unwrap();
+            assert_eq!(tokens.len(), 1, "{source:?}: {tokens:?}");
+            assert!(
+                matches!(tokens[0].kind, crate::TokenKind::Eof),
+                "{source:?}"
+            );
+            let error = parse_document_with(SourceFile::new(source), &options).unwrap_err();
+            assert_eq!(error.code(), "FSL-DIALECT-EMPTY", "{source:?}");
+            assert_eq!(
+                dialect_keyword_with(source, &options).unwrap_err().code(),
+                "FSL-DIALECT-EMPTY",
+                "{source:?}"
+            );
+            assert_eq!(
+                crate::parse_surface_document_with(source, &options)
+                    .unwrap_err()
+                    .code(),
+                "FSL-DIALECT-EMPTY",
+                "{source:?}"
+            );
+        }
+    }
+
     #[test]
     fn unknown_editions_and_editionless_dialects_reject_the_header() {
         let error =

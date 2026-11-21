@@ -1025,6 +1025,30 @@ fn a_development_minor_header_is_served_as_fsl_5_behind_the_gate() {
     );
 }
 
+/// Review of #1963: a document that is only its header, without a newline,
+/// is published as the empty document and the server keeps serving
+/// (`published_diagnostics` shuts it down cleanly); it used to panic.
+#[test]
+fn a_document_that_ends_at_its_header_is_served_as_empty() {
+    let header = format!("fsl 5.{}", fsl_syntax::DEV_MINOR);
+    for (text, gate) in [
+        ("fsl 5", &[][..]),
+        ("fsl 4", &[]),
+        ("fsl 5.0", &[]),
+        (header.as_str(), &[("FSLC_UNSTABLE", "fsl5-minor")]),
+    ] {
+        let published = published_diagnostics_each(&[text], gate)
+            .pop()
+            .expect("one publish");
+        assert!(
+            published
+                .iter()
+                .any(|diagnostic| diagnostic["code"] == "FSL-DIALECT-EMPTY"),
+            "{text:?}: {published:#?}"
+        );
+    }
+}
+
 /// #1243: the editor published no error for a forbidden the requirement-trace
 /// gate rejects, although `check` refuses the spec. It now publishes the gate's
 /// error where `check` locates it (`loc` line 19, column 3 of the gallery

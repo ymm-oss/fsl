@@ -1111,6 +1111,53 @@ fn the_solver_refutes_a_development_minor_document_as_it_refutes_fsl_5() {
     }
 }
 
+/// Review of #1963: a document that ends right after its header (no
+/// newline) is the empty document in every command, as before minors:
+/// exit 2 with `FSL-DIALECT-EMPTY`, never a panic (exit 101). The same for a
+/// literate document whose unterminated `fsl` fence ends in its header.
+#[test]
+fn a_document_that_ends_at_its_header_is_empty_in_every_command() {
+    let directory = scratch("header-at-eof");
+    let header = minor_header();
+    let cases = [
+        ("five.fsl", "fsl 5".to_owned(), false),
+        ("four.fsl", "fsl 4".to_owned(), false),
+        ("zero.fsl", "fsl 5.0".to_owned(), false),
+        ("comment.fsl", "// c\nfsl 4".to_owned(), false),
+        ("minor.fsl", header.clone(), true),
+        ("fence.fsl.md", "# T\n\n```fsl\nfsl 5".to_owned(), false),
+    ];
+    let commands: [&[&str]; 7] = [
+        &["check"],
+        &["kernel"],
+        &["fmt"],
+        &["fmt", "--check"],
+        &["lint"],
+        &["migrate"],
+        &["verify"],
+    ];
+    for (name, source, gated) in &cases {
+        write(&directory, name, source);
+        for command in commands {
+            if name.ends_with(".md") && !matches!(command, ["check"] | ["verify"]) {
+                continue;
+            }
+            let arguments = [command, &[*name]].concat();
+            let (stdout, exit) = if *gated {
+                fslc_gated(&directory, &arguments)
+            } else {
+                fslc(&directory, &arguments)
+            };
+            assert_eq!(exit, 2, "{arguments:?}: {stdout}");
+            assert!(
+                stdout.contains("FSL-DIALECT-EMPTY"),
+                "{arguments:?}: {stdout}"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 /// Behind the gate `migrate --edition 5.N` writes the minor's header: into a
 /// header-less spec (`missing_edition_header`) and into a process-form
 /// requirements document it rewrites (the e2e fixture), so the written

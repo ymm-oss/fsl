@@ -97,9 +97,14 @@ pub fn lex_with(source: &str, options: &crate::ParseOptions) -> Result<Vec<Token
             matches!(&tokens[0].kind, TokenKind::Ident(name) if name == "fsl")
                 && matches!(tokens[1].kind, TokenKind::Int(_))
         );
+        // `Eof` is never a header token: a document that ends right after
+        // its header has an empty `Eof` span at the header's end.
         let header_tokens = tokens
             .iter()
-            .take_while(|token| token.span.end.offset <= header.span.end.offset)
+            .take_while(|token| {
+                !matches!(token.kind, TokenKind::Eof)
+                    && token.span.end.offset <= header.span.end.offset
+            })
             .count();
         tokens.drain(..header_tokens);
     }
