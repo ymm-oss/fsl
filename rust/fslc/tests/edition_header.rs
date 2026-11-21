@@ -714,3 +714,399 @@ fn migrate_with_edition_current_keeps_the_current_edition() {
     }
     let _ = std::fs::remove_dir_all(&directory);
 }
+
+// #1818 D1: the development minor `fsl 5.DEV_MINOR`, read only behind the
+// `fsl5-minor` gate. It has no form of its own yet, so a document headed by
+// it must read exactly as the `fsl 5` document does.
+
+/// The development minor's header line.
+fn minor_header() -> String {
+    format!("fsl 5.{}", fsl_syntax::DEV_MINOR)
+}
+
+/// `(stdout, exit)` of `fslc <arguments>` in `directory` behind the gate.
+fn fslc_gated(directory: &Path, arguments: &[&str]) -> (String, i32) {
+    let mut command = fslc_cli::command();
+    command
+        .args(arguments)
+        .current_dir(directory)
+        .env("FSLC_UNSTABLE", "fsl5-minor");
+    let output = command.output().expect("run fslc");
+    let exit = output
+        .status
+        .code()
+        .unwrap_or_else(|| panic!("fslc {arguments:?} died by signal"));
+    (
+        String::from_utf8(output.stdout).expect("UTF-8 stdout"),
+        exit,
+    )
+}
+
+/// `source` headed by `header`: an `fsl 5` header is replaced, a document
+/// without one gets it, and an `fsl 4` document is kept.
+fn with_minor_header(source: &str, header: &str) -> String {
+    match fsl_syntax::edition_header(source, &fsl_syntax::ParseOptions::stable()) {
+        Ok(Some(declared)) if declared.edition == fsl_syntax::Edition::Fsl5 => format!(
+            "{}{header}{}",
+            &source[..declared.span.start.offset],
+            &source[declared.span.end.offset..]
+        ),
+        Ok(Some(_)) => source.to_owned(),
+        _ => with_header(source, header),
+    }
+}
+
+/// [`mirror`] for the minor header ([`with_minor_header`] on every `.fsl`).
+fn minor_mirror(label: &str, header: &str) -> PathBuf {
+    fn copy(from: &Path, to: &Path, header: &str) {
+        std::fs::create_dir_all(to).expect("create mirror directory");
+        for entry in std::fs::read_dir(from).expect("read corpus directory") {
+            let path = entry.expect("corpus entry").path();
+            let destination = to.join(path.file_name().expect("file name"));
+            if path.is_dir() {
+                copy(&path, &destination, header);
+            } else if path.extension().is_some_and(|extension| extension == "fsl") {
+                let source = std::fs::read_to_string(&path).expect("read corpus file");
+                std::fs::write(&destination, with_minor_header(&source, header))
+                    .expect("write copy");
+            } else {
+                std::fs::copy(&path, &destination).expect("copy corpus file");
+            }
+        }
+    }
+    let target = scratch(label);
+    for tree in ["specs", "examples"] {
+        copy(&root().join(tree), &target.join(tree), header);
+    }
+    target
+}
+
+/// `stdout` as JSON with `directory` written as `<mirror>` and the
+/// wall-clock and allocator fields removed (`memory_mb` is Z3 allocator
+/// noise, as edition_all_commands.rs masks it).
+fn comparable(stdout: &str, directory: &Path) -> Value {
+    fn mask(value: &mut Value) {
+        match value {
+            Value::Object(fields) => {
+                for key in ["elapsed_s", "check_elapsed_s", "memory_mb"] {
+                    fields.remove(key);
+                }
+                fields.values_mut().for_each(mask);
+            }
+            Value::Array(items) => items.iter_mut().for_each(mask),
+            _ => {}
+        }
+    }
+    let mut value = json(&stdout.replace(&*directory.to_string_lossy(), "<mirror>"));
+    mask(&mut value);
+    value
+}
+
+/// `output` without the `fsl_edition_minor` a minor document adds, which
+/// must be [`fsl_syntax::DEV_MINOR`] exactly where `fsl_edition` is 5.
+fn without_minor(mut output: Value) -> Result<Value, String> {
+    let Value::Object(fields) = &mut output else {
+        return Ok(output);
+    };
+    let minor = fields.remove("fsl_edition_minor");
+    match (fields.get("fsl_edition"), minor) {
+        (Some(major), Some(minor)) if major == 5 && minor == fsl_syntax::DEV_MINOR => Ok(output),
+        (Some(major), None) if major != 5 => Ok(output),
+        (None, None) => Ok(output),
+        (major, minor) => Err(format!(
+            "fsl_edition {major:?} with fsl_edition_minor {minor:?}"
+        )),
+    }
+}
+
+/// Acceptance of #1818 D1 PR1: every document the `fsl 5` corpus test reads,
+/// headed `fsl 5.DEV_MINOR` with the gate on (a document headed `fsl 5`
+/// re-headed, an `fsl 4` one kept), gives `kernel` and `check` the output
+/// the `fsl 5` mirror gives without the gate, but for `fsl_edition_minor`.
+/// The `fsl 5` mirror re-heads the `examples/fsl5/` documents the same way,
+/// so the Japanese ones are compared too.
+#[test]
+fn a_development_minor_header_reads_the_corpus_as_fsl_5_does() {
+    let (paths, _) = edition_corpus();
+    let header = minor_header();
+    // `fsl 5` padded with blanks to the minor header's length, so byte
+    // offsets (a finding's edits) match too.
+    let five = minor_mirror(
+        "family5",
+        &format!("{:width$}", "fsl 5", width = header.len()),
+    );
+    let minor = minor_mirror("family5-minor", &header);
+    let minor_rows = std::sync::atomic::AtomicUsize::new(0);
+    let failures = each_path(&paths, |path| {
+        let mut failures = Vec::new();
+        for command in ["kernel", "check"] {
+            let (expected, expected_exit) = fslc(&five, &[command, path]);
+            let (actual, actual_exit) = fslc_gated(&minor, &[command, path]);
+            let expected = comparable(&expected, &five);
+            let actual = comparable(&actual, &minor);
+            if actual.get("fsl_edition_minor").is_some() {
+                minor_rows.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            match without_minor(actual) {
+                Ok(actual) if actual == expected && actual_exit == expected_exit => {}
+                Ok(actual) => failures.push(format!(
+                    "{path}: {command} exit {expected_exit} -> {actual_exit}\nfsl 5:  {expected}\n{header}: {actual}"
+                )),
+                Err(error) => failures.push(format!("{path}: {command}: {error}")),
+            }
+        }
+        failures
+    })
+    .concat();
+    let _ = std::fs::remove_dir_all(&five);
+    let _ = std::fs::remove_dir_all(&minor);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert!(
+        minor_rows.into_inner() > 100,
+        "not vacuous: most corpus `check`s report the minor header"
+    );
+}
+
+/// Without the gate a minor header is an unsupported edition in every
+/// command and `--edition 5.N` is a usage error; `fsl 5.0` is `fsl 5`.
+#[test]
+fn a_development_minor_needs_the_gate() {
+    let directory = scratch("minor-gate");
+    let header = minor_header();
+    // One file name in three directories, so `kernel` spans compare.
+    let [minor, zero, five] = ["minor", "zero", "five"].map(|label| directory.join(label));
+    for (directory, header) in [
+        (&minor, header.as_str()),
+        (&zero, "fsl 5.0"),
+        (&five, "fsl 5"),
+    ] {
+        std::fs::create_dir_all(directory).expect("create directory");
+        write(directory, "spec.fsl", &with_header(LEGACY, header));
+    }
+    let run = |directory: &Path, gated: bool, arguments: &[&str]| {
+        let (stdout, exit) = if gated {
+            fslc_gated(directory, arguments)
+        } else {
+            fslc(directory, arguments)
+        };
+        (comparable(&stdout, directory), exit)
+    };
+    let message = format!("unsupported syntax edition '{header}'; supported editions: 4, 5 at 1:1");
+    for command in ["check", "verify", "kernel"] {
+        let (output, exit) = run(&minor, false, &[command, "spec.fsl"]);
+        assert_eq!(exit, 2, "{command}: {output}");
+        assert_eq!(
+            output["diagnostic_code"],
+            fsl_syntax::UNSUPPORTED_EDITION,
+            "{command}: {output}"
+        );
+        assert_eq!(output["message"], message, "{command}: {output}");
+        // `fsl 5.0` is `fsl 5`, with or without the gate.
+        let expected = run(&five, false, &[command, "spec.fsl"]);
+        assert_eq!(
+            run(&zero, false, &[command, "spec.fsl"]),
+            expected,
+            "{command}"
+        );
+        assert_eq!(
+            run(&zero, true, &[command, "spec.fsl"]),
+            expected,
+            "{command} behind the gate"
+        );
+        // Behind the gate the minor document reads as `fsl 5`.
+        let (gated, exit) = run(&minor, true, &[command, "spec.fsl"]);
+        assert_eq!(exit, expected.1, "{command}: {gated}");
+        assert_eq!(without_minor(gated), Ok(expected.0), "{command}");
+    }
+    for command in ["fmt", "lint", "migrate"] {
+        let (stdout, exit) = fslc(&minor, &[command, "spec.fsl"]);
+        assert_eq!(exit, 2, "{command}: {stdout}");
+        assert!(
+            stdout.contains(fsl_syntax::UNSUPPORTED_EDITION),
+            "{command}: {stdout}"
+        );
+    }
+    let usage = "--edition must be current, next, 4, or 5";
+    for command in ["check", "verify", "fmt", "lint", "migrate"] {
+        for value in [header.trim_start_matches("fsl "), "5.0"] {
+            let (stdout, exit) = fslc(&five, &[command, "spec.fsl", "--edition", value]);
+            let output = json(&stdout);
+            assert_eq!(exit, 2, "{command} --edition {value}: {stdout}");
+            assert_eq!(output["kind"], "usage", "{stdout}");
+            assert_eq!(output["message"], usage, "{stdout}");
+        }
+    }
+    let (stdout, _) = fslc_gated(&five, &["check", "spec.fsl", "--edition", "5.0"]);
+    assert_eq!(
+        json(&stdout)["message"],
+        usage,
+        "`5.0` is no request spelling"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// Behind the gate a conflict compares major and minor, and echoes both
+/// spellings; a header-less document takes `--edition 5.N` as `next`.
+#[test]
+fn a_development_minor_conflicts_by_major_and_minor() {
+    let directory = scratch("minor-conflict");
+    let header = minor_header();
+    let number = header.trim_start_matches("fsl ").to_owned();
+    let minor = write(&directory, "minor.fsl", &with_header(LEGACY, &header));
+    let zero = write(&directory, "zero.fsl", &with_header(LEGACY, "fsl 5.0"));
+    let five = write(&directory, "five.fsl", &with_header(LEGACY, "fsl 5"));
+    let four = write(&directory, "four.fsl", &with_header(LEGACY, "fsl 4"));
+    let plain = write(&directory, "plain.fsl", LEGACY);
+    for (file, requested, declared) in [
+        (&minor, "5", number.as_str()),
+        (&minor, "next", number.as_str()),
+        (&minor, "4", number.as_str()),
+        (&five, number.as_str(), "5"),
+        (&zero, number.as_str(), "5"),
+        (&four, number.as_str(), "4"),
+    ] {
+        for command in ["check", "verify", "fmt", "lint", "migrate"] {
+            let (stdout, exit) = fslc_gated(&directory, &[command, file, "--edition", requested]);
+            assert_eq!(exit, 2, "{command} {file} --edition {requested}: {stdout}");
+            assert!(
+                stdout.contains(fsl_syntax::EDITION_CONFLICT)
+                    && stdout.contains(&format!(
+                        "the document declares 'fsl {declared}' but --edition {requested} was requested"
+                    )),
+                "{command} {file} --edition {requested}: {stdout}"
+            );
+        }
+    }
+    for (file, requested) in [
+        (&minor, number.as_str()),
+        (&minor, "current"),
+        (&plain, number.as_str()),
+    ] {
+        let (stdout, exit) = fslc_gated(&directory, &["check", file, "--edition", requested]);
+        assert_eq!(exit, 0, "{file} --edition {requested}: {stdout}");
+    }
+    let (as_minor, _) = fslc_gated(&directory, &["check", &plain, "--edition", &number]);
+    let (as_next, _) = fslc(&directory, &["check", &plain, "--edition", "next"]);
+    assert_eq!(
+        comparable(&as_minor, &directory),
+        comparable(&as_next, &directory)
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// Behind the gate `fmt` keeps a minor document byte for byte, and `fmt
+/// --check`, `lint` and `migrate` report on it what they report on the `fsl
+/// 5` document (no finding), plus `fsl_edition_minor`. A run over an `fsl 5`
+/// and a minor document publishes no `fsl_edition`: they declare different
+/// editions.
+#[test]
+fn fmt_lint_and_migrate_read_a_development_minor_document_as_fsl_5() {
+    let header = minor_header();
+    let example = std::fs::read_to_string(root().join("examples/fsl5/leave_request.ja.fsl"))
+        .expect("read example");
+    let five_dir = scratch("minor-tools-5");
+    let minor_dir = scratch("minor-tools-minor");
+    let five = write(&five_dir, "leave.fsl", &example);
+    let minor_source = with_minor_header(&example, &header);
+    assert!(minor_source.starts_with(&format!("{header}\n")));
+    let minor = write(&minor_dir, "leave.fsl", &minor_source);
+    let (formatted_five, exit) = fslc(&five_dir, &["fmt", &five]);
+    assert_eq!((exit, formatted_five.as_str()), (0, example.as_str()));
+    let (formatted, exit) = fslc_gated(&minor_dir, &["fmt", &minor]);
+    assert_eq!(
+        (exit, formatted.as_str()),
+        (0, minor_source.as_str()),
+        "fmt keeps the minor document byte for byte"
+    );
+    for arguments in [
+        vec!["fmt", "--check", "leave.fsl"],
+        vec!["lint", "leave.fsl"],
+        vec!["migrate", "leave.fsl"],
+        vec!["migrate", "leave.fsl", "--write"],
+    ] {
+        let (expected, expected_exit) = fslc(&five_dir, &arguments);
+        let (actual, actual_exit) = fslc_gated(&minor_dir, &arguments);
+        assert_eq!(actual_exit, expected_exit, "{arguments:?}: {actual}");
+        assert_eq!(expected_exit, 0, "{arguments:?}: {expected}");
+        let actual = comparable(&actual, &minor_dir);
+        assert_eq!(
+            actual["fsl_edition_minor"],
+            fsl_syntax::DEV_MINOR,
+            "{arguments:?}: {actual}"
+        );
+        assert_eq!(
+            without_minor(actual),
+            Ok(comparable(&expected, &five_dir)),
+            "{arguments:?}"
+        );
+    }
+    let (lint, _) = fslc_gated(&minor_dir, &["lint", "leave.fsl"]);
+    assert_eq!(json(&lint)["finding_count"], 0, "{lint}");
+    assert_eq!(
+        std::fs::read_to_string(minor_dir.join("leave.fsl")).expect("read back"),
+        minor_source,
+        "migrate --write leaves the minor document as it is"
+    );
+    write(&minor_dir, "five.fsl", &example);
+    for command in ["lint", "migrate"] {
+        let (mixed, exit) = fslc_gated(&minor_dir, &[command, "five.fsl", "leave.fsl"]);
+        let output = json(&mixed);
+        assert_eq!(exit, 0, "{command}: {mixed}");
+        assert_eq!(output["edition"], "next", "{command}: {mixed}");
+        assert!(
+            output.get("fsl_edition").is_none() && output.get("fsl_edition_minor").is_none(),
+            "{command}: `fsl 5` and `{header}` are different editions: {mixed}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&five_dir);
+    let _ = std::fs::remove_dir_all(&minor_dir);
+}
+
+/// The requirements checks the enumeration defers to the solver run for a
+/// minor document as for the `fsl 5` one: `check`, `verify` and `kernel`
+/// reject the decisions/048 J3 fixtures with the same envelope.
+#[test]
+fn the_solver_refutes_a_development_minor_document_as_it_refutes_fsl_5() {
+    let header = minor_header();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fsl5_solver");
+    for name in ["large_domain.fsl", "resource_condition.fsl"] {
+        let source = std::fs::read_to_string(fixtures.join(name)).expect("read fixture");
+        let five = scratch("minor-solver-5");
+        let minor = scratch("minor-solver-minor");
+        // `fsl 5` padded to the minor header's length, so offsets match.
+        write(
+            &five,
+            "doc.fsl",
+            &with_minor_header(
+                &source,
+                &format!("{:width$}", "fsl 5", width = header.len()),
+            ),
+        );
+        write(&minor, "doc.fsl", &with_minor_header(&source, &header));
+        for command in [
+            vec!["check"],
+            vec!["verify", "--depth", "3"],
+            vec!["kernel"],
+        ] {
+            let arguments = [command.as_slice(), &["doc.fsl"]].concat();
+            let (expected, expected_exit) = fslc(&five, &arguments);
+            let (actual, actual_exit) = fslc_gated(&minor, &arguments);
+            let expected = comparable(&expected, &five);
+            assert_eq!(expected_exit, 2, "{name} {command:?}: {expected}");
+            assert!(
+                expected["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("checked by the solver")),
+                "{name} {command:?}: {expected}"
+            );
+            assert_eq!(actual_exit, expected_exit, "{name} {command:?}");
+            assert_eq!(
+                without_minor(comparable(&actual, &minor)),
+                Ok(expected),
+                "{name} {command:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&five);
+        let _ = std::fs::remove_dir_all(&minor);
+    }
+}

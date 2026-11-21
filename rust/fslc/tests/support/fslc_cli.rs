@@ -9,7 +9,9 @@
 //! per-test `FSLC_CACHE_DIR` under `CARGO_TARGET_TMPDIR` and removes
 //! `FSLC_CACHE` and `FSLC_CACHE_VERIFY`. A test that asserts cache behaviour
 //! shares a directory across commands explicitly with
-//! [`command_with_cache_dir`].
+//! [`command_with_cache_dir`]. It also removes the unstable gate
+//! `FSLC_UNSTABLE` (#1818 D1), so a gate in the developer's shell never
+//! reaches a child; a test that runs behind the gate sets it itself.
 //!
 //! "Per test" is per thread: libtest runs each test on its own thread, and
 //! the directory is removed when that thread exits. A thread still running
@@ -87,7 +89,8 @@ pub fn command_with_cache_dir(dir: impl AsRef<Path>) -> Command {
     command
         .env("FSLC_CACHE_DIR", dir.as_ref())
         .env_remove("FSLC_CACHE")
-        .env_remove("FSLC_CACHE_VERIFY");
+        .env_remove("FSLC_CACHE_VERIFY")
+        .env_remove("FSLC_UNSTABLE");
     command
 }
 
