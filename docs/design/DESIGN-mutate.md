@@ -177,6 +177,32 @@ Cross-engine encoding gaps remain a risk: explicit-clean may bypass a BMC-only
 `build_spec` rejection described below; full-record agreement controls must
 reject any observed drift rather than allowlist it.
 
+The bounds-only BMC (the model with invariants, transitions, reachables and
+`leadsTo` removed) is skipped when explicit certifies that model clean through
+K (#1892). The certificate is the full-model explicit run itself when it
+completed with no violation and only a reachable unwitnessed: the bounds-only
+model reaches the same states and checks a subset of the properties. Otherwise,
+when the full-model run found a violation or was unsupported (`leadsTo`, which
+the bounds-only model drops), one explicit attempt on the bounds-only model
+with the same budget certifies under the same rules (supported, no runtime
+error, no overrun, no violation). That attempt is not made when the full-model
+run did not happen, overran its budget or failed, since it would walk the same
+states into the same outcome, nor when the probe walked more than 3,000 states:
+there concrete exploration costs more than the BMC call it would save (a wide
+action parameter in `examples/named_predicate.fsl` takes about 14 s to certify
+a bounds-only model whose BMC answers in under 1 s). The skip cannot change a
+result: the bounds-only BMC only ever contributes a kill, and a clean answer
+falls through to the full-model BMC with no boundary killer. A certified model
+leaves it nothing to contribute, so the full-model BMC decides exactly as after
+a clean bounds-only BMC, and every output field (`status`, `killed_by`,
+`killers`, `by_requirement`, attribution, notes) stays as it was. This rests on
+explicit and BMC agreeing on what is clean, the assumption the full-model
+explicit decision already makes. On the 115 corpus specs `mutate` accepts,
+with the attempt made on every mutant that reaches the bounds-only BMC, all
+3,877 bounds-only models explicit certified were also clean under that BMC,
+and with the skip as built `--by-requirement` stdout is byte-identical (14 of
+the specs also with `--oracle-attribution`).
+
 **Baseline gate**: run auto with its default 1,000,000-state budget and accept
 `verified` or `proved`. If auto is not accepted, rerun the existing BMC baseline
 on a fresh scoped thread using the same captured source. A verified rerun
