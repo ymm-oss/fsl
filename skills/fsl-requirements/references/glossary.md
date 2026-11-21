@@ -185,6 +185,11 @@ the same kernel), `許可 … 条件 入力 返品金額 > 0` is `allow … only
 kernel member and stays English, but the names in it are aliases like
 everywhere else.
 
+The quoted texts are not respelled. They are written directly in Japanese,
+not translated from the English titles, and no name stands in them with
+spaces around it (`自動承認上限以下の返品`, not `自動承認上限 以下の返品`;
+`../SKILL.md`, "English is canonical").
+
 ## Checking a glossary
 
 - Run the whole check loop on the Japanese file, not only on the English one.

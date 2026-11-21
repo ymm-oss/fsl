@@ -52,6 +52,15 @@ reading `implements.result` and the seam fields is in
   spec checks, never instead of it. Both spellings lower to the same kernel.
 - Requirement, scenario and policy IDs stay ASCII (`REQ-RET-001`). Quoted
   source text is kept verbatim in its own language.
+- A quoted text you write in Japanese (the text of a `rule`, `decide`,
+  `covers`, `goal`, `policy`, `scenario` or `forbidden` in a Japanese
+  spelling, or one the source does not give) is written directly in
+  Japanese, as a sentence a PM reads, not as a translation of the English
+  title. Do not set a name into it with spaces around it: write
+  `"休暇は 1 日以上、最大日数以下で申請する"`, not
+  `"休暇は 1 日以上 最大日数 以下で申請する"`. Nothing checks a quoted text
+  and a name inside it is not resolved, so the spaces only make the sentence
+  harder to read.
 - Event names (`event request = …`) and the spec name are declared canonical;
   they reach implementations.
 
