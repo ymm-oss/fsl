@@ -11450,25 +11450,30 @@ fn mutation_oracle_for_model(
 struct FullExplicit {
     budget: usize,
     /// The distinct states that probe walked on the full model. It does not
-    /// step past a successor that violates a property, so for a mutant with
-    /// a violation it can be fewer than the bounds-only model reaches; it is
-    /// a cost signal, not a state count of that model.
+    /// step into a successor that violates a property, so for a mutant with
+    /// a violation it can be far fewer than the bounds-only model reaches:
+    /// it is only a lower bound on that model's states.
     probe_states: usize,
     first: verification::ExplicitFirst,
 }
 
-/// The most states the boundary probe may have walked for the main oracle
-/// to try the explicit engine on the bounds-only model (#1892).
+/// The most states the main oracle's explicit attempt on the bounds-only
+/// model explores (#1892): its budget, and the probe count past which it is
+/// not made at all, since that count is a lower bound on the states.
 ///
 /// Such an attempt saves time only when exploring the model concretely is
 /// cheaper than one bounds-only BMC call. With wide action parameters it is
 /// not: a mutant of `examples/named_predicate.fsl` (23,409 probe states)
 /// spends about 14 s certifying a bounds-only model whose BMC call takes
-/// under 1 s. Calibrated on the 115 corpus specs that `mutate` accepts (the
-/// survey of #1849) from per-mutant stage times: with any bound from 1,000 to
-/// 4,000 no spec loses more than 0.3 s, at 5,000 one loses 2.5 s, and 3,000
-/// keeps 95% of the BMC time the skip saves without a bound.
-const BOUNDS_ONLY_EXPLICIT_PROBE_STATES: usize = 3_000;
+/// under 1 s. The probe count alone undercounts when the full model has a
+/// violation (#1960 review: a mutant whose init violates an invariant walks
+/// one probe state and then 50,000 bounds-only states), so the bound is also
+/// the attempt's budget. Calibrated on the 115 corpus specs that `mutate`
+/// accepts (the survey of #1849) from per-mutant stage times: as a probe
+/// bound alone, 1,000 to 4,000 leave no spec more than 0.3 s slower and 5,000
+/// one 2.5 s slower; as both bounds, 3,000 keeps about 89% of the BMC time the
+/// skip saves without them.
+const BOUNDS_ONLY_EXPLICIT_STATES: usize = 3_000;
 
 /// Whether the explicit engine certifies the bounds-only model `automatic`
 /// clean through `depth`, so that its BMC call cannot kill the mutant and the
@@ -11492,10 +11497,11 @@ const BOUNDS_ONLY_EXPLICIT_PROBE_STATES: usize = 3_000;
 ///   ([`is_bounds_only_obligation`]): the attempt would reach the same
 ///   violation at the same point, so it is not made.
 /// - otherwise (another violation, or unsupported, e.g. because of `leadsTo`,
-///   which the bounds-only model drops): one budgeted attempt on the
-///   bounds-only model when the probe walked at most
-///   [`BOUNDS_ONLY_EXPLICIT_PROBE_STATES`] states, certifying only when it is
-///   supported, error-free, within budget and violation-free.
+///   which the bounds-only model drops): one attempt on the bounds-only
+///   model with at most [`BOUNDS_ONLY_EXPLICIT_STATES`] states of budget,
+///   made only when the probe walked no more states than that, certifying
+///   only when it is supported, error-free, within budget and
+///   violation-free.
 ///
 /// Like the full-model explicit decision, this certifies **clean only**: a
 /// bounds-only kill and its label always come from the bounds-only BMC.
@@ -11518,12 +11524,17 @@ fn explicit_certifies_bounds_only(
             violation: Some(found),
             ..
         })) if is_bounds_only_obligation(&found.violation) => false,
-        _ if explicit.probe_states > BOUNDS_ONLY_EXPLICIT_PROBE_STATES => false,
+        _ if explicit.probe_states > BOUNDS_ONLY_EXPLICIT_STATES => false,
         _ => {
             #[cfg(test)]
             BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
             matches!(
-                verification::explicit_first(automatic, depth, explicit.budget, None),
+                verification::explicit_first(
+                    automatic,
+                    depth,
+                    explicit.budget.min(BOUNDS_ONLY_EXPLICIT_STATES),
+                    None
+                ),
                 verification::ExplicitFirst::Ran(Ok(ref result)) if certifies(result)
             )
         }
@@ -21649,7 +21660,7 @@ mod mutate_explicit_first_tests {
         assert_eq!((calls, attempts), (1, 0));
     }
 
-    /// #1892: past [`BOUNDS_ONLY_EXPLICIT_PROBE_STATES`] probe states the
+    /// #1892: past [`BOUNDS_ONLY_EXPLICIT_STATES`] probe states the
     /// bounds-only model is not tried explicitly, so its BMC runs.
     #[test]
     fn wide_state_space_keeps_bounds_only_bmc() {
@@ -21663,6 +21674,22 @@ mod mutate_explicit_first_tests {
         assert_eq!(main.outcome.killed_by(), Some("Low"));
         assert!(main.boundary_killer.is_none(), "{main:?}");
         assert_eq!((calls, attempts), (2, 0));
+    }
+
+    /// #1892: the probe count undercounts the bounds-only model when the full
+    /// model has a violation; the attempt then stops at
+    /// [`BOUNDS_ONLY_EXPLICIT_STATES`] and the bounds-only BMC runs (#1960
+    /// review, `wide_inv.fsl`).
+    #[test]
+    fn undercounted_probe_caps_the_bounds_only_attempt() {
+        // Init violates `T`, so the probe walks only the root; the
+        // bounds-only model reaches 16 * 16 * 16 states through depth 3.
+        let wide = "spec WideT { type N = 0..15 type Small = 0..1 state { a: N, b: N, c: N, t: Small } init { a = 0 b = 0 c = 0 t = 1 } action set_a(x: N) { a = x } action set_b(x: N) { b = x } action set_c(x: N) { c = x } invariant T { t == 0 } }";
+        let (main, calls, attempts) = main_route_attempts(wide, 3, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("T"));
+        assert!(main.boundary_killer.is_none(), "{main:?}");
+        assert_eq!((calls, attempts), (2, 1));
     }
 
     /// #1892: without an explicit budget the main oracle makes no explicit
