@@ -31,6 +31,18 @@ and re-wraps it with `_envelope` on a hit. It is **not** inside `bmc.py` or `run
 - Callers that route through `run_verify` — `sweep`, `chain`, and the `explain`/`html`/`ledger`
   internal verifies — inherit caching automatically.
 
+**Native Rust placement.** The paragraphs above describe the Python reference. In native `fslc`
+the cache is a layer in `run_verify_cli_kernel_from_source` (`rust/fslc/src/verification.rs`),
+which `verify`, each `sweep` cell, and a `chain` spec layer with a `depth` reach through
+`run_verify_cli_admitted`; those three use the cache. The other commands that verify
+internally do not: `mutate` (baseline and mutants), `html`, `ledger`, `testgen`, counterexample
+export, scenario generation from checked traces and the `db`/`ai`/`domain` checks go through
+`run_verify_admitted_from_source`, which runs with the cache off, and `explain` calls the
+engines without the cache layer. None of them reads or writes an entry, so a mutant's verdict
+is never served from or stored into the cache. `rust/fslc/tests/issue_1946_cache_callers.rs`
+pins that `mutate`, `explain`, `html` and `ledger` leave the cache empty. The verify cache is not
+used by `fslc-lsp`.
+
 Lookup happens after `_read_spec` and the acceptance/forbidden pre-checks (cheap, concrete
 Monitor-based; error paths return before the cache is consulted). Parse + `build_spec` always
 run — a hit still costs one parse, which is what makes the key trustworthy.
@@ -54,8 +66,8 @@ kept in one place (`verify_cache.compute_key`); adding a semantics-affecting par
    flags, and `rustc -vV`. Runtime cache-key construction hashes that fixed digest rather than
    rereading and hashing the complete executable. This preserves fail-closed invalidation for
    rebuilt editable worktrees while avoiding an engine-independent cost proportional to a
-   debug binary's size; native entries using this layout are schema `fslc-rust-cache.v2` under
-   `verify/v2` (issue #349).
+   debug binary's size; native entries using this layout are schema `fslc-rust-cache.v2`
+   (issue #349), now stored under `verify/v3` (§3).
 3. **Kernel AST**: the `(ast, display_names)` pair returned by `parse_src` — i.e.
    *post*-desugaring (compose/requirements/business/governance/db/ai/domain) and *post*
    `--instances`/`--values` override application. Because `expand_compose` /
@@ -66,6 +78,10 @@ kept in one place (`verify_cache.compute_key`); adding a semantics-affecting par
 4. **Raw entry-file source** (`sha256` of the bytes). Required because diagnostics quote
    source text by line (`_source_line_text` / `_requires_blocking_entry` slice
    `source_lines[line-1]`), and a text edit can change a quoted line without changing the AST.
+
+   Items 3 and 4 are the Python reference. The native key hashes **no AST**: it hashes the
+   entry spec's captured bytes and the bytes of every dependency it read (below), which
+   determine the expanded AST, so they cover item 3 as well.
 5. **All cacheable verify options**: `engine`, `depth`, `k_ind`, `deadlock_mode`, `vacuity_mode`,
    `property_name`, sorted `exclude_property_names`, `strict_tags`, the parsed
    `--instances`/`--values` overrides (defense in depth — they are already reflected in the
@@ -88,7 +104,7 @@ the entry file miss the cache. That is the accepted trade — hit-rate loss, nev
 bytes (item 4), each dependency it actually read (the `from`/`use` and inline `implements`
 targets, recorded as *path relative to the entry spec's directory* plus bytes), the
 `--requirements` file's bytes, the verify options (item 5), and the implementation/solver
-fingerprint (item 2), under key prefix `fslc-rust-verify-cache-v4`. **No absolute path enters
+fingerprint (item 2), under key prefix `fslc-rust-verify-cache-v5`. **No absolute path enters
 the key, and neither does the entry spec's own path**: no cacheable verdict carries a file path
 (results carry spec names), so the path is not an input to the result, and hashing it only made
 an unchanged spec miss after a move, rename, or second checkout (measured: 13.32 s miss against
@@ -97,6 +113,19 @@ entry, and entries written under the older key derivation (prefix `fslc-rust-ver
 cannot be found by the new one, so a stale `verified` from before the change is never replayed.
 Everything that can change a verdict still changes the key: a spec edit, a dependency's content
 or relative name, any option.
+
+**Every hashed byte is a byte the verdict was computed from (issue #1946).** The entry spec's
+bytes are the root source captured once at the start of the command (#808) — for a literate
+`.md` root, the Markdown document read once together with the source extracted from it — and
+never a second read of the file. Dependencies are the contents the recording resolver returned
+to verification. The `--requirements` file is read at most once per run, and the strict-tag
+pass uses the same bytes as the key; a file that cannot be read makes the run uncacheable. With
+`--engine auto` both candidate keys (explicit and bmc) are computed once before the run, and
+the store after the run uses the keys the lookup used. Before #1946 the key re-read the entry
+file and the requirements file, and `auto` rebuilt its store keys after the run, so a file
+replaced during a run could have the old content's verdict stored under the new content's key
+(a false green or false red on the next run). The prefix moved from `v4` to `v5` with that fix,
+so an entry written under a `v4` key, which may hold such a verdict, is never matched.
 
 Canonical encoding: a recursive encoder tagging container types (tuple vs list vs dict —
 dicts serialized with sorted keys), then `json.dumps(..., sort_keys=True)` → sha256. The
@@ -162,7 +191,12 @@ than hashing an under-specified representation).
   would leave the primary agent loop unaccelerated. `--no-cache`/`FSLC_CACHE=off` remain for
   distrust, and `FSLC_CACHE_VERIFY=1` is a paranoid mode that on every hit *also* re-runs the
   engine and reports any verdict divergence as `{"result":"error","kind":"internal"}` — used
-  in CI (§8), available to anyone.
+  in CI (§8), available to anyone. Native `fslc` does this by skipping the lookup, running
+  fresh, and, before it stores, comparing the fresh `result` with what an ordinary lookup of
+  the run's key returns: the entry stored under that exact key, or else a `violated` entry
+  reached through the key's cross-depth pointer (§5) whose step is within the requested
+  depth. A divergence is reported (exit 3) and nothing is stored. Since issue #1946 this
+  covers `--engine auto` too, against the key of the engine that decided.
 - Test hermeticity: `tests/conftest.py` sets `FSLC_CACHE=off` so the existing suite never
   observes a developer's warm cache; cache tests opt back in with `FSLC_CACHE_DIR=tmp_path`.
 
@@ -183,7 +217,7 @@ No other cross-depth reuse in v1: a `verified`-at-depth-10 entry is *not* served
 depth-8 request, because verified payloads embed the depth in `depth`/`checked_to_depth`/
 warning text; rewriting cached payloads is exactly the kind of cleverness this design bans.
 (Index: a small `<root>/verify/v1/xdepth/<depth-agnostic-key>.json` pointer for Python, or
-`<root>/verify/v2/xdepth/<depth-agnostic-key>.json` for native Rust, to the violated entry;
+`<root>/verify/v3/xdepth/<depth-agnostic-key>.json` for native Rust, to the violated entry;
 same atomicity rules.)
 
 ## 6. Property-level differential re-verification (staged; BMC only)
@@ -241,8 +275,9 @@ the deferred internal reuse proposal does not describe live argv-candidate cachi
 
 | Failure mode | Prevention |
 |---|---|
-| Spec edit not detected | Key covers raw source bytes + full post-expansion kernel AST; parse always runs; no mtime/size shortcuts anywhere. |
-| Edit to a composed/`use`d/refined component while entry file unchanged | Expansion inlines components into the AST at parse time → AST hash moves. |
+| Spec edit not detected | Python: key covers raw source bytes + full post-expansion kernel AST. Native: key covers the captured entry-spec bytes (no AST; §2). Parse always runs; no mtime/size shortcuts anywhere. |
+| Spec or `--requirements` file edited while a run is in progress | Native: the key hashes the bytes the verdict was computed from, each read once — the captured root, the recorded dependencies, the requirements bytes the strict-tag pass also uses — and `auto` stores under the keys computed before the run (§2, issue #1946). |
+| Edit to a composed/`use`d/refined component while entry file unchanged | Python: expansion inlines components into the AST at parse time → AST hash moves. Native: each dependency's recorded bytes are in the key. |
 | `--instances`/`--values`/`--depth`/`--engine`/`--k`/`--deadlock`/`--vacuity`/`--property`/`--exclude-property`/`--strict-tags` change on a cacheable run | Each is an explicit key component; bounds overrides are additionally reflected in the AST they rewrite. |
 | Any native `--lemma` candidate supplied or changed | Lemma-guided runs bypass persistent cache lookup and storage entirely, so neither a no-lemma verdict nor an earlier candidate verdict can be replayed. Candidate order affects the uncached retry loop, not a live cache key. |
 | `--requirements` file edited at same path | Content hash, not path, in the key. |
@@ -271,7 +306,11 @@ nondeterminism the tool already has across z3 versions.
   over the full §2.5 list); requirements-content edit misses; fingerprint change misses;
   comment-only edit misses (documents the conservative choice); corrupt entry ⇒ miss without
   crash; `--no-cache`/`FSLC_CACHE=off` never read nor write; `run_mutate` leaves the cache
-  directory empty.
+  directory empty. Native: `rust/fslc/tests/issue_1946_cache_callers.rs` pins the last one for
+  `mutate`, `explain`, `html` and `ledger`; the `issue_1946_*` unit tests in
+  `rust/fslc/src/verification.rs` pin that a verdict is keyed by the captured root (a file
+  holding other content, a file replaced during an `auto` run, a literate document) and that
+  strict-tag warnings are keyed by the requirements bytes they were computed from.
 - Key-completeness guard: introspect `run_verify`'s signature and assert every parameter is
   either a declared key component or on an explicit allowlist of non-semantic parameters —
   a new parameter fails the test until classified.

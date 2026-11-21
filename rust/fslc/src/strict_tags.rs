@@ -3,10 +3,55 @@
 //! `--strict-tags` warnings: requirement tags a spec declares but does not
 //! reference, and the reverse.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fsl_core::KernelModel;
 use serde_json::{Value, json};
+
+/// A `--requirements` file, read once for one run (issue #1946).
+///
+/// `verify` hashes these bytes into its cache key and gives the same bytes to
+/// the strict-tag pass, so a file edited during the run cannot have its later
+/// contents' warnings stored under the key of its earlier contents.
+pub(crate) struct RequirementsFile {
+    path: PathBuf,
+    contents: std::io::Result<Vec<u8>>,
+}
+
+impl RequirementsFile {
+    pub(crate) fn read(path: &Path) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            contents: std::fs::read(path),
+        }
+    }
+
+    /// The bytes read, or `None` when the read failed.
+    pub(crate) fn bytes(&self) -> Option<&[u8]> {
+        self.contents.as_deref().ok()
+    }
+
+    /// The contents as text, failing with the message a direct
+    /// `read_to_string` of the file reports.
+    fn text(&self) -> Result<&str, String> {
+        let bytes = self.contents.as_deref().map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                format!("file not found: {}", self.path.display())
+            } else {
+                crate::spec_loading::read_failure_message(&self.path, error)
+            }
+        })?;
+        std::str::from_utf8(bytes).map_err(|_| {
+            crate::spec_loading::read_failure_message(
+                &self.path,
+                &std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "stream did not contain valid UTF-8",
+                ),
+            )
+        })
+    }
+}
 
 /// Collect every requirement ID that some declaration or trace case references.
 ///
@@ -66,7 +111,7 @@ pub(crate) fn referenced_requirement_ids(
 pub(crate) fn strict_tag_warnings_from_source(
     model: &KernelModel,
     source: &str,
-    requirements: Option<&Path>,
+    requirements: Option<&RequirementsFile>,
 ) -> Result<Vec<Value>, String> {
     let mut warnings = Vec::new();
     // The hint names the canonical link form from `docs/design/DESIGN-id-policy.md`.
@@ -136,16 +181,9 @@ pub(crate) fn strict_tag_warnings_from_source(
         fsl_core::requirements_declared_ids_with_options(source, crate::process::parse_options())
             .unwrap_or_default();
     let mut declared_from_file: Vec<String> = Vec::new();
-    if let Some(path) = requirements {
-        let source = std::fs::read_to_string(path).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                format!("file not found: {}", path.display())
-            } else {
-                crate::spec_loading::read_failure_message(path, &error)
-            }
-        })?;
+    if let Some(file) = requirements {
         declared_from_file.extend(
-            source
+            file.text()?
                 .lines()
                 .map(str::trim)
                 .filter(|line| !line.is_empty())
@@ -185,7 +223,7 @@ pub(crate) fn add_strict_tag_warnings_from_source(
     model: &KernelModel,
     source: &str,
     strict_tags: bool,
-    requirements: Option<&Path>,
+    requirements: Option<&RequirementsFile>,
 ) -> Result<(), String> {
     if !strict_tags
         || !matches!(
@@ -206,4 +244,44 @@ pub(crate) fn add_strict_tag_warnings_from_source(
         .expect("warnings is an array")
         .extend(additions);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RequirementsFile;
+
+    /// The strict-tag pass reports an unreadable `--requirements` file with
+    /// the message a direct read reports (issue #1946 moved the read).
+    #[test]
+    fn issue_1946_requirements_read_errors_keep_their_messages() {
+        let dir = std::env::temp_dir().join(format!(
+            "fslc-1946-requirements-errors-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create scratch directory");
+        let missing = dir.join("missing.txt");
+        assert_eq!(
+            RequirementsFile::read(&missing)
+                .text()
+                .expect_err("missing"),
+            format!("file not found: {}", missing.display())
+        );
+        let invalid = dir.join("invalid.txt");
+        std::fs::write(&invalid, [b'R', 0xff, b'\n']).expect("write invalid UTF-8");
+        let direct = std::fs::read_to_string(&invalid).expect_err("invalid UTF-8");
+        assert_eq!(
+            RequirementsFile::read(&invalid)
+                .text()
+                .expect_err("invalid UTF-8"),
+            crate::spec_loading::read_failure_message(&invalid, &direct)
+        );
+        let direct = std::fs::read_to_string(&dir).expect_err("a directory");
+        assert_eq!(
+            RequirementsFile::read(&dir)
+                .text()
+                .expect_err("a directory"),
+            crate::spec_loading::read_failure_message(&dir, &direct)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
