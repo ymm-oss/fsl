@@ -313,15 +313,36 @@ Known remaining differences from BMC (#1961):
   `partial_op`.
 - **A partial-guard state at the depth that BMC keeps alive.** The
   three-valued reading counts a state as dead unless one guard is shown true
-  for every value of its reads. BMC keeps the state alive also when a guard
-  is true for every value but the reading cannot show it (`q.head() >= 0 or
-  q.head() < 0`), and when the guards are each falsifiable but never all
-  false together (`q.head() == 0` on one action, `q.head() != 0` on
-  another). There, at the depth, explicit reports the terminal's `partial_op`
-  or the deadlock and BMC reports nothing. This is the one remaining
-  difference in the dead-state decision, and it errs toward reporting; no
-  finite enumeration of the read is exact, because BMC's read ranges over
-  the unbounded integers.
+  for every value of its reads, and it stops at an instance's first
+  `requires` that is not `True` or its first partial `let`. BMC keeps the
+  state alive also when a guard is true for every value but the reading
+  cannot show it. At the depth explicit then reports the terminal's
+  `partial_op` or the deadlock and BMC reports nothing, for example:
+  - a partial `let` read later in a tautology (a `letpartial` shape:
+    `let h = q.head()` then `requires h == h`, after a `pop` empties `q`);
+  - a division over a partial read (a `divread` shape: `q.head() / z == 0`
+    at `z = 0`, which BMC's totalized quotient makes `0 == 0`);
+  - a conditional whose branches agree only per value (a `condg2` shape:
+    `if q.head() == 1 then q.head() == 1 else q.head() != 1`);
+  - guards that are each falsifiable but never all false together (a
+    `twoinst` shape: `q.head() == 1` on one action, `q.head() != 1` on
+    another), or a disjunction such as `q.head() >= 0 or q.head() < 0`.
+
+  This is the one remaining difference in the dead-state decision, and it
+  errs toward reporting; no finite enumeration of the read is exact, because
+  BMC's read ranges over the unbounded integers.
+- **The default BMC route's boundary pre-pass.** `--engine bmc` (and the
+  default engine) first runs the concrete boundary probe
+  (`probe_bmc_boundary` in `rust/fslc/src/verification.rs`), which reports
+  the first successor `partial_op` or `type_bound` it reaches in its own
+  breadth-first order, before BMC proper and so before BMC's per-step order
+  of action partial operations and terminals. With the bound of a Seq
+  checked, explicit can then name a different violation: in an `h6` shape
+  without `--property`, explicit reports `_partial_crash` at step 2 and the
+  BMC route `type_bound` `_bounds_q` at step 2 (base explicit agreed with
+  the BMC route there); in an `h4` shape explicit reports the terminal's
+  `partial_op` at step 1 and the BMC route `_bounds_q` at step 2, as on
+  base. The verdict is `violated` in every engine.
 - **An unchecked Seq overflow while expanding** (seed). When nothing is
   held, an unchecked Seq overflow on a successor fails the run (exit 2,
   `model sequence length exceeds capacity`) as soon as it is met, even if a
