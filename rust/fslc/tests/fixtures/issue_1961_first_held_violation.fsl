@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 re-review): from the two states of step 1, `x` violates
+// `NotFive` and `y` violates `NotSix` at step 2. BMC checks the invariants of
+// step 2 in declaration order, and explicit reports the first stepped
+// violation in frontier order; both give `NotFive`.
+spec TwoInv {
+  type K = 0..7
+  state { k: K }
+  init { k = 0 }
+  action a() { requires k == 0 k = 1 }
+  action b() { requires k == 0 k = 2 }
+  action x() { requires k == 1 k = 5 }
+  action y() { requires k == 2 k = 6 }
+  invariant NotFive { k != 5 }
+  invariant NotSix { k != 6 }
+}

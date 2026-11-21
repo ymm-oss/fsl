@@ -394,3 +394,19 @@ fn held_terminal_failure_wins_over_an_unchecked_overflow() {
         assert_eq!(output["violated_at_step"], 1, "{engine}: {output:#}");
     }
 }
+
+/// The held stepped violation is the first one found, not the last.
+#[test]
+fn the_first_stepped_violation_is_reported() {
+    let name = "issue_1961_first_held_violation.fsl";
+    for engine in ["explicit", "auto", "bmc"] {
+        let (output, status) = verify_args(name, engine, &[]);
+        assert_eq!(status, 1, "{engine}: {output:#}");
+        assert_eq!(
+            output["violation_kind"], "invariant",
+            "{engine}: {output:#}"
+        );
+        assert_eq!(output["invariant"], "NotFive", "{engine}: {output:#}");
+        assert_eq!(output["violated_at_step"], 2, "{engine}: {output:#}");
+    }
+}
