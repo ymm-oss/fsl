@@ -1139,7 +1139,7 @@ fn a_document_that_ends_at_its_header_is_empty_in_every_command() {
     for (name, source, gated) in &cases {
         write(&directory, name, source);
         for command in commands {
-            if name.ends_with(".md") && !matches!(command, ["check"] | ["verify"]) {
+            if *name == "fence.fsl.md" && !matches!(command, ["check" | "verify"]) {
                 continue;
             }
             let arguments = [command, &[*name]].concat();
