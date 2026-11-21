@@ -11504,7 +11504,9 @@ const BOUNDS_ONLY_EXPLICIT_STATES: usize = 3_000;
 ///   violation-free.
 ///
 /// Like the full-model explicit decision, this certifies **clean only**: a
-/// bounds-only kill and its label always come from the bounds-only BMC.
+/// bounds-only kill and its label always come from the bounds-only BMC. It
+/// assumes explicit and BMC agree on what is clean; DESIGN-mutate §3 names
+/// the known exceptions (#1961, a solver `unknown`, a BMC-only `build_spec`).
 fn explicit_certifies_bounds_only(
     explicit: Option<&FullExplicit>,
     automatic: &KernelModel,
