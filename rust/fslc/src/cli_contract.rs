@@ -161,8 +161,13 @@ fn validate_tokens(
             return Err(missing_value(command, token));
         };
         index += 1;
+        // The gated `--edition 5.N` (#1818 D1) is not advertised in the
+        // contract's choices; the command-local parser decides it.
+        let gated_edition =
+            token == "--edition" && fsl_syntax::Edition::parse_option(value, &options).is_ok();
         if let Some(choices) = action["choices"].as_array()
             && !choices.iter().any(|choice| choice.as_str() == Some(value))
+            && !gated_edition
         {
             return Err(choice_message(command, token, value, options));
         }
@@ -435,6 +440,33 @@ mod tests {
         assert_eq!(
             validate_with(&["fmt", "--names", "invalid", "spec.fsl"], options),
             Err("--names must be alias or canonical".to_owned())
+        );
+    }
+
+    /// #1818 D1: `--edition 5.N` passes the contract only behind the gate,
+    /// on the commands that take `--edition`; the contract does not list it.
+    #[test]
+    fn the_gated_edition_passes_the_contract_only_with_the_gate() {
+        let gated = ParseOptions::with_unstable(
+            fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5Minor),
+        );
+        let minor = format!("5.{}", fsl_syntax::DEV_MINOR);
+        for command in ["check", "verify", "fmt", "lint", "migrate"] {
+            let argv = [command, "spec.fsl", "--edition", minor.as_str()];
+            assert_eq!(validate_with(&argv, gated), Ok(()), "{argv:?}");
+            assert_eq!(
+                validate(&argv),
+                Err("--edition must be current, next, 4, or 5".to_owned()),
+                "{argv:?}"
+            );
+        }
+        assert_eq!(
+            validate_with(&["check", "spec.fsl", "--edition", "5.0"], gated),
+            Err("--edition must be current, next, 4, or 5".to_owned())
+        );
+        assert!(
+            !include_str!("../cli-contract.json").contains(&format!("\"{minor}\"")),
+            "the gated spelling is not advertised"
         );
     }
 

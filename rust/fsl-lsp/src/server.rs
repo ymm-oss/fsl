@@ -115,7 +115,8 @@ pub fn run_stdio() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     let params: InitializeParams = serde_json::from_value(initialize)?;
     let mut state = ServerState {
         roots: workspace_roots(&params),
-        parse_options: fsl_syntax::ParseOptions::stable(),
+        // The unstable gate (`FSLC_UNSTABLE`), read once at start (#1818 D1).
+        parse_options: fslc_rust::unstable_gate::from_environment(),
         ..ServerState::default()
     };
 
@@ -383,10 +384,10 @@ fn publish_diagnostics(
         fslc_rust::source_diagnostic::trace_gate_diagnostics(&source, model, &state.parse_options)
     });
     // `check`'s last stage: the requirements checks the enumeration deferred,
-    // asked once the trace gate passes (decisions/048 J3). Only a `fsl 5`
-    // document has such checks.
+    // asked once the trace gate passes (decisions/048 J3). Only a document
+    // of the `fsl 5` family has such checks.
     let requirements = match &model {
-        Some(model) if trace_gate.is_empty() && edition == fsl_syntax::Edition::Fsl5 => {
+        Some(model) if trace_gate.is_empty() && edition.family_fsl5() => {
             requirements_diagnostics(&source, model, state.parse_options)
         }
         _ => Vec::new(),
@@ -535,7 +536,7 @@ fn to_lsp_diagnostic(
     item: SourceDiagnostic,
     edition: fsl_syntax::Edition,
 ) -> Diagnostic {
-    let severity = if item.kind == "migration" && edition != fsl_syntax::Edition::Fsl5 {
+    let severity = if item.kind == "migration" && !edition.family_fsl5() {
         DiagnosticSeverity::WARNING
     } else {
         DiagnosticSeverity::ERROR

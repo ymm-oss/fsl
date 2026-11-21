@@ -2008,7 +2008,20 @@ fn verify_cache_keys_with_solver_version(
 /// (an edition conflict), so their results are never shared. The document's
 /// edition header is part of the source text the key already hashes. Without
 /// an explicit request the blob has no `edition_request` (#1434).
+///
+/// #1818 D1: a request for a minor other than `0` (`--edition 5.N`, gated)
+/// adds `edition_request_minor`, and a run with unstable features enabled
+/// carries their names (`unstable`), so a gated run never shares a result with
+/// an ungated one. Without either the blob is unchanged.
 fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value {
+    verify_cache_base_options_with(engine, options, crate::process::parse_options().unstable())
+}
+
+fn verify_cache_base_options_with(
+    engine: &str,
+    options: &CliVerifyOptions,
+    unstable: fsl_syntax::UnstableFeatures,
+) -> Value {
     let mut blob = json!({
         "deadlock": options.deadlock,
         "engine": engine,
@@ -2031,6 +2044,17 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
             "edition_request".to_owned(),
             json!(request.edition.number()),
         );
+        if request.edition.minor() != 0 {
+            fields.insert(
+                "edition_request_minor".to_owned(),
+                json!(request.edition.minor()),
+            );
+        }
+    }
+    if !unstable.is_empty()
+        && let Value::Object(fields) = &mut blob
+    {
+        fields.insert("unstable".to_owned(), json!(unstable.names()));
     }
     blob
 }
@@ -3697,6 +3721,48 @@ pub(crate) mod tests {
         )));
         assert_eq!(five["edition"], json!("next"), "{five:#}");
         assert_eq!(five["edition_request"], json!(5), "{five:#}");
+        assert!(five.get("edition_request_minor").is_none(), "{five:#}");
+    }
+
+    /// #1818 D1: the development minor's request and the gate are in the
+    /// key; a published run's blob has neither.
+    #[test]
+    fn verify_cache_base_options_separate_minor_requests_and_the_gate() {
+        let gate = fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5Minor);
+        let blob = |edition, unstable| {
+            let mut options = CliVerifyOptions::default();
+            options.shared.edition = edition;
+            verify_cache_base_options_with("bmc", &options, unstable)
+        };
+        let five = Some(fsl_syntax::EditionRequest::numbered(
+            fsl_syntax::Edition::Fsl5,
+        ));
+        let minor = Some(fsl_syntax::EditionRequest::numbered(
+            fsl_syntax::Edition::Fsl5Dev,
+        ));
+        let published = blob(five, fsl_syntax::UnstableFeatures::NONE);
+        assert!(published.get("unstable").is_none(), "{published:#}");
+        let gated_five = blob(five, gate);
+        assert_eq!(
+            gated_five["unstable"],
+            json!(["fsl5-minor"]),
+            "{gated_five:#}"
+        );
+        assert_ne!(gated_five, published);
+        let gated_minor = blob(minor, gate);
+        assert_eq!(gated_minor["edition"], json!("next"), "{gated_minor:#}");
+        assert_eq!(gated_minor["edition_request"], json!(5), "{gated_minor:#}");
+        assert_eq!(
+            gated_minor["edition_request_minor"],
+            json!(fsl_syntax::DEV_MINOR),
+            "{gated_minor:#}"
+        );
+        assert_ne!(gated_minor, gated_five);
+        assert_eq!(
+            blob(None, gate).get("edition_request_minor"),
+            None,
+            "a header's minor is in the hashed source, not the blob"
+        );
     }
 
     #[test]

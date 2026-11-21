@@ -164,7 +164,7 @@ pub fn convert_process_forms(
     edition: Edition,
     options: &ParseOptions,
 ) -> ProcessFormOutcome {
-    if edition != Edition::Fsl5 {
+    if !edition.family_fsl5() {
         return ProcessFormOutcome::Unchanged;
     }
     let shared = shared_requirement_ids(original, *options);

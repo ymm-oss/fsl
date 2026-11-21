@@ -37,8 +37,20 @@ struct Request {
     files: BTreeMap<String, String>,
     #[serde(default)]
     options: Options,
-    // No `unstable` field (#1434): `fsl 5` is published. An old client's
-    // `"unstable"` value, of any type, is an unknown field serde ignores.
+    // No top-level `unstable` field (#1434): `fsl 5` is published. An old
+    // client's `"unstable"` value, of any type, is an unknown field serde
+    // ignores. The gate is `options.unstable` (#1818 D1).
+}
+
+impl Request {
+    /// The parse options this request runs under: the published language,
+    /// plus the unstable features `options.unstable` names.
+    fn parse_options(&self) -> fsl_syntax::ParseOptions {
+        let (features, _unknown) = fsl_syntax::UnstableFeatures::from_names(
+            self.options.unstable.iter().map(String::as_str),
+        );
+        fsl_syntax::ParseOptions::with_unstable(features)
+    }
 }
 
 fn default_source_file() -> String {
@@ -57,6 +69,12 @@ struct Options {
     depth: usize,
     #[serde(default = "default_deadlock")]
     deadlock: String,
+    /// The unstable features this request enables (#1818 D1), as
+    /// `FSLC_UNSTABLE` lists them for the native CLI: `["fsl5-minor"]`. Not
+    /// advertised. Unknown names, and a value that is not an array of
+    /// strings, enable nothing.
+    #[serde(default, deserialize_with = "lenient_feature_names")]
+    unstable: Vec<String>,
 }
 
 impl Default for Options {
@@ -64,8 +82,27 @@ impl Default for Options {
         Self {
             depth: default_depth(),
             deadlock: default_deadlock(),
+            unstable: Vec::new(),
         }
     }
+}
+
+/// `options.unstable` as a list of names; any other JSON value is no list, so
+/// a malformed gate never turns a request into an error.
+fn lenient_feature_names<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    Ok(value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 const fn default_depth() -> usize {
@@ -150,7 +187,7 @@ fn admitted_resolver<'a>(
             files: request.files.clone(),
         },
         log.clone(),
-        fsl_syntax::ParseOptions::stable(),
+        request.parse_options(),
         envelope,
     )
 }
@@ -171,7 +208,7 @@ fn build(
         &request.source,
         &resolver,
         &request.source_file,
-        &fsl_syntax::ParseOptions::stable(),
+        &request.parse_options(),
     )
     .map_err(|failure| {
         fslc_rust::spec_load::render_spec_load_error(
@@ -179,7 +216,7 @@ fn build(
             &fslc_rust::spec_load::kernel_load_error(
                 &request.source,
                 &failure,
-                &fsl_syntax::ParseOptions::stable(),
+                &request.parse_options(),
             ),
         )
     })?;
@@ -217,7 +254,7 @@ async fn reject_refuted_requirements<S: fsl_solver::SmtSolver>(
     match fslc_rust::requirements_solver::refute(
         &request.source,
         &model,
-        &fsl_syntax::ParseOptions::stable(),
+        &request.parse_options(),
         new_solver,
     )
     .await
@@ -263,7 +300,7 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
         &request.source_file,
         &resolver,
         &|| envelope(solver_version),
-        &fsl_syntax::ParseOptions::stable(),
+        &request.parse_options(),
         new_solver,
         edition,
     )
@@ -274,14 +311,11 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
     };
     let compose_warnings = checked.kernel.diagnostics().to_vec();
     let model = checked.model;
-    let warning_ctx = match ModelWarningContext::from_source(
-        &model,
-        &request.source,
-        &fsl_syntax::ParseOptions::stable(),
-    ) {
-        Ok(ctx) => ctx,
-        Err(core_error) => return error(solver_version, "semantics", core_error.to_string()),
-    };
+    let warning_ctx =
+        match ModelWarningContext::from_source(&model, &request.source, &request.parse_options()) {
+            Ok(ctx) => ctx,
+            Err(core_error) => return error(solver_version, "semantics", core_error.to_string()),
+        };
     let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -312,7 +346,7 @@ fn admit_edition(
     request: &Request,
     solver_version: &str,
 ) -> Result<fslc_rust::migration::SourceEdition, Value> {
-    let options = fsl_syntax::ParseOptions::stable();
+    let options = request.parse_options();
     fslc_rust::migration::admit_source(
         &request.source,
         &request.source_file,
@@ -360,7 +394,7 @@ async fn governance_output(
     let dependency_envelope = || envelope(solver_version);
     let resolver = admitted_resolver(request, log, &dependency_envelope);
     let resolver_ref = &resolver;
-    let options = fsl_syntax::ParseOptions::stable();
+    let options = request.parse_options();
     let options_ref = &options;
     fslc_rust::verification_output::governance_output_async(
         &request.source,
@@ -457,7 +491,7 @@ fn implements_output(
         &resolver,
         model,
         depth,
-        &fsl_syntax::ParseOptions::stable(),
+        &request.parse_options(),
     )
 }
 
@@ -472,11 +506,9 @@ fn add_frontend_metadata(
     if let Some(implements) = implements {
         fslc_rust::verification_output::attach_requirements_implements(&mut output, implements);
     }
-    if let Ok(ctx) = ModelWarningContext::from_source(
-        model,
-        &request.source,
-        &fsl_syntax::ParseOptions::stable(),
-    ) {
+    if let Ok(ctx) =
+        ModelWarningContext::from_source(model, &request.source, &request.parse_options())
+    {
         finalize_envelope_model_warnings(&mut output, &ctx);
     }
     output
@@ -533,7 +565,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
     // (#1417); the Worker does not share that native orchestration.
     match fsl_syntax::parse_document_with(
         fsl_syntax::SourceFile::new(&request.source),
-        &fsl_syntax::ParseOptions::stable(),
+        &request.parse_options(),
     ) {
         // Same envelope `check` renders, and the one the native CLI now
         // renders for every spec-reading command: `kind:"parse"` with
@@ -559,7 +591,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
     if let Err(failure) = fslc_rust::check_stages::validate_specialized_document(
         &request.source,
         &request.source_file,
-        &fsl_syntax::ParseOptions::stable(),
+        &request.parse_options(),
     ) {
         return fslc_rust::spec_load::render_spec_load_error(envelope(solver_version), &failure);
     }
@@ -576,7 +608,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
                 &envelope(solver_version),
                 &request.source,
                 model,
-                &fsl_syntax::ParseOptions::stable(),
+                &request.parse_options(),
             ) {
                 Ok(fslc_rust::verification_output::TraceGate::Rejected { failure, .. }) => {
                     return failure;
@@ -790,6 +822,9 @@ pub fn internal_error(message: String) -> String {
 
 #[cfg(test)]
 mod issue_1434_publication_tests;
+
+#[cfg(test)]
+mod issue_1818_minor_edition_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2318,6 +2353,7 @@ mod tests {
             options: Options {
                 depth: 2,
                 deadlock: "warn".to_owned(),
+                ..Options::default()
             },
         };
         assert_worker_verify_boundary_error_matches_native(&request, "type bound");
@@ -3129,6 +3165,7 @@ mod tests {
         let options = Options {
             depth: 4,
             deadlock: "error".to_owned(),
+            ..Options::default()
         };
 
         let envelope = render_verify(

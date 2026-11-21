@@ -404,7 +404,7 @@ impl MigrationDiagnostic {
             .contains(&self.code)
             {
                 "warning"
-            } else if edition == Edition::Fsl5 {
+            } else if edition.family_fsl5() {
                 "error"
             } else {
                 "warning"
@@ -908,7 +908,7 @@ pub fn admit_source(
         .ok()
         .flatten()
         .map(|header| header.edition);
-    let next = edition == Edition::Fsl5;
+    let next = edition.family_fsl5();
     let Ok(plan) = plan_migration(source, path, edition, options) else {
         if let Err(original) = fsl_syntax::parse_surface_document_with(source, options) {
             let error = original.clone().for_edition(source, edition, options);
@@ -965,9 +965,19 @@ pub fn admit_source(
 /// Without a header the envelope is unchanged.
 fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value {
     if let (Some(edition), Value::Object(envelope)) = (declared, &mut output) {
-        envelope.insert("fsl_edition".to_owned(), json!(edition.number()));
+        insert_declared_edition(envelope, edition);
     }
     output
+}
+
+/// `fsl_edition`, the header's major number, and `fsl_edition_minor` only
+/// for a minor other than `0` (#1818 D1): a `fsl 5` or `fsl 5.0` document
+/// keeps the published shape.
+pub fn insert_declared_edition(envelope: &mut Map<String, Value>, edition: Edition) {
+    envelope.insert("fsl_edition".to_owned(), json!(edition.number()));
+    if edition.minor() != 0 {
+        envelope.insert("fsl_edition_minor".to_owned(), json!(edition.minor()));
+    }
 }
 
 /// `migrated` laid out like `original` (#1755): every line ends as
@@ -1014,7 +1024,7 @@ pub fn missing_edition_header(
     edition: Edition,
     options: &ParseOptions,
 ) -> Option<MigrationDiagnostic> {
-    if edition != Edition::Fsl5
+    if !edition.family_fsl5()
         || !matches!(fsl_syntax::edition_header(source, options), Ok(None))
         || fsl_syntax::dialect_keyword_with(source, options).is_ok_and(|keyword| {
             matches!(keyword, "refinement" | "compose")
@@ -1029,7 +1039,7 @@ pub fn missing_edition_header(
         |newline| newline + 1,
     );
     let span = source_span(source, line_start, line_start);
-    let header = format!("fsl {}", edition.number());
+    let header = format!("fsl {edition}");
     Some(MigrationDiagnostic {
         code: fsl_syntax::MISSING_EDITION_HEADER,
         taxonomy: Taxonomy::NonCanonical,
@@ -1415,7 +1425,7 @@ fn id_occurrences(source: &str, options: ParseOptions) -> Vec<IdOccurrence> {
     let next_requirements = document == Some("requirements")
         && matches!(
             fsl_syntax::edition_header(source, &options),
-            Ok(Some(header)) if header.edition == Edition::Fsl5
+            Ok(Some(header)) if header.edition.family_fsl5()
         );
     for (index, token) in tokens.iter().enumerate() {
         let TokenKind::Ident(keyword) = &token.kind else {

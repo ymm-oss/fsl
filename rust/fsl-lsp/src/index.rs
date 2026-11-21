@@ -236,17 +236,18 @@ impl DocumentIndex {
         // English ones).
         let mut authority = parsed
             .as_ref()
-            .filter(|parsed| parsed.edition == fsl_syntax::Edition::Fsl4)
+            .filter(|parsed| !parsed.edition.family_fsl5())
             .and_then(|parsed| crate::ast_projection::ast_declarations(&parsed.surface))
             .map(DeclarationAuthority::new);
         let (lexicon, glossary) = match parsed
             .as_ref()
             .map(|parsed| (parsed.edition, &parsed.surface))
         {
-            Some((
-                fsl_syntax::Edition::Fsl5,
-                fsl_syntax::SurfaceDocument::Requirements(requirements),
-            )) => (Lexicon::Next, glossary_rows(source, &requirements.items)),
+            Some((edition, fsl_syntax::SurfaceDocument::Requirements(requirements)))
+                if edition.family_fsl5() =>
+            {
+                (Lexicon::Next, glossary_rows(source, &requirements.items))
+            }
             _ => (Lexicon::Published, Vec::new()),
         };
         drop(parsed);
