@@ -322,6 +322,16 @@ Known remaining differences from BMC (#1961):
   difference in the dead-state decision, and it errs toward reporting; no
   finite enumeration of the read is exact, because BMC's read ranges over
   the unbounded integers.
+- **An unchecked Seq overflow while expanding** (seed). When nothing is
+  held, an unchecked Seq overflow on a successor fails the run (exit 2,
+  `model sequence length exceeds capacity`) as soon as it is met, even if a
+  later state of the level has an action partial operation that BMC reports
+  first (an `h6` shape: `_partial_crash` at step 2 in BMC). Not green.
+- **Coverage at the depth** (seed). Action coverage and `--vacuity` use the
+  concrete enabledness, not the totalized guard: for `requires done and
+  5 / z == 0` at `z = 0` (a `div_true` shape, `--depth 1 --vacuity error`)
+  explicit reports `never_enabled_action` (exit 2) where BMC, whose guard
+  reads the totalized quotient, reports `verified`.
 - **Where every engine is silent.** A terminal that is undefined only at a
   level after the first recorded deadlock (a `term_later` shape: a deadlock
   at step 1, an undefined terminal on a dead state at step 2) and a
