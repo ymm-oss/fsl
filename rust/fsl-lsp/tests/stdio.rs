@@ -993,6 +993,38 @@ fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors()
     );
 }
 
+/// #1818 D1: a server started with `FSLC_UNSTABLE=fsl5-minor` reads a
+/// `fsl 5.N` document as `fsl 5`: the same diagnostics, migration findings
+/// as errors. Without the gate the header is an unsupported edition.
+#[test]
+fn a_development_minor_header_is_served_as_fsl_5_behind_the_gate() {
+    let body = "spec Quantifier {\n  type Id = 0..1\n  state { ready: Map<Id, Bool> }\n  init { forall i in 0..1: { ready[i] = false } }\n  invariant Typed { forall i in 0..1: ready[i] == true or ready[i] == false }\n}\n";
+    let header = format!("fsl 5.{}", fsl_syntax::DEV_MINOR);
+    let gate = [("FSLC_UNSTABLE", "fsl5-minor")];
+    // `fsl 5` padded to the minor header's length, so ranges match.
+    let five = format!("{:width$}\n{body}", "fsl 5", width = header.len());
+    let minor = format!("{header}\n{body}");
+    let expected = published_diagnostics(&five);
+    assert!(
+        expected
+            .iter()
+            .any(|diagnostic| diagnostic["data"]["kind"] == "migration"
+                && diagnostic["severity"] == 1),
+        "{expected:#?}"
+    );
+    let served = published_diagnostics_each(&[&minor], &gate)
+        .pop()
+        .expect("one publish");
+    assert_eq!(served, expected);
+    let ungated = published_diagnostics(&minor);
+    assert!(
+        ungated
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "unsupported_edition"),
+        "{ungated:#?}"
+    );
+}
+
 /// #1243: the editor published no error for a forbidden the requirement-trace
 /// gate rejects, although `check` refuses the spec. It now publishes the gate's
 /// error where `check` locates it (`loc` line 19, column 3 of the gallery
