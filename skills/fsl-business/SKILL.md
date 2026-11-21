@@ -34,6 +34,14 @@ This skill owns the syntax of this layer (below). Expressions and the
   Write business names in ASCII English: they are the canonical names the
   requirements layer must repeat and implementations see. Put the source's
   Japanese terms in the quoted texts and in the requirements layer's glossary.
+- A quoted text you write in Japanese (the text of a `control`, `policy` or
+  `goal` that the source does not give in Japanese) is written directly in
+  Japanese, as a sentence a business owner reads, not as a translation of an
+  English title. Do not set a name into it with spaces around it: write
+  `"承認された休暇はいずれ取得か取消になる"`, not
+  `"Approved の休暇は いずれ Taken か Cancelled になる"`. Nothing checks a
+  quoted text and a name inside it is not resolved, so the spaces only make
+  the sentence harder to read.
 
 ## Boundary
 
