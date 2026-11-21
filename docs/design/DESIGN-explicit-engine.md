@@ -223,10 +223,10 @@ obligation; expanding diagnostic sites does not change acceptance or verdicts.
 ## 4. Property semantics
 
 The engine checks the same property surface as `bmc.verify`. For every
-property below it reaches the same verdict as BMC at the same depth, and for
-the partial operations of one level it reports them in BMC's order (see
-**Deadlock**), so the violation kind, name and step agree as well; the known
-remaining differences are listed after the list.
+property below it reaches the same verdict as BMC at the same depth, except
+in the cases listed under "Known remaining differences" after the list, and
+it reports the failures of one level in BMC's order (see **Deadlock**), so
+the violation kind, name and step agree as well outside those cases.
 
 - **Invariants** — evaluated on every visited state (including initial
   states, level 0).
@@ -243,20 +243,32 @@ remaining differences are listed after the list.
   same level witnesses it. The witness is the first state in frontier order.
   A `reachable` witnessed at an earlier level is not evaluated again (#1961).
 - **Deadlock** — a state with no enabled action instance, honoring
-  `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior. An instance
-  whose guard reaches a partial operation keeps a state alive only if that
-  guard holds under BMC's encoding of the operation: `/` and `%` by zero are
-  totalized to zero there, and a partial Seq read is an unconstrained value
-  that BMC's deadlock query may choose. Explicit re-evaluates such a guard
-  with division totalized; `true` keeps the state alive, and `false` or a
-  partial Seq read leaves it dead. The checks of one level follow BMC's order
-  at one step (#1961):
+  `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior. Below the
+  depth a state is dead when it has no candidate: an instance whose guard
+  reaches a partial operation is stepped into its action's `partial_op`,
+  which step 2 below reports first. At the depth such an instance keeps the
+  state alive only if its guard holds for every valuation BMC's deadlock
+  query can choose (`∃ v. ∀ i. ¬guard_i(v)` over the free terms of the
+  state's partial reads, one guard conjunction per instance): `/` and `%` by
+  zero are totalized to zero there, so they are not free, and a partial Seq
+  read is an unconstrained value of the solver sort, for an integer range
+  the unbounded integers rather than the element type. Explicit reads each
+  `requires` in three values with division totalized: the connectives,
+  `not` and conditionals combine their operands' values (Kleene's strong
+  logic), a comparison of an expression with itself is decided when both
+  sides read the same slots of a state Seq of positive capacity, and any
+  other expression is evaluated, a partial read making it unknown. A guard
+  shown true for every value keeps the state alive; otherwise the state is
+  dead. The checks of one level follow BMC's order at one step (#1961):
   1. the state properties of the level (bounds and invariants, `trans` and
      `ensures` of the steps into it, and the partial operations of the
      `reachable`s still unwitnessed when the level starts);
   2. below the depth, the action partial operations of the steps out of the
-     level (guards, bodies, `ensures`): the first one found in frontier
-     order, then action declaration order, is reported;
+     level (guards, bodies, `ensures`): explicit reports the first one found
+     in frontier order, then action declaration order; BMC goes action by
+     action in declaration order, each over all states of the step, so when
+     two actions have partial operations on different states the reported
+     name can differ (the kind and step agree);
   3. while no deadlock is recorded, the terminal of every dead state of the
      level, in frontier order, until the first evaluation that fails: a
      partial operation is a `partial_op` (`_partial_property_terminal`) at
@@ -299,12 +311,17 @@ Known remaining differences from BMC (#1961):
   reports that error even when a later dead state of the level has a
   partial terminal; BMC asks for the partial terminal first and reports
   `partial_op`.
-- **A partial Seq read in a guard that cannot be false.** Explicit treats
-  such a guard as disabled. BMC's query disables it only when some value of
-  the read makes it false; for `requires done and q.head() == q.head()` with
-  `q` empty it does not, so at the depth BMC reports nothing where explicit
-  reports the terminal's `partial_op` or the deadlock. A stale value in a
-  Seq slot beyond the live prefix can also fix the guard in BMC.
+- **A partial-guard state at the depth that BMC keeps alive.** The
+  three-valued reading counts a state as dead unless one guard is shown true
+  for every value of its reads. BMC keeps the state alive also when a guard
+  is true for every value but the reading cannot show it (`q.head() >= 0 or
+  q.head() < 0`), and when the guards are each falsifiable but never all
+  false together (`q.head() == 0` on one action, `q.head() != 0` on
+  another). There, at the depth, explicit reports the terminal's `partial_op`
+  or the deadlock and BMC reports nothing. This is the one remaining
+  difference in the dead-state decision, and it errs toward reporting; no
+  finite enumeration of the read is exact, because BMC's read ranges over
+  the unbounded integers.
 - **Where every engine is silent.** A terminal that is undefined only at a
   level after the first recorded deadlock (a `term_later` shape: a deadlock
   at step 1, an undefined terminal on a dead state at step 2) and a

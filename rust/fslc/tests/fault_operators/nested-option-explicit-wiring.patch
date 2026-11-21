@@ -1,7 +1,7 @@
 diff --git a/rust/fsl-runtime/src/explicit.rs b/rust/fsl-runtime/src/explicit.rs
 --- a/rust/fsl-runtime/src/explicit.rs
 +++ b/rust/fsl-runtime/src/explicit.rs
-@@ -388,7 +388,7 @@ pub fn verify_explicit_selected(
+@@ -395,7 +395,7 @@ pub fn verify_explicit_selected(
                  if !expanding {
                      continue;
                  }
