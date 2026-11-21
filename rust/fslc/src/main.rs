@@ -21472,7 +21472,10 @@ mod mutate_explicit_first_tests {
     /// `fslc mutate`'s mutant 12 of `TERM_MUT` (`integer_literal_plus1` on
     /// the init `c = 0`): explicit-first runs, finds `CZero` violated, and
     /// does not certify clean, so the bounds-only BMC model kills the mutant
-    /// with the partial terminal.
+    /// with the partial terminal. A routing pin only: it passes before #1961
+    /// as well, because the `CZero` violation alone keeps the explicit run
+    /// from certifying clean. The discriminating test is
+    /// `issue_1961_partial_terminal_is_not_certified_clean`.
     #[test]
     fn issue_1961_mutant_12_is_killed_by_the_partial_terminal() {
         let mutant = TERM_MUT.replace("c = 0 done", "c = 1 done");
