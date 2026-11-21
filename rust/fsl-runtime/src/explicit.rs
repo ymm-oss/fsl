@@ -449,16 +449,28 @@ pub fn verify_explicit_selected(
 }
 
 /// Whether BMC's deadlock query can find every instance in `candidates`
-/// disabled, for a state where none is enabled. Each candidate is then a
-/// guard that reaches a partial operation, and BMC reads that guard with its
-/// symbolic encoding of the operation: `/` and `%` by zero are totalized to
-/// zero (DESIGN-divmod.md), and a partial Seq read is an unconstrained value
-/// (DESIGN-seq-partial-operations.md). So the guard is re-evaluated with
-/// division totalized: `true` keeps the state alive, `false` disables the
-/// instance, and a guard that still reaches a partial operation counts as
-/// disabled, the value BMC's query may choose. That last case is exact when
-/// some value of the read disables the guard, and otherwise reports a dead
-/// state that BMC does not (DESIGN-explicit-engine.md §4).
+/// disabled, for a state at the depth where none is enabled. Each candidate
+/// is then a guard that reaches a partial operation.
+///
+/// BMC's query (`bmc.rs`, the `deadlock` query over `enabled_terms`, whose
+/// terms are each instance's guard conjunction from `action_guards_in`) asks
+/// whether some valuation of its free terms makes every instance's guard
+/// false: `∃ v. ∀ i. ¬guard_i(v)`. For a fixed state the free terms are the
+/// values its partial reads produce: `/` and `%` by zero are totalized to zero
+/// (DESIGN-divmod.md), so they are not free, and a partial Seq read is an
+/// unconstrained value of the solver sort (an unobservable slot,
+/// DESIGN-seq-partial-operations.md; for an integer range that sort is the
+/// unbounded integers, so the read is not limited to the element type).
+///
+/// So each guard is read in three values ([`guard_truth`]), with division
+/// totalized and every partial Seq read unknown: a guard that is `true` for
+/// every value of its reads keeps the state alive, as it does in BMC
+/// (`∀ v. guard_i(v)` implies `∀ v. ∃ i. guard_i(v)`). Every other state
+/// counts as dead. That is exact when the reads can disable every guard at
+/// once, and otherwise reports a dead state that BMC does not: a guard that
+/// is true for every value but not shown to be so by the three-valued
+/// reading, or instances that are each falsifiable but never all false
+/// together (DESIGN-explicit-engine.md §4).
 fn every_partial_guard_may_be_disabled(
     model: &KernelModel,
     state: &State,
@@ -471,16 +483,195 @@ fn every_partial_guard_may_be_disabled(
             .iter()
             .find(|action| action.name == instance.action)
             .expect("candidate action belongs to the model");
-        match with_total_division(|| {
-            super::evaluate_action_guards(action, &instance.params, state, model)
-        }) {
-            Ok(Some(_)) => return Ok(false),
-            Ok(None) => {}
-            Err(error) if super::is_partial_operation_error(&error) => {}
-            Err(error) => return Err(error),
+        let truth =
+            with_total_division(|| instance_guard_truth(action, &instance.params, state, model))?;
+        if truth == Truth::True {
+            return Ok(false);
         }
     }
     Ok(true)
+}
+
+/// A guard's value for every value of its partial Seq reads: always true,
+/// always false, or not decided by the three-valued reading.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Truth {
+    True,
+    False,
+    Unknown,
+}
+
+impl Truth {
+    fn from_bool(value: bool) -> Self {
+        if value { Self::True } else { Self::False }
+    }
+
+    fn not(self) -> Self {
+        match self {
+            Self::True => Self::False,
+            Self::False => Self::True,
+            Self::Unknown => Self::Unknown,
+        }
+    }
+
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::False, _) | (_, Self::False) => Self::False,
+            (Self::True, Self::True) => Self::True,
+            _ => Self::Unknown,
+        }
+    }
+
+    fn or(self, other: Self) -> Self {
+        self.not().and(other.not()).not()
+    }
+}
+
+/// An instance's guards, in order, as BMC's conjunction reads them: a `let`
+/// whose value is a partial read leaves the instance undecided.
+fn instance_guard_truth(
+    action: &fsl_core::ActionDef,
+    params: &Bindings,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Truth, RuntimeError> {
+    let mut bindings = params.clone();
+    let mut truth = Truth::True;
+    for guard in &action.guards {
+        match guard {
+            fsl_core::ActionGuard::Let(name, expression) => {
+                match eval(expression, state, &mut bindings, model, None) {
+                    Ok(value) => {
+                        bindings.insert(name.clone(), value);
+                    }
+                    Err(error) if super::is_partial_operation_error(&error) => {
+                        return Ok(Truth::Unknown);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            fsl_core::ActionGuard::Requires(expression) => {
+                truth = truth.and(guard_truth(expression, state, &mut bindings, model)?);
+                if truth == Truth::False {
+                    return Ok(Truth::False);
+                }
+            }
+        }
+    }
+    Ok(truth)
+}
+
+/// One `requires` expression read in three values. The connectives, `not`
+/// and conditionals combine their operands' values (Kleene's strong logic),
+/// so an operand that does not decide the result may be unknown; a
+/// comparison of an expression with itself is decided when both sides read
+/// the same slots, as BMC's terms then are equal ([`reads_the_same_slots`]);
+/// any other expression is evaluated, and a partial operation makes it
+/// unknown. A connective that may bind a pattern name is evaluated whole.
+fn guard_truth(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+) -> Result<Truth, RuntimeError> {
+    match expr {
+        Expr::Binary { op, left, right }
+            if super::is_connective(op) && !super::connective_may_bind(expr) =>
+        {
+            let left = guard_truth(left, state, bindings, model)?;
+            match (op.as_str(), left) {
+                ("and", Truth::False) => return Ok(Truth::False),
+                ("or", Truth::True) | ("=>", Truth::False) => return Ok(Truth::True),
+                _ => {}
+            }
+            let right = guard_truth(right, state, bindings, model)?;
+            Ok(match op.as_str() {
+                "and" => left.and(right),
+                "or" => left.or(right),
+                _ => left.not().or(right),
+            })
+        }
+        Expr::Not(inner) => Ok(guard_truth(inner, state, bindings, model)?.not()),
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => match guard_truth(condition, state, bindings, model)? {
+            Truth::True => guard_truth(then_expr, state, bindings, model),
+            Truth::False => guard_truth(else_expr, state, bindings, model),
+            Truth::Unknown => {
+                let then_truth = guard_truth(then_expr, state, bindings, model)?;
+                let else_truth = guard_truth(else_expr, state, bindings, model)?;
+                Ok(if then_truth == else_truth {
+                    then_truth
+                } else {
+                    Truth::Unknown
+                })
+            }
+        },
+        Expr::Binary { op, left, right }
+            if matches!(op.as_str(), "==" | "!=" | "<=" | ">=")
+                && left == right
+                && reads_the_same_slots(left, bindings, model) =>
+        {
+            match eval(left, state, bindings, model, None) {
+                Err(error) if super::is_partial_operation_error(&error) => {
+                    Ok(Truth::from_bool(op != "!="))
+                }
+                _ => guard_leaf(expr, state, bindings, model),
+            }
+        }
+        _ => guard_leaf(expr, state, bindings, model),
+    }
+}
+
+fn guard_leaf(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+) -> Result<Truth, RuntimeError> {
+    match super::eval_with_bindings(expr, state, bindings, model, None) {
+        Ok(value) => super::as_bool(value).map(Truth::from_bool),
+        Err(error) if super::is_partial_operation_error(&error) => Ok(Truth::Unknown),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether two evaluations of `expr` read the same symbolic slots in BMC, so
+/// that `expr == expr` holds there whatever the slots hold. That holds for
+/// reads of state Seqs with a positive capacity, whose slots are state
+/// terms; a capacity-zero Seq and a Seq literal have no slot to read and get
+/// a fresh unconstrained term for each read (DESIGN-seq-partial-operations.md,
+/// "Capacity-zero Seqs"). Only a narrow syntax is accepted; anything else
+/// answers `false`, and the comparison is then evaluated like any other.
+fn reads_the_same_slots(expr: &Expr, bindings: &Bindings, model: &KernelModel) -> bool {
+    match expr {
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => true,
+        Expr::Var(name) => match bindings.get(name) {
+            Some(value) => !matches!(value, Value::Seq(_)),
+            None => model.state.iter().any(|(state, ty)| {
+                state == name
+                    && (matches!(ty, TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _))
+                        || matches!(ty, TypeRef::Seq(_, capacity) if *capacity > 0))
+            }),
+        },
+        Expr::Some(inner) | Expr::Neg(inner) | Expr::Not(inner) | Expr::Field(inner, _) => {
+            reads_the_same_slots(inner, bindings, model)
+        }
+        Expr::Index(left, right) | Expr::Binary { left, right, .. } => {
+            reads_the_same_slots(left, bindings, model)
+                && reads_the_same_slots(right, bindings, model)
+        }
+        Expr::Method { receiver, args, .. } => {
+            reads_the_same_slots(receiver, bindings, model)
+                && args
+                    .iter()
+                    .all(|arg| reads_the_same_slots(arg, bindings, model))
+        }
+        _ => false,
+    }
 }
 
 /// The first failed terminal evaluation of a level, held back until the

@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 re-review): `q.head() == q.head()` reads the same slot
+// twice (capacity 2), so BMC's terms are equal and the guard holds for every
+// value: at `--depth 1` every engine reports `verified`.
+spec G_headeq {
+  type Job = 0..1
+  type Z = 0..1
+  state { done: Bool, z: Z, q: Seq<Job, 2> }
+  init { done = false z = 0 q = Seq { } }
+  action a() { requires not done done = true  }
+  action g() { requires done and q.head() == q.head() z = 0 }
+  terminal { q.head() == 1 }
+}

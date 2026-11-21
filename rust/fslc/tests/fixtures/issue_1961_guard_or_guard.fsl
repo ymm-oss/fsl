@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 re-review): `g`'s guard reads `q.head()` on an empty
+// `q`, but `q.head() == 1 or done` is true for every value of the read, so
+// BMC's deadlock query cannot disable it: at `--depth 1` every engine reports
+// `verified`.
+spec G_or_guard {
+  type Job = 0..1
+  type Z = 0..1
+  state { done: Bool, z: Z, q: Seq<Job, 2> }
+  init { done = false z = 0 q = Seq { } }
+  action a() { requires not done done = true  }
+  action g() { requires done and (q.head() == 1 or done) z = 0 }
+  terminal { q.head() == 1 }
+}

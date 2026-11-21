@@ -337,3 +337,40 @@ fn budget_stop_records_no_deadlock_for_a_partial_guard_state() {
         assert_eq!(output["violated_at_step"], 2, "{engine}: {output:#}");
     }
 }
+
+/// At the depth, a state whose only candidates are partial guards is dead
+/// exactly when BMC's deadlock query can disable every guard: division is
+/// totalized, and a partial Seq read is an unconstrained integer that a guard
+/// true for every value (by its connectives, or by comparing a read with
+/// itself) cannot be falsified by.
+#[test]
+fn partial_guard_reading_at_depth_one_agrees_with_bmc() {
+    let terminal = Some(("_partial_property_terminal", 1));
+    let cases = [
+        ("issue_1961_guard_or_guard.fsl", None),
+        ("issue_1961_guard_headeq.fsl", None),
+        ("issue_1961_guard_div_true.fsl", None),
+        ("issue_1961_guard_geq0.fsl", terminal),
+        ("issue_1961_guard_div_false.fsl", terminal),
+        ("issue_1961_partial_guard_terminal.fsl", terminal),
+    ];
+    for (name, expected) in cases {
+        for engine in ["explicit", "auto", "bmc"] {
+            let (output, status) = verify_args(name, engine, &["--depth", "1"]);
+            match expected {
+                None => {
+                    assert_eq!(status, 0, "{name} {engine}: {output:#}");
+                    assert_eq!(output["result"], "verified", "{name} {engine}: {output:#}");
+                }
+                Some((property, step)) => {
+                    assert_eq!(status, 1, "{name} {engine}: {output:#}");
+                    assert_eq!(output["invariant"], property, "{name} {engine}: {output:#}");
+                    assert_eq!(
+                        output["violated_at_step"], step,
+                        "{name} {engine}: {output:#}"
+                    );
+                }
+            }
+        }
+    }
+}

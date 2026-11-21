@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 re-review): `5 / z` with `z = 0` is totalized to `0` in
+// BMC's guard, so `5 / z == 0` holds: at `--depth 1` every engine reports
+// `verified`.
+spec G_div_true {
+  type Job = 0..1
+  type Z = 0..1
+  state { done: Bool, z: Z, q: Seq<Job, 2> }
+  init { done = false z = 0 q = Seq { } }
+  action a() { requires not done done = true  }
+  action g() { requires done and 5 / z == 0 z = 0 }
+  terminal { q.head() == 1 }
+}
