@@ -20079,7 +20079,10 @@ spec InitTraceability {
 
     /// The counterfactual runs ask no `action_coverage` or vacuity probe; the
     /// witness run, which is not a counterfactual run, still asks both
-    /// (#1868).
+    /// (#1868). Each run also asks `deadlock`, the first query after the
+    /// coverage stage of step 0, so the runs did reach the stage they skip.
+    /// The reachable phase is checked on its own, from its call site in
+    /// `unreached_reachables`, with no invariant-phase run to reuse.
     #[test]
     fn counterfactual_runs_ask_no_coverage_or_vacuity_probe() {
         let fixture = SnapshotFixture::new("explain-run-probes", EXPLAIN_RUN_COUNT_SPEC);
@@ -20100,10 +20103,37 @@ spec InitTraceability {
                 "counterfactual run kinds {counterfactual:?}"
             );
         }
-        assert!(
-            counterfactual.contains("invariant"),
-            "counterfactual run kinds {counterfactual:?}"
+        for kind in ["invariant", "deadlock"] {
+            assert!(
+                counterfactual.contains(kind),
+                "counterfactual run kinds {counterfactual:?}"
+            );
+        }
+
+        let (_, names) = load_kernel_model_from_source(&fixture.path, EXPLAIN_RUN_COUNT_SPEC)
+            .expect("load fixture");
+        let reachable = reachable_counterfactuals_from_source(
+            &names,
+            &fixture.path,
+            EXPLAIN_RUN_COUNT_SPEC,
+            4,
+            &WeakenedModelRuns::default(),
         );
+        assert_ne!(reachable, json!([]), "reachable counterfactuals");
+        let [witness, reachable_phase] = explain_run_observer::query_kinds();
+        assert!(witness.is_empty(), "witness run kinds {witness:?}");
+        for kind in ["action_coverage", "vacuity"] {
+            assert!(
+                !reachable_phase.contains(kind),
+                "reachable-phase run kinds {reachable_phase:?}"
+            );
+        }
+        for kind in ["reachable", "deadlock"] {
+            assert!(
+                reachable_phase.contains(kind),
+                "reachable-phase run kinds {reachable_phase:?}"
+            );
+        }
     }
 
     /// Screening, sharing and replay print what making every per-invariant

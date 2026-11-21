@@ -221,7 +221,10 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   back, the run fails or succeeds and that counterfactual is silently dropped
   or appears. The witness run is not a counterfactual run and keeps both probes. Test:
   `counterfactual_runs_ask_no_coverage_or_vacuity_probe` (`main.rs`) records the
-  query kinds the witness and counterfactual runs ask on a small spec.
+  query kinds the witness and counterfactual runs ask on a small spec: the
+  counterfactual runs ask `deadlock`, the first query after step 0's coverage
+  stage, and no `action_coverage` or `vacuity`; the reachable phase is checked
+  again on its own, with no invariant-phase run to reuse.
 - **Tests.** `shared_counterfactual_runs_print_the_unshared_output`
   (a unit test in `rust/fslc/src/main.rs`) compares the JSON of `explain` at depth 4
   on `examples/nfr/support_sla.fsl` and `examples/self/refinement_algebra.fsl`,
