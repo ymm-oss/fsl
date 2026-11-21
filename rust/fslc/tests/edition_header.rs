@@ -783,7 +783,7 @@ fn minor_mirror(label: &str, header: &str) -> PathBuf {
 
 /// `stdout` as JSON with `directory` written as `<mirror>` and the
 /// wall-clock and allocator fields removed (`memory_mb` is Z3 allocator
-/// noise, as edition_all_commands.rs masks it).
+/// noise, as `edition_all_commands.rs` masks it).
 fn comparable(stdout: &str, directory: &Path) -> Value {
     fn mask(value: &mut Value) {
         match value {

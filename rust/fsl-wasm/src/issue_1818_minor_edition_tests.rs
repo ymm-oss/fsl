@@ -21,11 +21,11 @@ fn ready<F: Future>(future: F) -> F::Output {
     }
 }
 
-fn check(source: &str, options: Value, top_level: Option<Value>) -> Value {
+fn check(source: &str, options: &Value, top_level: Option<&Value>) -> Value {
     let mut packet =
         json!({"cmd":"check","source":source,"source_file":"model.fsl","options":options});
     if let Some(value) = top_level {
-        packet["unstable"] = value;
+        packet["unstable"] = value.clone();
     }
     let request = serde_json::from_value::<super::Request>(packet).expect("request decodes");
     ready(super::check(&request, VERSION))
@@ -34,12 +34,12 @@ fn check(source: &str, options: Value, top_level: Option<Value>) -> Value {
 #[test]
 fn the_worker_reads_the_development_minor_only_behind_its_request_gate() {
     let minor = format!("fsl 5.{}\n{BODY}", fsl_syntax::DEV_MINOR);
-    let five = check(&format!("fsl 5\n{BODY}"), json!({}), None);
+    let five = check(&format!("fsl 5\n{BODY}"), &json!({}), None);
     assert_eq!(five["result"], "ok", "{five:#}");
     assert_eq!(five["fsl_edition"], 5, "{five:#}");
     assert!(five.get("fsl_edition_minor").is_none(), "{five:#}");
 
-    let gated = check(&minor, json!({"unstable":["fsl5-minor"]}), None);
+    let gated = check(&minor, &json!({"unstable":["fsl5-minor"]}), None);
     let mut expected = five.clone();
     expected["fsl_edition_minor"] = json!(fsl_syntax::DEV_MINOR);
     assert_eq!(gated, expected, "the minor document reads as the fsl 5 one");
@@ -47,7 +47,7 @@ fn the_worker_reads_the_development_minor_only_behind_its_request_gate() {
     assert_eq!(
         check(
             &format!("fsl 5\n{BODY}"),
-            json!({"unstable":["fsl5-minor"]}),
+            &json!({"unstable":["fsl5-minor"]}),
             None
         ),
         five
@@ -64,7 +64,7 @@ fn the_worker_reads_the_development_minor_only_behind_its_request_gate() {
         (json!({"unstable":{"fsl5-minor":true}}), None),
         (json!({}), Some(json!(["fsl5-minor"]))),
     ] {
-        let output = check(&minor, options.clone(), top_level.clone());
+        let output = check(&minor, &options, top_level.as_ref());
         assert_eq!(
             output["result"], "error",
             "{options} {top_level:?}: {output:#}"

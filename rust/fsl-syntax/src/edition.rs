@@ -144,7 +144,7 @@ impl Edition {
     /// The edition a header `major[.minor]` names under `options`: a
     /// published edition (`.0` names it too), or [`Self::Fsl5Dev`] when the
     /// gate is on. `None` for anything else.
-    fn from_header(major: &str, minor: Option<&str>, options: &ParseOptions) -> Option<Self> {
+    fn from_header(major: &str, minor: Option<&str>, options: ParseOptions) -> Option<Self> {
         let edition = Self::from_number(major.parse().ok()?)?;
         match minor {
             None | Some("0") => Some(edition),
@@ -310,7 +310,7 @@ pub fn edition_header(
         Edition::from_header(
             &source[major.clone()],
             minor.clone().map(|minor| &source[minor]),
-            options,
+            *options,
         )
     });
     match edition {
