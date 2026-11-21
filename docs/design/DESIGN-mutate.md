@@ -177,6 +177,52 @@ Cross-engine encoding gaps remain a risk: explicit-clean may bypass a BMC-only
 `build_spec` rejection described below; full-record agreement controls must
 reject any observed drift rather than allowlist it.
 
+The bounds-only BMC (the model with invariants, transitions, reachables and
+`leadsTo` removed) is skipped when explicit certifies that model clean through
+K (#1892). The certificate is the full-model explicit run itself when it
+completed with no violation and only a reachable unwitnessed: the bounds-only
+model reaches the same states and checks a subset of the properties. Otherwise,
+when the full-model run stopped at a violation the bounds-only model does not
+check (an invariant, transition or reachable) or was unsupported (`leadsTo`,
+which the bounds-only model drops), one explicit attempt on the bounds-only
+model certifies under the same rules (supported, no runtime error, no overrun,
+no violation). That attempt is not made when the full-model run overran its
+budget (the attempt walks the same states and would overrun too), stopped at an
+obligation the bounds-only model keeps (an `ensures`, a type bound, an action
+or `terminal` `partial_op`: the attempt would stop at the same one), or did not
+happen or failed (a failed run is not retried; an attempt would most likely be
+wasted). Its budget is 3,000 states, and it is not made when the probe already
+walked more: there concrete exploration costs more than the BMC call it would
+save (a wide action parameter in `examples/named_predicate.fsl` takes about
+14 s to certify a bounds-only model whose BMC answers in under 1 s). The
+probe count alone is not enough: the probe walks the full model and does not
+step into a successor that violates a property, so for a mutant with a
+violation, exactly the case that reaches the attempt, it can be far below the
+bounds-only model's states (a mutant whose init violates an invariant walks one
+probe state); it serves only as a lower bound, and the 3,000-state budget
+bounds what a miscounted attempt costs.
+
+The skip **assumes explicit and BMC agree on what is clean** for the
+bounds-only model, the same assumption, and the same cross-engine risk, as the
+full-model explicit decision in the paragraph above. Under that assumption it
+does not change a result: the bounds-only BMC contributes only a kill, a clean
+answer falls through to the full-model BMC with no boundary killer, and a
+certified model leaves it nothing to contribute. Where the engines disagree,
+the skip can change `status`, `killed_by`, `killers` and `by_requirement`.
+Known cases: an explicit gap such as #1961 (a `terminal` `partial_op` on a
+later dead state of a BFS level is not checked, so explicit certifies a model
+whose bounds-only BMC kills with `_partial_property_terminal`; a test pins the
+expected record until the fix lands); a solver `unknown` in the bounds-only
+BMC, which made the mutant an oracle `error` and now leaves the decision to the
+full-model BMC; and a BMC-only `build_spec` rejection that only the full-depth
+clean bounds-only run reaches (its coverage, vacuity and definedness passes),
+which the full-model BMC may now pre-empt with a property kill. None of these
+occurred in the corpus: on the 115 corpus specs `mutate` accepts, with the
+attempt made on every mutant that reaches the bounds-only BMC, all 3,877
+bounds-only models explicit certified were also clean under that BMC, and with
+the skip as built `--by-requirement` stdout is byte-identical (14 of the specs
+also with `--oracle-attribution`).
+
 **Baseline gate**: run auto with its default 1,000,000-state budget and accept
 `verified` or `proved`. If auto is not accepted, rerun the existing BMC baseline
 on a fresh scoped thread using the same captured source. A verified rerun

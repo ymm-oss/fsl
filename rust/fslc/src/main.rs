@@ -11395,10 +11395,18 @@ fn mutation_oracle_for_model(
             engine: "probe",
         };
     }
-    if let Some(budget) = explicit_budget
-        && matches!(probe, Ok(ref probe) if !probe.exhausted)
-        && let verification::ExplicitFirst::Ran(Ok(result)) =
-            verification::explicit_first(&model, depth, budget, None)
+    let explicit = match (explicit_budget, &probe) {
+        (Some(budget), Ok(probe)) if !probe.exhausted => Some(FullExplicit {
+            budget,
+            probe_states: probe.states_explored,
+            first: verification::explicit_first(&model, depth, budget, None),
+        }),
+        _ => None,
+    };
+    if let Some(FullExplicit {
+        first: verification::ExplicitFirst::Ran(Ok(result)),
+        ..
+    }) = &explicit
         && !result.budget_exceeded
         && result.violation.is_none()
         && result.reachables.values().all(Option::is_some)
@@ -11414,25 +11422,150 @@ fn mutation_oracle_for_model(
     automatic.transitions.clear();
     automatic.reachables.clear();
     automatic.leadstos.clear();
-    let (automatic_result, automatic_violation) = mutation_model_verdict(automatic, depth, bmc);
-    if !automatic_result.is_clean() {
-        let boundary_killer = automatic_result.killed_by().map(|killed_by| {
-            automatic_violation.map_or_else(
-                || BoundaryKiller::Label(killed_by.to_owned()),
-                |(name, last_action)| BoundaryKiller::Violation { name, last_action },
-            )
-        });
-        return MainOracle {
-            outcome: automatic_result,
-            boundary_killer,
-            engine: "bmc",
-        };
+    if !explicit_certifies_bounds_only(explicit.as_ref(), &automatic, depth) {
+        let (automatic_result, automatic_violation) = mutation_model_verdict(automatic, depth, bmc);
+        if !automatic_result.is_clean() {
+            let boundary_killer = automatic_result.killed_by().map(|killed_by| {
+                automatic_violation.map_or_else(
+                    || BoundaryKiller::Label(killed_by.to_owned()),
+                    |(name, last_action)| BoundaryKiller::Violation { name, last_action },
+                )
+            });
+            return MainOracle {
+                outcome: automatic_result,
+                boundary_killer,
+                engine: "bmc",
+            };
+        }
     }
     MainOracle {
         outcome: mutation_model_oracle(model, depth, bmc),
         boundary_killer: None,
         engine: "bmc",
     }
+}
+
+/// The main oracle's full-model explicit attempt, made only after a
+/// finding-free boundary probe that did not exhaust its budget.
+struct FullExplicit {
+    budget: usize,
+    /// The distinct states that probe walked on the full model. It does not
+    /// step into a successor that violates a property, so for a mutant with
+    /// a violation it can be far fewer than the bounds-only model reaches:
+    /// it is only a lower bound on that model's states.
+    probe_states: usize,
+    first: verification::ExplicitFirst,
+}
+
+/// The most states the main oracle's explicit attempt on the bounds-only
+/// model explores (#1892): its budget, and the probe count past which it is
+/// not made at all, since that count is a lower bound on the states.
+///
+/// Such an attempt saves time only when exploring the model concretely is
+/// cheaper than one bounds-only BMC call. With wide action parameters it is
+/// not: a mutant of `examples/named_predicate.fsl` (23,409 probe states)
+/// spends about 14 s certifying a bounds-only model whose BMC call takes
+/// under 1 s. The probe count alone undercounts when the full model has a
+/// violation (#1960 review: a mutant whose init violates an invariant walks
+/// one probe state and then 50,000 bounds-only states), so the bound is also
+/// the attempt's budget. Calibrated on the 115 corpus specs that `mutate`
+/// accepts (the survey of #1849) from per-mutant stage times: as a probe
+/// bound alone, 1,000 to 4,000 leave no spec more than 0.3 s slower and 5,000
+/// one 2.5 s slower; as both bounds, 3,000 keeps about 89% of the BMC time the
+/// skip saves without them.
+const BOUNDS_ONLY_EXPLICIT_STATES: usize = 3_000;
+
+/// Whether the explicit engine certifies the bounds-only model `automatic`
+/// clean through `depth`, so that its BMC call cannot kill the mutant and the
+/// main oracle may go straight to the full model (#1892).
+///
+/// `explicit` is the full-model attempt, `None` when it did not run (no
+/// explicit budget, or the boundary probe failed or exhausted its budget).
+/// The bounds-only model has the same actions, init and state bounds, and
+/// its properties are a subset of the full model's, so its explicit run walks
+/// the same states in the same order and stops no earlier. Hence:
+///
+/// - full attempt not run, over its budget, or a runtime error: no attempt on
+///   the bounds-only model either. Over budget, it would overrun the same
+///   budget; a run that was not made (exhausted probe) or failed is not
+///   retried on the smaller model, since that attempt would most likely be
+///   wasted.
+/// - full attempt complete with no violation (only a reachable left
+///   unwitnessed): it already checked every bounds-only property on every
+///   state within `depth`, so it certifies the bounds-only model as is.
+/// - full attempt stopped at an obligation the bounds-only model keeps
+///   ([`is_bounds_only_obligation`]): the attempt would reach the same
+///   violation at the same point, so it is not made.
+/// - otherwise (another violation, or unsupported, e.g. because of `leadsTo`,
+///   which the bounds-only model drops): one attempt on the bounds-only
+///   model with at most [`BOUNDS_ONLY_EXPLICIT_STATES`] states of budget,
+///   made only when the probe walked no more states than that, certifying
+///   only when it is supported, error-free, within budget and
+///   violation-free.
+///
+/// Like the full-model explicit decision, this certifies **clean only**: a
+/// bounds-only kill and its label always come from the bounds-only BMC. It
+/// assumes explicit and BMC agree on what is clean; DESIGN-mutate §3 names
+/// the known exceptions (#1961, a solver `unknown`, a BMC-only `build_spec`).
+fn explicit_certifies_bounds_only(
+    explicit: Option<&FullExplicit>,
+    automatic: &KernelModel,
+    depth: usize,
+) -> bool {
+    let certifies = |result: &fsl_runtime::ExplicitResult| {
+        !result.budget_exceeded && result.violation.is_none()
+    };
+    let Some(explicit) = explicit else {
+        return false;
+    };
+    match &explicit.first {
+        verification::ExplicitFirst::Ran(Err(_)) => false,
+        verification::ExplicitFirst::Ran(Ok(result)) if result.budget_exceeded => false,
+        verification::ExplicitFirst::Ran(Ok(result)) if certifies(result) => true,
+        verification::ExplicitFirst::Ran(Ok(fsl_runtime::ExplicitResult {
+            violation: Some(found),
+            ..
+        })) if is_bounds_only_obligation(&found.violation) => false,
+        _ if explicit.probe_states > BOUNDS_ONLY_EXPLICIT_STATES => false,
+        _ => {
+            #[cfg(test)]
+            BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
+            matches!(
+                verification::explicit_first(
+                    automatic,
+                    depth,
+                    explicit.budget.min(BOUNDS_ONLY_EXPLICIT_STATES),
+                    None
+                ),
+                verification::ExplicitFirst::Ran(Ok(ref result)) if certifies(result)
+            )
+        }
+    }
+}
+
+/// Whether `violation` is one the bounds-only model also checks: an
+/// `ensures`, a type bound, or a partial operation in an action step or in
+/// the `terminal` condition (not one in an invariant, transition or
+/// reachable, which that model drops). A misread name only ever makes the
+/// caller attempt, or not attempt, an explicit run; it never certifies.
+fn is_bounds_only_obligation(violation: &fsl_runtime::Violation) -> bool {
+    match violation.kind.as_str() {
+        "ensures" | "type_bound" => true,
+        "partial_op" => matches!(
+            fsl_core::SyntheticName::parse_internal(&violation.name),
+            Some(
+                fsl_core::SyntheticName::PartialAction { .. }
+                    | fsl_core::SyntheticName::PartialTerminal
+            )
+        ),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Explicit attempts on the bounds-only model, for the #1892 tests.
+    static BOUNDS_ONLY_EXPLICIT_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn clear_action_ensures(model: &mut KernelModel) {
@@ -21420,12 +21553,31 @@ mod mutate_explicit_first_tests {
         );
     }
 
+    /// [`main_route`], also returning how many explicit attempts the main
+    /// oracle made on the bounds-only model (#1892).
+    fn main_route_attempts(
+        source: &str,
+        depth: usize,
+        budget: usize,
+    ) -> (MainOracle, usize, usize) {
+        BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(|attempts| attempts.set(0));
+        let (main, calls) = main_route(source, depth, budget);
+        (
+            main,
+            calls,
+            BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(std::cell::Cell::get),
+        )
+    }
+
     #[test]
     fn budget_one() {
         compare("subset.fsl", TOGGLE, 2, 6, 1);
-        let (main, calls) = main_route(TOGGLE, 2, 1);
+        // The full-model explicit attempt overruns its budget, so the
+        // bounds-only model is not tried explicitly (#1892) and its BMC runs.
+        let (main, calls, attempts) = main_route_attempts(TOGGLE, 2, 1);
         assert_eq!(main.engine, "bmc");
         assert_eq!(calls, 2);
+        assert_eq!(attempts, 0);
         let (main, calls) = main_route(TOGGLE, 2, MUTATION_EXPLICIT_BUDGET);
         assert_eq!(main.engine, "explicit");
         assert_eq!(calls, 0);
@@ -21435,14 +21587,228 @@ mod mutate_explicit_first_tests {
     fn reachable_at_k_plus_one() {
         compare("subset.fsl", REACH, 1, 12, MUTATION_EXPLICIT_BUDGET);
         let delayed = REACH.replace("init { x = 1 }", "init { x = 0 }");
-        let (main, calls) = main_route(&delayed, 1, MUTATION_EXPLICIT_BUDGET);
+        // The complete, violation-free full-model explicit run leaves only
+        // `End` unwitnessed; it certifies the bounds-only model by itself, so
+        // only the full-model BMC runs (#1892).
+        let (main, calls, attempts) = main_route_attempts(&delayed, 1, MUTATION_EXPLICIT_BUDGET);
         assert_eq!(main.engine, "bmc");
         assert_eq!(main.outcome.killed_by(), Some("End"));
-        assert_eq!(calls, 2);
+        assert!(main.boundary_killer.is_none(), "{main:?}");
+        assert_eq!(calls, 1);
+        assert_eq!(attempts, 0);
         let (main, calls) = main_route(&delayed, 2, MUTATION_EXPLICIT_BUDGET);
         assert_eq!(main.engine, "explicit");
         assert!(main.outcome.is_clean());
         assert_eq!(calls, 0);
+    }
+
+    /// Killed by its invariant; the bounds-only model is clean.
+    const INVARIANT_KILL: &str = "spec InvariantKill { type Small = 0..1 state { x: Small } init { x = 0 } action flip() { x = 1 - x } invariant Zero { x == 0 } }";
+    /// `leadsTo` keeps the full model out of the explicit engine; the
+    /// bounds-only model drops it.
+    const LEADS_TO: &str = "spec LeadsBack { type Small = 0..1 state { x: Small } init { x = 0 } action flip() { x = 1 - x } leadsTo Back { x == 1 ~> x == 0 } }";
+    /// Killed by the terminal condition, partial on the empty queue of the
+    /// one dead state; the boundary probe does not evaluate `terminal`.
+    const TERMINAL_PARTIAL_KILL: &str = "spec TerminalPartialKill { type J = 0..1 state { x: J, q: Seq<J, 2> } init { x = 0 q = Seq { } } action go() { requires x == 0 x = 1 } terminal { q.head() == 1 } }";
+    /// Killed by `set`'s ensures, which the bounds-only model keeps; the
+    /// boundary probe does not look at ensures.
+    const ENSURES_KILL: &str = "spec EnsuresKill { type Small = 0..1 state { x: Small } init { x = 0 } action set() { requires x == 0 x = 1 ensures x == 0 } }";
+
+    /// #1892: when explicit certifies the bounds-only model clean, its BMC
+    /// does not run and the full-model BMC decides alone. Disabling the skip
+    /// makes `calls` 2 in both cases.
+    #[test]
+    fn explicit_certified_bounds_only_model_skips_its_bmc() {
+        // The full-model explicit attempt finds `Zero` violated; the
+        // bounds-only attempt certifies.
+        let (main, calls, attempts) =
+            main_route_attempts(INVARIANT_KILL, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("Zero"));
+        assert!(main.boundary_killer.is_none(), "{main:?}");
+        assert_eq!((calls, attempts), (1, 1));
+        // The full model is unsupported (leadsTo); the bounds-only attempt
+        // certifies.
+        let (main, calls, attempts) = main_route_attempts(LEADS_TO, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert!(main.boundary_killer.is_none(), "{main:?}");
+        assert_eq!((calls, attempts), (1, 1));
+    }
+
+    /// #1892: explicit certifies clean only. A violation on the bounds-only
+    /// model leaves the bounds-only BMC to decide the kill and its label.
+    /// The full-model attempt already stopped at that obligation (`set`'s
+    /// ensures, the terminal condition's partial `q.head()`), so the
+    /// bounds-only model is not tried explicitly.
+    #[test]
+    fn bounds_only_violation_keeps_its_bmc() {
+        let (main, calls, attempts) =
+            main_route_attempts(ENSURES_KILL, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("set"));
+        assert!(
+            matches!(main.boundary_killer, Some(BoundaryKiller::Violation { .. })),
+            "{main:?}"
+        );
+        assert_eq!((calls, attempts), (1, 0));
+        let (main, calls, attempts) =
+            main_route_attempts(TERMINAL_PARTIAL_KILL, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("_partial_property_terminal"));
+        assert!(
+            matches!(main.boundary_killer, Some(BoundaryKiller::Violation { .. })),
+            "{main:?}"
+        );
+        assert_eq!((calls, attempts), (1, 0));
+    }
+
+    /// #1892: past [`BOUNDS_ONLY_EXPLICIT_STATES`] probe states the
+    /// bounds-only model is not tried explicitly, so its BMC runs.
+    #[test]
+    fn wide_state_space_keeps_bounds_only_bmc() {
+        // The model reaches 16 * 16 * 16 states through depth 3. The probe
+        // does not step into the 256 states with `a == 15`, which violate
+        // `Low`, and walks 15 * 16 * 16 = 3,840; the full-model attempt finds
+        // `Low` violated after the first step.
+        let wide = "spec Wide { type N = 0..15 state { a: N, b: N, c: N } init { a = 0 b = 0 c = 0 } action set_a(x: N) { a = x } action set_b(x: N) { b = x } action set_c(x: N) { c = x } invariant Low { a <= 14 } }";
+        let (main, calls, attempts) = main_route_attempts(wide, 3, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("Low"));
+        assert!(main.boundary_killer.is_none(), "{main:?}");
+        assert_eq!((calls, attempts), (2, 0));
+    }
+
+    /// #1892: the probe count undercounts the bounds-only model when the full
+    /// model has a violation; the attempt then stops at
+    /// [`BOUNDS_ONLY_EXPLICIT_STATES`] and the bounds-only BMC runs (#1960
+    /// review, `wide_inv.fsl`).
+    #[test]
+    fn undercounted_probe_caps_the_bounds_only_attempt() {
+        // Init violates `T`, so the probe walks only the root; the
+        // bounds-only model reaches 16 * 16 * 16 states through depth 3.
+        let wide = "spec WideT { type N = 0..15 type Small = 0..1 state { a: N, b: N, c: N, t: Small } init { a = 0 b = 0 c = 0 t = 1 } action set_a(x: N) { a = x } action set_b(x: N) { b = x } action set_c(x: N) { c = x } invariant T { t == 0 } }";
+        let (main, calls, attempts) = main_route_attempts(wide, 3, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("T"));
+        assert!(main.boundary_killer.is_none(), "{main:?}");
+        assert_eq!((calls, attempts), (2, 1));
+    }
+
+    /// #1892: a full-model explicit run that failed with a runtime error is
+    /// not retried on the bounds-only model. The failed run is built by hand
+    /// rather than provoked through a spec; the bounds-only model itself
+    /// would certify (one state, no actions).
+    #[test]
+    fn failed_full_model_run_is_not_retried() {
+        let kernel = fsl_core::parse_kernel_source(
+            "spec Still { type Small = 0..1 state { x: Small } init { x = 0 } }",
+            &fsl_core::FsResolver::new("."),
+        )
+        .expect("parse");
+        let automatic = fsl_core::build_model(kernel).expect("build");
+        let failed = |budget| FullExplicit {
+            budget,
+            probe_states: 1,
+            first: verification::ExplicitFirst::Ran(Err(fsl_runtime::RuntimeError {
+                message: "unit: explicit run failed".to_owned(),
+                span: None,
+                partial_operation: None,
+                map_key_outside_domain: false,
+            })),
+        };
+        BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(|attempts| attempts.set(0));
+        assert!(!explicit_certifies_bounds_only(
+            Some(&failed(MUTATION_EXPLICIT_BUDGET)),
+            &automatic,
+            2
+        ));
+        assert_eq!(BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(std::cell::Cell::get), 0);
+        // The same model after an unsupported full-model run is attempted
+        // and certified, so the refusal above is the guard's.
+        let unsupported = FullExplicit {
+            first: verification::ExplicitFirst::Unsupported("unit".to_owned()),
+            ..failed(MUTATION_EXPLICIT_BUDGET)
+        };
+        assert!(explicit_certifies_bounds_only(
+            Some(&unsupported),
+            &automatic,
+            2
+        ));
+        assert_eq!(BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(std::cell::Cell::get), 1);
+    }
+
+    /// #1892: without an explicit budget the main oracle makes no explicit
+    /// attempt at all, so both BMC calls run.
+    #[test]
+    fn no_explicit_budget_keeps_both_bmc_calls() {
+        let kernel = fsl_core::parse_kernel_source(INVARIANT_KILL, &fsl_core::FsResolver::new("."))
+            .expect("parse");
+        let model = fsl_core::build_model(kernel).expect("build");
+        BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(|attempts| attempts.set(0));
+        let mut calls = 0;
+        let main = mutation_oracle_for_model(model, 2, None, &mut |model, depth| {
+            calls += 1;
+            native_mutation_bmc(model, depth)
+        });
+        assert_eq!(main.outcome.killed_by(), Some("Zero"));
+        assert_eq!(calls, 2);
+        assert_eq!(BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(std::cell::Cell::get), 0);
+    }
+
+    /// The PR #1960 review's counterexample: the `terminal` condition reads
+    /// `q.head()`, which is partial on the empty queue left by `make_b`.
+    const TERM_MUT: &str = "spec TermMut {\n  type Job = 0..1\n  type Small = 0..1\n  state { a_first: Bool, c: Small, done: Bool, q: Seq<Job, 2> }\n  init { a_first = true c = 0 done = false q = Seq { } }\n  action make_a() {\n    requires not done\n    a_first = false\n    done = true\n    q = q.push(0)\n  }\n  action make_b() {\n    requires not done\n    done = true\n  }\n  invariant CZero { c == 0 }\n  terminal { q.head() == 1 }\n}\n";
+
+    /// #1892 / #1961: mutant 12 (`c = 0` -> `c = 1` in init) violates `CZero`
+    /// at step 0 and the terminal condition's partial `q.head()` on the dead
+    /// state `make_b` leaves. The bounds-only BMC reports the latter, and
+    /// that is the published killer. The explicit engine misses a terminal
+    /// `partial_op` on a later dead state of a BFS level (#1961), certifies
+    /// the bounds-only model clean, and the skip then publishes `CZero`.
+    /// Un-ignore once the #1961 fix is in.
+    #[test]
+    #[ignore = "needs #1961"]
+    fn terminal_partial_on_a_later_dead_state_keeps_its_killer() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("subset.fsl");
+        let (report, status) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(STACK_SIZE)
+                .spawn_scoped(scope, || {
+                    run_mutate_from_source(
+                        &path,
+                        TERM_MUT,
+                        MutateOptions {
+                            depth: 8,
+                            max_mutants: 24,
+                            explicit_budget: Some(MUTATION_EXPLICIT_BUDGET),
+                            by_requirement: true,
+                            oracle_attribution: true,
+                            external_mutants: None,
+                            gate: MutationGate::default(),
+                        },
+                        &mut native_mutation_bmc,
+                    )
+                })
+                .expect("spawn term_mut")
+                .join()
+                .expect("term_mut panicked")
+        });
+        assert_eq!(status, 0, "{report:#}");
+        let record = &report["mutants"][11];
+        assert_eq!(record["op"], "integer_literal_plus1", "{record:#}");
+        assert_eq!(record["loc"], json!({"line":5,"column":25}), "{record:#}");
+        assert_eq!(record["status"], "killed", "{record:#}");
+        assert_eq!(
+            record["killed_by"], "_partial_property_terminal",
+            "{record:#}"
+        );
+        assert_eq!(
+            record["killers"],
+            json!(["CZero", "_partial_property_terminal"]),
+            "{record:#}"
+        );
     }
 }
 
