@@ -101,13 +101,24 @@ An edition is a `(major, minor)` value (`fsl_syntax::Edition`). The header
 grammar is `fsl MAJOR[.MINOR]`: `fsl`, blanks, a decimal major, and optionally
 `.` and a decimal minor (`0`, or digits without a leading zero), then only
 blanks to the end of the line. `fsl 5.0` is `fsl 5` (and `fsl 4.0` is
-`fsl 4`) everywhere, gate or not; outputs and messages spell it `5`.
+`fsl 4`) in every command, the language server and the Worker, gate or not;
+outputs and messages spell it `5`. The VS Code grammar
+(`fsl.tmLanguage.json`, which matches `fsl [45]`) and `LANGUAGE*.md` do not
+describe `fsl 5.0` or minors yet; that is left to the release that
+publishes a minor.
 
 A line that starts like a header but is not one (`fsl`, blanks, a major, then
 `.` or a blank followed by anything other than the grammar above: `fsl 5.`,
-`fsl 5.01`, `fsl 5.x`, `fsl 5 next`, `fsl 5 spec S {}`) is
-`unsupported_edition`, not a header-less document read as `fsl 4`. A major run
+`fsl 5.01`, `fsl 5.x`, `fsl 5.1.0`, `fsl 4.1`, `fsl 6.0`, `fsl 5 next`,
+`fsl 5 spec S {}`, and a trailing comment such as `fsl 5 // note` or
+`fsl 5 /* note */`) is `unsupported_edition`, not a header-less document read
+as `fsl 4`. Only the `diagnostic_code` and the message change for these
+(`kind` stays `parse`, the exit stays 2). The message quotes at most one line
+of the header text: it stops at a `\r` (a CR-only file is one line to the
+header reader) and after 32 characters, marking a cut with `…`. A major run
 followed directly by another character (`fsl 5x`) is still an ordinary line.
+A document that ends right after its header (no newline) is the empty
+document (`FSL-DIALECT-EMPTY`), as it was before minors.
 
 **The development minor.** `fsl_syntax::DEV_MINOR` is the one constant naming
 the minor under development; the release that publishes it renumbers it (the
@@ -132,7 +143,13 @@ process-form conversion, the language server's lexicon and diagnostics).
 Code that asks for an addition of one minor asks `Edition::has(Feature)`,
 where each `Feature` names the edition it arrives in (`since`). No feature
 exists yet; one test-only placeholder exercises `has`. Comparing with
-`Edition::Fsl5` matches only `5.0`, so no product code does.
+`Edition::Fsl5` matches only `5.0`. The one intended `== Edition::Fsl5` in
+product code is in `Edition::from_header` (`edition.rs`): the development
+minor is a minor of `fsl 5` only, so `5.DEV_MINOR` is read when the major
+names `fsl 5`. (The header/request conflict in `document_edition` compares
+whole editions, major and minor, on purpose.) Other uses of `Edition::Fsl5`
+are values: the `next` request, `migrate`'s default edition, and the
+`fsl 5` header `ProcessFormConversion::render` writes.
 
 **Requests and outputs.** `--edition current`, `next`, `4` and `5` are
 unchanged, and `next` stays `5.0`. A conflict between a header and
@@ -149,10 +166,16 @@ default.
 
 **What the minor reads today.** Nothing new: until a feature lands, a
 document headed `fsl 5.DEV_MINOR` reads exactly as the `fsl 5` document.
-`rust/fslc/tests/edition_header.rs` pins that over the corpus (`kernel` and
-`check`, every field but `fsl_edition_minor`) and for `fmt`, `lint`,
-`migrate` and the solver-deferred requirements checks; fsl-lsp and fsl-wasm
-pin the index, the served diagnostics and the Worker's admission.
+`rust/fslc/tests/edition_header.rs` pins that over the corpus: `kernel` and
+`check` give the same JSON but for `fsl_edition_minor`, with the wall-clock
+and allocator fields (`elapsed_s`, `check_elapsed_s`, `memory_mb`) masked and
+the `fsl 5` mirror's header padded with blanks to the minor header's length,
+so locations and byte offsets compare. Further tests there cover `fmt`,
+`lint`, `migrate`, the solver-deferred requirements checks, and one test per
+family-predicate site the corpus does not reach (non-ASCII names, legacy
+operators under `--edition 5.N`, `fmt --lang` / `--names`, the ID policy);
+each fails when its site is reverted to `== Edition::Fsl5`. fsl-lsp and
+fsl-wasm pin the index, the served diagnostics and the Worker's admission.
 
 ## Rewrite table
 
