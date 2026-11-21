@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 control: issue_1961_terminal_partial_second.fsl with the
+// frontier order swapped. `make_a` now sets `a_first` to true, so the
+// `make_b` state (empty `q`, undefined terminal) is the first dead state of
+// step 1. The explicit engine caught this order before #1961 as well.
+spec TermPartialFirst {
+  type Job = 0..1
+  state { a_first: Bool, done: Bool, q: Seq<Job, 2> }
+  init { a_first = false done = false q = Seq { } }
+  action make_a() {
+    requires not done
+    a_first = true
+    done = true
+    q = q.push(0)
+  }
+  action make_b() {
+    requires not done
+    done = true
+  }
+  terminal { q.head() == 1 }
+}

@@ -623,3 +623,74 @@ fn explicit_violation_trace_replays_through_the_monitor() {
     assert_eq!(violation.violation.step, 2);
     fsl_runtime::replay_trace(model, &violation.trace).expect("replay explicit trace");
 }
+
+fn issue_1961_fixture(name: &str) -> fsl_core::KernelModel {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fslc/tests/fixtures")
+        .join(name);
+    let source = std::fs::read_to_string(&path).expect("read #1961 fixture");
+    build_model(parse_kernel_source(&source, &FsResolver::new(".")).expect("parse kernel"))
+        .expect("build model")
+}
+
+fn last_state(trace: &[fsl_core::TraceStep]) -> &fsl_core::FslValue {
+    trace
+        .last()
+        .and_then(|step| step.state.get("q"))
+        .expect("trace ends in a state with q")
+}
+
+/// #1961: a dead state whose terminal is undefined is a `partial_op` even
+/// when a dead non-terminal state comes before it in the same level. Before
+/// the fix the first dead state recorded the deadlock and the later one was
+/// never evaluated, so the run closed as `proved` with a deadlock.
+#[test]
+fn issue_1961_partial_terminal_on_a_later_dead_state_of_the_level() {
+    for name in [
+        "issue_1961_terminal_partial_second.fsl",
+        "issue_1961_terminal_partial_first.fsl",
+    ] {
+        let result = fsl_runtime::verify_explicit(issue_1961_fixture(name), 8, 100)
+            .expect("explicit verification");
+        let violation = result
+            .violation
+            .unwrap_or_else(|| panic!("{name}: expected a partial terminal"));
+        assert_eq!(violation.violation.kind, "partial_op", "{name}");
+        assert_eq!(
+            violation.violation.name, "_partial_property_terminal",
+            "{name}"
+        );
+        assert_eq!(violation.violation.step, 1, "{name}");
+        assert_eq!(
+            last_state(&violation.trace),
+            &FslValue::Seq(Vec::new()),
+            "{name}: the reported state is the one with the undefined terminal"
+        );
+        // BMC records no deadlock at the step whose terminal is partial.
+        assert_eq!(result.deadlock_step, None, "{name}");
+        assert_eq!(result.deadlock_trace, None, "{name}");
+    }
+}
+
+/// #1961 control: when every dead state of the level has a defined terminal,
+/// the deadlock is still the first dead non-terminal state in frontier order.
+#[test]
+fn issue_1961_deadlock_trace_is_still_the_first_dead_state() {
+    let model = model(
+        "spec TwoDead { type Job = 0..1 \
+         state { a_first: Bool, done: Bool, q: Seq<Job, 2> } \
+         init { a_first = true done = false q = Seq { } } \
+         action make_a() { requires not done a_first = false done = true q = q.push(0) } \
+         action make_b() { requires not done done = true q = q.push(1) } \
+         terminal { q.size() == 2 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 8, 100).expect("explicit verification");
+    assert!(result.violation.is_none(), "{result:?}");
+    assert_eq!(result.deadlock_step, Some(1));
+    let trace = result.deadlock_trace.expect("deadlock trace");
+    assert_eq!(
+        last_state(&trace),
+        &FslValue::Seq(vec![FslValue::Int(0)]),
+        "the a_first = false state comes first in frontier order"
+    );
+}

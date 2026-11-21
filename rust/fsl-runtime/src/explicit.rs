@@ -235,6 +235,18 @@ pub fn verify_explicit_selected(
             }
         }
 
+        // BMC's rule at a step where no deadlock is recorded yet (`bmc.rs`,
+        // the `deadlock` query, #1961): it first asks for a dead state whose
+        // terminal reaches a partial operation, over every state of the step,
+        // and records a deadlock only when there is none. So at this level
+        // every dead state has its terminal evaluated, and a partial terminal
+        // on any of them wins over a dead non-terminal state that comes
+        // earlier in frontier order. The deadlock is recorded after the
+        // level, at the first dead non-terminal state in frontier order, as
+        // before. Once a deadlock is recorded neither engine evaluates the
+        // terminal at a later level.
+        let check_terminals = result.deadlock_step.is_none();
+        let mut level_deadlock = None;
         let mut enabled_by_state = Vec::with_capacity(frontier.len());
         for (state, id) in &frontier {
             // A guard that reaches a partial operation is neither enabled nor
@@ -261,7 +273,7 @@ pub fn verify_explicit_selected(
                     .expect("enabled action belongs to the model")
                     .enabled += 1;
             }
-            if candidates.is_empty() && result.deadlock_step.is_none() {
+            if candidates.is_empty() && check_terminals {
                 let terminal = match terminal_holds_at(&scratch.model, state) {
                     Ok(value) => value,
                     Err(error) if super::is_partial_operation_error(&error) => {
@@ -277,12 +289,15 @@ pub fn verify_explicit_selected(
                     }
                     Err(error) => return Err(error),
                 };
-                if !terminal {
-                    result.deadlock_step = Some(level);
-                    result.deadlock_trace = Some(seen.trace(*id));
+                if !terminal && level_deadlock.is_none() {
+                    level_deadlock = Some(*id);
                 }
             }
             enabled_by_state.push(candidates);
+        }
+        if let Some(id) = level_deadlock {
+            result.deadlock_step = Some(level);
+            result.deadlock_trace = Some(seen.trace(id));
         }
 
         if level == depth {
