@@ -11395,10 +11395,18 @@ fn mutation_oracle_for_model(
             engine: "probe",
         };
     }
-    if let Some(budget) = explicit_budget
-        && matches!(probe, Ok(ref probe) if !probe.exhausted)
-        && let verification::ExplicitFirst::Ran(Ok(result)) =
-            verification::explicit_first(&model, depth, budget, None)
+    let explicit = match (explicit_budget, &probe) {
+        (Some(budget), Ok(probe)) if !probe.exhausted => Some(FullExplicit {
+            budget,
+            probe_states: probe.states_explored,
+            first: verification::explicit_first(&model, depth, budget, None),
+        }),
+        _ => None,
+    };
+    if let Some(FullExplicit {
+        first: verification::ExplicitFirst::Ran(Ok(result)),
+        ..
+    }) = &explicit
         && !result.budget_exceeded
         && result.violation.is_none()
         && result.reachables.values().all(Option::is_some)
@@ -11414,25 +11422,106 @@ fn mutation_oracle_for_model(
     automatic.transitions.clear();
     automatic.reachables.clear();
     automatic.leadstos.clear();
-    let (automatic_result, automatic_violation) = mutation_model_verdict(automatic, depth, bmc);
-    if !automatic_result.is_clean() {
-        let boundary_killer = automatic_result.killed_by().map(|killed_by| {
-            automatic_violation.map_or_else(
-                || BoundaryKiller::Label(killed_by.to_owned()),
-                |(name, last_action)| BoundaryKiller::Violation { name, last_action },
-            )
-        });
-        return MainOracle {
-            outcome: automatic_result,
-            boundary_killer,
-            engine: "bmc",
-        };
+    if !explicit_certifies_bounds_only(explicit.as_ref(), &automatic, depth) {
+        let (automatic_result, automatic_violation) = mutation_model_verdict(automatic, depth, bmc);
+        if !automatic_result.is_clean() {
+            let boundary_killer = automatic_result.killed_by().map(|killed_by| {
+                automatic_violation.map_or_else(
+                    || BoundaryKiller::Label(killed_by.to_owned()),
+                    |(name, last_action)| BoundaryKiller::Violation { name, last_action },
+                )
+            });
+            return MainOracle {
+                outcome: automatic_result,
+                boundary_killer,
+                engine: "bmc",
+            };
+        }
     }
     MainOracle {
         outcome: mutation_model_oracle(model, depth, bmc),
         boundary_killer: None,
         engine: "bmc",
     }
+}
+
+/// The main oracle's full-model explicit attempt, made only after a
+/// finding-free boundary probe that did not exhaust its budget.
+struct FullExplicit {
+    budget: usize,
+    /// The distinct states that probe walked: every state reachable through
+    /// the depth, the bounds-only model's included.
+    probe_states: usize,
+    first: verification::ExplicitFirst,
+}
+
+/// The most states the boundary probe may have walked for the main oracle
+/// to try the explicit engine on the bounds-only model (#1892).
+///
+/// Such an attempt saves time only when exploring the model concretely is
+/// cheaper than one bounds-only BMC call. With wide action parameters it is
+/// not: a mutant of `examples/named_predicate.fsl` (23,409 probe states)
+/// spends about 14 s certifying a bounds-only model whose BMC call takes
+/// under 1 s. Calibrated on the 115 corpus specs that `mutate` accepts (the
+/// survey of #1849): every bound from 1,000 to 4,000 leaves no spec slower,
+/// 5,000 makes one slower, and 3,000 keeps 95% of the BMC time the skip
+/// saves without a limit.
+const BOUNDS_ONLY_EXPLICIT_PROBE_STATES: usize = 3_000;
+
+/// Whether the explicit engine certifies the bounds-only model `automatic`
+/// clean through `depth`, so that its BMC call cannot kill the mutant and the
+/// main oracle may go straight to the full model (#1892).
+///
+/// `explicit` is the full-model attempt, `None` when it did not run (no
+/// explicit budget, or the boundary probe failed or exhausted its budget).
+/// The bounds-only model has the same actions, init and state bounds, so it
+/// reaches the same states; it only checks fewer properties. Hence:
+///
+/// - full attempt not run, over its budget, or a runtime error: no attempt on
+///   the bounds-only model either. It would walk the same states into the
+///   same budget or error and could not certify.
+/// - full attempt complete with no violation (only a reachable left
+///   unwitnessed): it already checked every bounds-only property on every
+///   state within `depth`, so it certifies the bounds-only model as is.
+/// - otherwise (a violation, or unsupported, e.g. because of `leadsTo`,
+///   which the bounds-only model drops): one budgeted attempt on the
+///   bounds-only model when the probe walked at most
+///   [`BOUNDS_ONLY_EXPLICIT_PROBE_STATES`] states, certifying only when it is
+///   supported, error-free, within budget and violation-free.
+///
+/// Like the full-model explicit decision, this certifies **clean only**: a
+/// bounds-only kill and its label always come from the bounds-only BMC.
+fn explicit_certifies_bounds_only(
+    explicit: Option<&FullExplicit>,
+    automatic: &KernelModel,
+    depth: usize,
+) -> bool {
+    let certifies = |result: &fsl_runtime::ExplicitResult| {
+        !result.budget_exceeded && result.violation.is_none()
+    };
+    let Some(explicit) = explicit else {
+        return false;
+    };
+    match &explicit.first {
+        verification::ExplicitFirst::Ran(Err(_)) => false,
+        verification::ExplicitFirst::Ran(Ok(result)) if result.budget_exceeded => false,
+        verification::ExplicitFirst::Ran(Ok(result)) if certifies(result) => true,
+        _ if explicit.probe_states > BOUNDS_ONLY_EXPLICIT_PROBE_STATES => false,
+        _ => {
+            #[cfg(test)]
+            BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
+            matches!(
+                verification::explicit_first(automatic, depth, explicit.budget, None),
+                verification::ExplicitFirst::Ran(Ok(ref result)) if certifies(result)
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Explicit attempts on the bounds-only model, for the #1892 tests.
+    static BOUNDS_ONLY_EXPLICIT_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn clear_action_ensures(model: &mut KernelModel) {
