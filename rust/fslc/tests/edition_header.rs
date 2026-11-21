@@ -1110,3 +1110,54 @@ fn the_solver_refutes_a_development_minor_document_as_it_refutes_fsl_5() {
         let _ = std::fs::remove_dir_all(&minor);
     }
 }
+
+/// Behind the gate `migrate --edition 5.N` writes the minor's header: into a
+/// header-less spec (`missing_edition_header`) and into a process-form
+/// requirements document it rewrites (the e2e fixture), so the written
+/// document reads in the requested edition. The default `migrate` still
+/// writes `fsl 5`.
+#[test]
+fn migrate_to_the_development_minor_writes_its_header() {
+    let header = minor_header();
+    let number = header.trim_start_matches("fsl ").to_owned();
+    let e2e = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fsl5/e2e");
+    let directory = scratch("minor-migrate");
+    std::fs::copy(e2e.join("1_business.fsl"), directory.join("1_business.fsl"))
+        .expect("copy business");
+    let requirements = std::fs::read_to_string(e2e.join("original.fsl")).expect("read e2e");
+    assert!(
+        requirements.contains("process"),
+        "the fixture has a process form"
+    );
+    for (name, source) in [
+        ("spec.fsl", LEGACY),
+        ("original.fsl", requirements.as_str()),
+    ] {
+        for (requested, expected, gated) in [
+            (Some(number.as_str()), header.as_str(), true),
+            (None, "fsl 5", false),
+        ] {
+            write(&directory, name, source);
+            let mut arguments = vec!["migrate", name, "--write"];
+            if let Some(requested) = requested {
+                arguments.extend(["--edition", requested]);
+            }
+            let (stdout, exit) = if gated {
+                fslc_gated(&directory, &arguments)
+            } else {
+                fslc(&directory, &arguments)
+            };
+            assert_eq!(exit, 0, "{name} {arguments:?}: {stdout}");
+            let written = std::fs::read_to_string(directory.join(name)).expect("read back");
+            let first = fsl_syntax::first_significant_offset(&written);
+            assert!(
+                written[first..].starts_with(&format!("{expected}\n")),
+                "{name} {arguments:?}: {}",
+                written[first..].lines().next().unwrap_or_default()
+            );
+            let (check, status) = fslc_gated(&directory, &["check", name]);
+            assert_eq!(status, 0, "{name}: {check}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
