@@ -10,6 +10,10 @@
 //! deadlock and later dead states of that level skipped the terminal, so
 //! `issue_1961_terminal_partial_second.fsl` closed as `proved` with a
 //! deadlock warning under explicit and auto while BMC reported `violated`.
+//!
+//! The terminal failure of a level is reported only after the level's
+//! stepping has found no action partial operation, which BMC checks first
+//! (#1962 review): `issue_1961_action_partial_before_terminal.fsl`.
 
 use std::path::{Path, PathBuf};
 
@@ -24,13 +28,16 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn verify(name: &str, engine: &str) -> (Value, i32) {
-    let output = fslc_cli::command()
+fn verify(name: &str, engine: &str, depth: Option<&str>) -> (Value, i32) {
+    let mut command = fslc_cli::command();
+    command
         .arg("verify")
         .arg(fixture(name))
-        .args(["--engine", engine])
-        .output()
-        .expect("run fslc verify");
+        .args(["--engine", engine]);
+    if let Some(depth) = depth {
+        command.args(["--depth", depth]);
+    }
+    let output = command.output().expect("run fslc verify");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("{name} {engine}: not JSON ({error}): {stdout}"));
@@ -43,7 +50,19 @@ fn assert_partial_terminal(name: &str, engine: &str, last_state: &Value) {
 }
 
 fn assert_partial(name: &str, engine: &str, property: &str, last_state: &Value) {
-    let (output, status) = verify(name, engine);
+    assert_partial_at(name, None, engine, (property, 1), last_state);
+}
+
+/// [`assert_partial`] at `depth` (the default when `None`), for the
+/// `partial_op` `property` reported at `step`.
+fn assert_partial_at(
+    name: &str,
+    depth: Option<&str>,
+    engine: &str,
+    (property, step): (&str, usize),
+    last_state: &Value,
+) {
+    let (output, status) = verify(name, engine, depth);
     assert_eq!(status, 1, "{name} {engine}: {output:#}");
     assert_eq!(output["result"], "violated", "{name} {engine}: {output:#}");
     assert_eq!(
@@ -51,7 +70,10 @@ fn assert_partial(name: &str, engine: &str, property: &str, last_state: &Value) 
         "{name} {engine}: {output:#}"
     );
     assert_eq!(output["invariant"], property, "{name} {engine}: {output:#}");
-    assert_eq!(output["violated_at_step"], 1, "{name} {engine}: {output:#}");
+    assert_eq!(
+        output["violated_at_step"], step,
+        "{name} {engine}: {output:#}"
+    );
     let trace = output["trace"].as_array().expect("trace");
     assert_eq!(
         &trace.last().expect("trace step")["state"],
@@ -129,4 +151,72 @@ fn reachable_witnessed_earlier_in_the_level_auto() {
 #[test]
 fn reachable_witnessed_earlier_in_the_level_bmc() {
     assert_partial(REACHABLE, "bmc", "_partial_property_R", &reachable_state());
+}
+
+const ACTION_BEFORE_TERMINAL: &str = "issue_1961_action_partial_before_terminal.fsl";
+
+fn crash_state() -> Value {
+    json!({"done": true, "k": 3, "q": []})
+}
+
+#[test]
+fn action_partial_before_terminal_explicit() {
+    assert_partial_at(
+        ACTION_BEFORE_TERMINAL,
+        None,
+        "explicit",
+        ("_partial_crash", 2),
+        &crash_state(),
+    );
+}
+
+#[test]
+fn action_partial_before_terminal_auto() {
+    assert_partial_at(
+        ACTION_BEFORE_TERMINAL,
+        None,
+        "auto",
+        ("_partial_crash", 2),
+        &crash_state(),
+    );
+}
+
+#[test]
+fn action_partial_before_terminal_bmc() {
+    assert_partial_at(
+        ACTION_BEFORE_TERMINAL,
+        None,
+        "bmc",
+        ("_partial_crash", 2),
+        &crash_state(),
+    );
+}
+
+/// At the depth no action of the last level is checked, so the terminal is.
+#[test]
+fn action_partial_before_terminal_at_depth_one() {
+    for engine in ["explicit", "auto", "bmc"] {
+        assert_partial_at(
+            ACTION_BEFORE_TERMINAL,
+            Some("1"),
+            engine,
+            ("_partial_property_terminal", 1),
+            &json!({"done": true, "k": 2, "q": []}),
+        );
+    }
+}
+
+const ACTION_BEFORE_INVARIANT: &str = "issue_1961_action_partial_before_invariant.fsl";
+
+#[test]
+fn action_partial_before_a_later_invariant_violation() {
+    for engine in ["explicit", "auto", "bmc"] {
+        assert_partial_at(
+            ACTION_BEFORE_INVARIANT,
+            None,
+            engine,
+            ("_partial_crash", 2),
+            &json!({"done": true, "k": 2, "q": []}),
+        );
+    }
 }

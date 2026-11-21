@@ -251,18 +251,24 @@ pub fn verify_explicit_selected(
             }
         }
 
-        // BMC's rule at a step where no deadlock is recorded yet (`bmc.rs`,
-        // the `deadlock` query, #1961): it first asks for a dead state whose
-        // terminal reaches a partial operation, over every state of the step,
-        // and records a deadlock only when there is none. So at this level
-        // every dead state has its terminal evaluated, and a partial terminal
-        // on any of them wins over a dead non-terminal state that comes
-        // earlier in frontier order. The deadlock is recorded after the
-        // level, at the first dead non-terminal state in frontier order, as
-        // before. Once a deadlock is recorded neither engine evaluates the
-        // terminal at a later level.
+        // BMC's order at one step k (`bmc.rs`, `verify_bounded_config`, #1961):
+        // the state properties of k, then the action partial operations of
+        // the instances leaving k (guards, bodies, `ensures`; only when
+        // k < depth), then, while no deadlock is recorded, the `deadlock`
+        // query: a dead state whose terminal reaches a partial operation, then
+        // one whose terminal is otherwise undefined (an error), then a dead
+        // non-terminal state, which is recorded as the deadlock. The other
+        // checks of a step from k (bounds, invariants, `trans`, `ensures`)
+        // belong to the state properties of k + 1, after all of that.
+        //
+        // So at this level the terminal is evaluated on every dead state until
+        // the first one whose evaluation fails, and that failure is held back
+        // until the stepping below has found no action partial operation.
+        // Once a deadlock is recorded neither engine evaluates the terminal at
+        // a later level.
         let check_terminals = result.deadlock_step.is_none();
         let mut level_deadlock = None;
+        let mut terminal_failure = None;
         let mut enabled_by_state = Vec::with_capacity(frontier.len());
         for (state, id) in &frontier {
             // A guard that reaches a partial operation is neither enabled nor
@@ -289,56 +295,64 @@ pub fn verify_explicit_selected(
                     .expect("enabled action belongs to the model")
                     .enabled += 1;
             }
-            if candidates.is_empty() && check_terminals {
-                let terminal = match terminal_holds_at(&scratch.model, state) {
-                    Ok(value) => value,
-                    Err(error) if super::is_partial_operation_error(&error) => {
-                        result.violation = Some(ExplicitViolation {
-                            trace: seen.trace(*id),
-                            violation: Violation {
-                                kind: "partial_op".to_owned(),
-                                name: fsl_core::SyntheticName::PartialTerminal.internal(),
-                                step: level,
-                            },
-                        });
-                        return Ok(result);
+            if candidates.is_empty() && check_terminals && terminal_failure.is_none() {
+                match terminal_holds_at(&scratch.model, state) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        if level_deadlock.is_none() {
+                            level_deadlock = Some(*id);
+                        }
                     }
-                    Err(error) => return Err(error),
-                };
-                if !terminal && level_deadlock.is_none() {
-                    level_deadlock = Some(*id);
+                    Err(error) if super::is_partial_operation_error(&error) => {
+                        terminal_failure = Some(TerminalFailure::Partial(*id));
+                    }
+                    Err(error) => terminal_failure = Some(TerminalFailure::Error(error)),
                 }
             }
             enabled_by_state.push(candidates);
         }
-        if let Some(id) = level_deadlock {
-            result.deadlock_step = Some(level);
-            result.deadlock_trace = Some(seen.trace(id));
-        }
 
         if level == depth {
+            if let Some(failure) = terminal_failure {
+                return report_terminal_failure(result, failure, &seen, level);
+            }
+            record_deadlock(&mut result, level_deadlock, &seen, level);
             break;
         }
 
+        // After a held terminal failure or a stepped violation that is not an
+        // action partial operation, the stepping only looks for an action
+        // partial operation of this level: it expands no successor, and an
+        // error or an unchecked Seq overflow on a later instance belongs to a
+        // later check than the one already held.
+        let mut held_violation = None;
+        let mut expanding = terminal_failure.is_none();
         let mut next = Vec::new();
         for ((state, id), candidates) in frontier.iter().zip(&enabled_by_state) {
             for candidate in candidates {
                 let instance = candidate.instance();
-                let stepped = scratch.step_enumerated(
+                let stepped = match scratch.step_enumerated(
                     state,
                     level,
                     candidate,
                     checked_bounds,
                     &mut |next| admits_stored && seen.id_of(next).is_some_and(|id| id != root),
-                )?;
+                ) {
+                    Ok(stepped) => stepped,
+                    Err(_) if !expanding => continue,
+                    Err(error) => return Err(error),
+                };
                 // Match symbolic frames: an omitted Seq bound must not let
                 // exploration proceed beyond the frame's representable capacity.
                 let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
                 for (name, ty) in &scratch.model.state {
-                    if checked_bounds.is_some_and(|selected| {
-                        !selected
-                            .contains(&fsl_core::SyntheticName::Bounds { state: name }.internal())
-                    }) && let TypeRef::Seq(_, capacity) = ty
+                    if expanding
+                        && checked_bounds.is_some_and(|selected| {
+                            !selected.contains(
+                                &fsl_core::SyntheticName::Bounds { state: name }.internal(),
+                            )
+                        })
+                        && let TypeRef::Seq(_, capacity) = ty
                         && let Some(Value::Seq(values)) = after.get(name)
                         && values.len() > *capacity
                     {
@@ -348,12 +362,22 @@ pub fn verify_explicit_selected(
                 if let Some(violation) = stepped.violation {
                     // The Monitor rolls back on violation (`state` is the pre-step
                     // state); the trace must show the attempted post-state.
-                    let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
                     let mut trace = seen.trace(*id);
                     trace.push(edge_trace_step(level + 1, state, instance, after));
-                    result.depth_reached = level + 1;
-                    result.violation = Some(ExplicitViolation { violation, trace });
-                    return Ok(result);
+                    let found = ExplicitViolation { violation, trace };
+                    if is_action_partial(&found.violation, &instance.action) {
+                        result.depth_reached = level + 1;
+                        result.violation = Some(found);
+                        return Ok(result);
+                    }
+                    if expanding {
+                        held_violation = Some(found);
+                        expanding = false;
+                    }
+                    continue;
+                }
+                if !expanding {
+                    continue;
                 }
                 let child_state = stepped.state;
                 // A frontier state is unique and `Monitor::enabled` enumerates
@@ -377,6 +401,7 @@ pub fn verify_explicit_selected(
                 ) {
                     Admission::Stored => {}
                     Admission::Full => {
+                        record_deadlock(&mut result, level_deadlock, &seen, level);
                         result.states_explored = seen.len();
                         result.budget_exceeded = true;
                         return Ok(result);
@@ -384,6 +409,15 @@ pub fn verify_explicit_selected(
                     Admission::New(child) => next.push((child_state, child)),
                 }
             }
+        }
+        if let Some(failure) = terminal_failure {
+            return report_terminal_failure(result, failure, &seen, level);
+        }
+        record_deadlock(&mut result, level_deadlock, &seen, level);
+        if let Some(found) = held_violation {
+            result.depth_reached = level + 1;
+            result.violation = Some(found);
+            return Ok(result);
         }
         result.states_explored = seen.len();
         if next.is_empty() {
@@ -396,6 +430,58 @@ pub fn verify_explicit_selected(
 
     result.states_explored = seen.len();
     Ok(result)
+}
+
+/// The first failed terminal evaluation of a level, held back until the
+/// level's stepping has found no action partial operation.
+enum TerminalFailure {
+    /// The terminal reached a partial operation on the dead state stored as this id.
+    Partial(usize),
+    /// The terminal could not be evaluated for another reason.
+    Error(RuntimeError),
+}
+
+fn report_terminal_failure(
+    mut result: ExplicitResult,
+    failure: TerminalFailure,
+    seen: &StateStore,
+    level: usize,
+) -> Result<ExplicitResult, RuntimeError> {
+    match failure {
+        TerminalFailure::Partial(id) => {
+            result.depth_reached = level;
+            result.violation = Some(ExplicitViolation {
+                trace: seen.trace(id),
+                violation: Violation {
+                    kind: "partial_op".to_owned(),
+                    name: fsl_core::SyntheticName::PartialTerminal.internal(),
+                    step: level,
+                },
+            });
+            Ok(result)
+        }
+        TerminalFailure::Error(error) => Err(error),
+    }
+}
+
+/// Record the level's first dead non-terminal state as the deadlock.
+fn record_deadlock(
+    result: &mut ExplicitResult,
+    level_deadlock: Option<usize>,
+    seen: &StateStore,
+    level: usize,
+) {
+    if let Some(id) = level_deadlock {
+        result.deadlock_step = Some(level);
+        result.deadlock_trace = Some(seen.trace(id));
+    }
+}
+
+/// Whether a stepped violation is the stepped action's own partial operation
+/// (guard, body or `ensures`), which BMC checks before the level's terminal.
+fn is_action_partial(violation: &Violation, action: &str) -> bool {
+    violation.kind == "partial_op"
+        && violation.name == fsl_core::SyntheticName::PartialAction { action }.internal()
 }
 
 /// Evaluate each reachable in `pending` (parallel to `model.reachables`) on

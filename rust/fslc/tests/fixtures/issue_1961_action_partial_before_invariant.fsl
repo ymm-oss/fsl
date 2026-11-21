@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 review): from the first state of step 1 in frontier
+// order (`k = 1`) `bad` violates `NotThree` at step 2; from the second
+// (`k = 2`) `crash` reaches `q.head()` on an empty `q`. BMC checks the action
+// partial operations of step 1 before the invariants of step 2, so every
+// engine reports `partial_op` `_partial_crash` at step 2.
+spec Mix {
+  type Job = 0..1
+  type K = 0..3
+  state { done: Bool, k: K, q: Seq<Job, 2> }
+  init { done = false k = 0 q = Seq { } }
+  action a() { requires not done k = 1 done = true }
+  action b() { requires not done k = 2 done = true }
+  action bad() { requires done and k == 1 k = 3 }
+  action crash() { requires done and k == 2 q = q.push(q.head()) }
+  invariant NotThree { k != 3 }
+}

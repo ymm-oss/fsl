@@ -734,3 +734,28 @@ fn issue_1961_reachable_witnessed_at_an_earlier_level_is_not_rechecked() {
     let witness = result.reachables["R"].as_ref().expect("R witnessed");
     assert_eq!(witness.step, 0);
 }
+
+/// #1961 (#1962 review): a terminal failure held back for the level's
+/// stepping is still reported when that stepping would reach the state
+/// budget. At step 1 the `b` state's terminal is undefined and the `c` state
+/// steps to a fifth state; with a budget of four states the run must report
+/// the partial terminal, not stop at the budget.
+#[test]
+fn issue_1961_held_terminal_failure_is_reported_at_the_state_budget() {
+    let source = "spec TermBudget { type Job = 0..1 type K = 0..3 \
+         state { done: Bool, k: K, q: Seq<Job, 2> } \
+         init { done = false k = 0 q = Seq { } } \
+         action a() { requires not done k = 1 done = true q = q.push(0) } \
+         action b() { requires not done k = 2 done = true } \
+         action c() { requires not done k = 3 done = true q = q.push(1) } \
+         action grow() { requires done and k == 3 k = 0 } \
+         terminal { q.head() == 1 } }";
+    let unbounded = fsl_runtime::verify_explicit(model(source), 8, 100).expect("explicit");
+    assert!(unbounded.violation.is_some(), "{unbounded:?}");
+    let result = fsl_runtime::verify_explicit(model(source), 8, 4).expect("explicit");
+    assert!(!result.budget_exceeded, "{result:?}");
+    let violation = result.violation.expect("partial terminal");
+    assert_eq!(violation.violation.kind, "partial_op");
+    assert_eq!(violation.violation.name, "_partial_property_terminal");
+    assert_eq!(violation.violation.step, 1);
+}
