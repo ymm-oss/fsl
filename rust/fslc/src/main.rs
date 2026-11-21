@@ -21692,6 +21692,49 @@ mod mutate_explicit_first_tests {
         assert_eq!((calls, attempts), (2, 1));
     }
 
+    /// #1892: a full-model explicit run that failed with a runtime error is
+    /// not retried on the bounds-only model. The failed run is built by hand
+    /// rather than provoked through a spec; the bounds-only model itself
+    /// would certify (one state, no actions).
+    #[test]
+    fn failed_full_model_run_is_not_retried() {
+        let kernel = fsl_core::parse_kernel_source(
+            "spec Still { type Small = 0..1 state { x: Small } init { x = 0 } }",
+            &fsl_core::FsResolver::new("."),
+        )
+        .expect("parse");
+        let automatic = fsl_core::build_model(kernel).expect("build");
+        let failed = |budget| FullExplicit {
+            budget,
+            probe_states: 1,
+            first: verification::ExplicitFirst::Ran(Err(fsl_runtime::RuntimeError {
+                message: "unit: explicit run failed".to_owned(),
+                span: None,
+                partial_operation: None,
+                map_key_outside_domain: false,
+            })),
+        };
+        BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(|attempts| attempts.set(0));
+        assert!(!explicit_certifies_bounds_only(
+            Some(&failed(MUTATION_EXPLICIT_BUDGET)),
+            &automatic,
+            2
+        ));
+        assert_eq!(BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(std::cell::Cell::get), 0);
+        // The same model after an unsupported full-model run is attempted
+        // and certified, so the refusal above is the guard's.
+        let unsupported = FullExplicit {
+            first: verification::ExplicitFirst::Unsupported("unit".to_owned()),
+            ..failed(MUTATION_EXPLICIT_BUDGET)
+        };
+        assert!(explicit_certifies_bounds_only(
+            Some(&unsupported),
+            &automatic,
+            2
+        ));
+        assert_eq!(BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(std::cell::Cell::get), 1);
+    }
+
     /// #1892: without an explicit budget the main oracle makes no explicit
     /// attempt at all, so both BMC calls run.
     #[test]
