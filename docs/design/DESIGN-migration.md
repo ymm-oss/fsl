@@ -161,7 +161,8 @@ other than `0`. A `lint`, `migrate` or `fmt --check` report over several
 documents publishes them only when every document declares the same
 `(major, minor)`. The verify cache key adds `edition_request_minor` for a
 gated `--edition 5.N` and the gate's feature names (`unstable`) when it is on;
-a published run's key is unchanged. `migrate` still inserts `fsl 5` by
+the options in a published run's key are unchanged (the implementation
+fingerprint in the key changes with any code change). `migrate` still inserts `fsl 5` by
 default.
 
 **What the minor reads today.** Nothing new: until a feature lands, a
