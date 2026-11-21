@@ -21639,6 +21639,62 @@ mod mutate_explicit_first_tests {
         assert_eq!(calls, 2);
         assert_eq!(BOUNDS_ONLY_EXPLICIT_ATTEMPTS.with(std::cell::Cell::get), 0);
     }
+
+    /// The PR #1960 review's counterexample: the `terminal` condition reads
+    /// `q.head()`, which is partial on the empty queue left by `make_b`.
+    const TERM_MUT: &str = "spec TermMut {\n  type Job = 0..1\n  type Small = 0..1\n  state { a_first: Bool, c: Small, done: Bool, q: Seq<Job, 2> }\n  init { a_first = true c = 0 done = false q = Seq { } }\n  action make_a() {\n    requires not done\n    a_first = false\n    done = true\n    q = q.push(0)\n  }\n  action make_b() {\n    requires not done\n    done = true\n  }\n  invariant CZero { c == 0 }\n  terminal { q.head() == 1 }\n}\n";
+
+    /// #1892 / #1961: mutant 12 (`c = 0` -> `c = 1` in init) violates `CZero`
+    /// at step 0 and the terminal condition's partial `q.head()` on the dead
+    /// state `make_b` leaves. The bounds-only BMC reports the latter, and
+    /// that is the published killer. The explicit engine misses a terminal
+    /// `partial_op` on a later dead state of a BFS level (#1961), certifies
+    /// the bounds-only model clean, and the skip then publishes `CZero`.
+    /// Un-ignore once the #1961 fix is in.
+    #[test]
+    #[ignore = "needs #1961"]
+    fn terminal_partial_on_a_later_dead_state_keeps_its_killer() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("subset.fsl");
+        let (report, status) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(STACK_SIZE)
+                .spawn_scoped(scope, || {
+                    run_mutate_from_source(
+                        &path,
+                        TERM_MUT,
+                        MutateOptions {
+                            depth: 8,
+                            max_mutants: 24,
+                            explicit_budget: Some(MUTATION_EXPLICIT_BUDGET),
+                            by_requirement: true,
+                            oracle_attribution: true,
+                            external_mutants: None,
+                            gate: MutationGate::default(),
+                        },
+                        &mut native_mutation_bmc,
+                    )
+                })
+                .expect("spawn term_mut")
+                .join()
+                .expect("term_mut panicked")
+        });
+        assert_eq!(status, 0, "{report:#}");
+        let record = &report["mutants"][11];
+        assert_eq!(record["op"], "integer_literal_plus1", "{record:#}");
+        assert_eq!(record["loc"], json!({"line":5,"column":25}), "{record:#}");
+        assert_eq!(record["status"], "killed", "{record:#}");
+        assert_eq!(
+            record["killed_by"], "_partial_property_terminal",
+            "{record:#}"
+        );
+        assert_eq!(
+            record["killers"],
+            json!(["CZero", "_partial_property_terminal"]),
+            "{record:#}"
+        );
+    }
 }
 
 #[cfg(test)]
