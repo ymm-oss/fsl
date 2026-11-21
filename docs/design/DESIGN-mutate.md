@@ -186,8 +186,9 @@ when the full-model run found a violation or was unsupported (`leadsTo`, which
 the bounds-only model drops), one explicit attempt on the bounds-only model
 with the same budget certifies under the same rules (supported, no runtime
 error, no overrun, no violation). That attempt is not made when the full-model
-run did not happen, overran its budget or failed, since it would walk the same
-states into the same outcome, nor when the probe walked more than 3,000 states:
+run overran its budget (the attempt walks the same states and would overrun
+too), did not happen or failed (an attempt would most likely be wasted), nor
+when the probe walked more than 3,000 states:
 there concrete exploration costs more than the BMC call it would save (a wide
 action parameter in `examples/named_predicate.fsl` takes about 14 s to certify
 a bounds-only model whose BMC answers in under 1 s). The skip cannot change a

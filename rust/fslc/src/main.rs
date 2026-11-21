@@ -11449,8 +11449,10 @@ fn mutation_oracle_for_model(
 /// finding-free boundary probe that did not exhaust its budget.
 struct FullExplicit {
     budget: usize,
-    /// The distinct states that probe walked: every state reachable through
-    /// the depth, the bounds-only model's included.
+    /// The distinct states that probe walked on the full model. It does not
+    /// step past a successor that violates a property, so for a mutant with
+    /// a violation it can be fewer than the bounds-only model reaches; it is
+    /// a cost signal, not a state count of that model.
     probe_states: usize,
     first: verification::ExplicitFirst,
 }
@@ -11474,12 +11476,15 @@ const BOUNDS_ONLY_EXPLICIT_PROBE_STATES: usize = 3_000;
 ///
 /// `explicit` is the full-model attempt, `None` when it did not run (no
 /// explicit budget, or the boundary probe failed or exhausted its budget).
-/// The bounds-only model has the same actions, init and state bounds, so it
-/// reaches the same states; it only checks fewer properties. Hence:
+/// The bounds-only model has the same actions, init and state bounds, and
+/// its properties are a subset of the full model's, so its explicit run walks
+/// the same states in the same order and stops no earlier. Hence:
 ///
 /// - full attempt not run, over its budget, or a runtime error: no attempt on
-///   the bounds-only model either. It would walk the same states into the
-///   same budget or error and could not certify.
+///   the bounds-only model either. Over budget, it would overrun the same
+///   budget; a run that was not made (exhausted probe) or failed is not
+///   retried on the smaller model, since that attempt would most likely be
+///   wasted.
 /// - full attempt complete with no violation (only a reachable left
 ///   unwitnessed): it already checked every bounds-only property on every
 ///   state within `depth`, so it certifies the bounds-only model as is.
