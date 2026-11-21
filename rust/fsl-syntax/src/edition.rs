@@ -305,7 +305,6 @@ pub fn edition_header(
     let Some(line) = header_line(source) else {
         return Ok(None);
     };
-    let span = crate::source_span(source, line.start, line.end);
     let edition = line.number.as_ref().and_then(|(major, minor)| {
         Edition::from_header(
             &source[major.clone()],
@@ -313,22 +312,50 @@ pub fn edition_header(
             *options,
         )
     });
-    match edition {
-        Some(edition) => Ok(Some(EditionHeader { edition, span })),
-        None => Err(ParseError::coded(
-            UNSUPPORTED_EDITION,
-            format!(
-                "unsupported syntax edition 'fsl {}'; supported editions: {}",
-                &source[line.text_start..line.end],
-                Edition::ALL
-                    .iter()
-                    .map(|edition| edition.number().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            span,
-        )),
+    if let Some(edition) = edition {
+        let span = crate::source_span(source, line.start, line.end);
+        return Ok(Some(EditionHeader { edition, span }));
     }
+    let (quoted, end) = quoted_header_text(source, line.text_start, line.end);
+    Err(ParseError::coded(
+        UNSUPPORTED_EDITION,
+        format!(
+            "unsupported syntax edition 'fsl {quoted}'; supported editions: {}",
+            Edition::ALL
+                .iter()
+                .map(|edition| edition.number().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        crate::source_span(source, line.start, end),
+    ))
+}
+
+/// The most characters of a refused header's text an error quotes.
+const QUOTED_HEADER_CHARS: usize = 32;
+
+/// The text of a refused header line from `start` (its number) to `end`, as
+/// an error quotes it, and where the quote ends in `source`: cut at the first
+/// `\r` (a file with CR-only line ends is one line to the header reader) and
+/// after [`QUOTED_HEADER_CHARS`] characters, with `…` marking a cut. So the
+/// message never quotes the rest of the document.
+fn quoted_header_text(source: &str, start: usize, end: usize) -> (String, usize) {
+    let text = &source[start..end];
+    let line = text.split('\r').next().unwrap_or_default();
+    let kept = line
+        .char_indices()
+        .nth(QUOTED_HEADER_CHARS)
+        .map_or(line.len(), |(offset, _)| offset);
+    let quoted = line[..kept].trim_end_matches([' ', '\t']);
+    let cut = quoted.len() < text.len();
+    (
+        if cut {
+            format!("{quoted}…")
+        } else {
+            quoted.to_owned()
+        },
+        start + quoted.len(),
+    )
 }
 
 /// The edition `source` is read in: its header's, else `requested` (an
@@ -717,6 +744,37 @@ mod tests {
                 );
                 assert_eq!(error.span.start.column, 1, "{source:?}");
             }
+        }
+    }
+
+    /// Review of #1963: a refused header's message quotes at most one line
+    /// of header text, cut at `\r` and after `QUOTED_HEADER_CHARS`
+    /// characters, never the rest of the document.
+    #[test]
+    fn a_refused_header_quotes_a_bounded_text() {
+        let long = format!("fsl 5 spec S {{ state {{ x: Int }} {} }}", "a".repeat(200));
+        for (source, quoted, end_column) in [
+            ("fsl 5\rspec S {\r  state { x: Int }\r}\r", "fsl 5…", 6),
+            ("fsl 5.x\rspec S {}\r", "fsl 5.x…", 8),
+            (long.as_str(), "fsl 5 spec S { state { x: Int } aaaa…", 37),
+            ("fsl 5 next \r\nspec S {}", "fsl 5 next", 11),
+        ] {
+            let error = edition_header(source, &ParseOptions::stable()).unwrap_err();
+            assert_eq!(error.code(), UNSUPPORTED_EDITION, "{source:?}");
+            assert_eq!(
+                error.message,
+                format!("unsupported syntax edition '{quoted}'; supported editions: 4, 5"),
+                "{source:?}"
+            );
+            assert_eq!(
+                (
+                    error.span.start.column,
+                    error.span.end.line,
+                    error.span.end.column
+                ),
+                (1, 1, end_column),
+                "{source:?}"
+            );
         }
     }
 
