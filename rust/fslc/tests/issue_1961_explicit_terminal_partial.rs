@@ -374,3 +374,23 @@ fn partial_guard_reading_at_depth_one_agrees_with_bmc() {
         }
     }
 }
+
+/// A held terminal failure is not replaced by an unchecked Seq overflow met
+/// while the level's stepping looks for an action partial operation.
+#[test]
+fn held_terminal_failure_wins_over_an_unchecked_overflow() {
+    let name = "issue_1961_held_terminal_overflow.fsl";
+    for engine in ["explicit", "auto", "bmc"] {
+        let (output, status) = verify_args(name, engine, &["--property", "Small"]);
+        assert_eq!(status, 1, "{engine}: {output:#}");
+        assert_eq!(
+            output["violation_kind"], "partial_op",
+            "{engine}: {output:#}"
+        );
+        assert_eq!(
+            output["invariant"], "_partial_property_terminal",
+            "{engine}: {output:#}"
+        );
+        assert_eq!(output["violated_at_step"], 1, "{engine}: {output:#}");
+    }
+}

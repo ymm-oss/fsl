@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1961 (#1962 re-review): at step 1 the `k = 2` state is dead with an
+// undefined terminal (`q.head()` on an empty `q`), and from the `k = 1` state
+// `grow` pushes past the capacity of `q`. Under `--property Small` the bound
+// of `q` is not checked, so that step is an unchecked Seq overflow. BMC
+// checks the terminal of step 1 before the overflow of step 2, so every
+// engine reports `_partial_property_terminal` at step 1.
+spec H4 {
+  type Job = 0..1
+  type K = 0..5
+  state { k: K, q: Seq<Job, 1> }
+  init { k = 0 q = Seq { } }
+  action a() { requires k == 0 k = 1 q = q.push(0) }
+  action b() { requires k == 0 k = 2 }
+  action grow() { requires k == 1 k = 4 q = q.push(0) }
+  invariant Small { k <= 5 }
+  terminal { q.head() == 1 }
+}
