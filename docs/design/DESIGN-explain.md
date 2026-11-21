@@ -183,6 +183,48 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   they were, though the printed output no longer needs them (removing them
   is a separate change). With `unshared_counterfactual_runs` every
   per-invariant run re-solves, since its outcomes are printed directly.
+- **No descriptive probes (#1868).** The counterfactual runs (screening,
+  per-invariant and replayed runs, and the reachable phase's runs; all through
+  `counterfactual_bounded_run`) call
+  `fsl_verifier::verify_bounded_without_coverage`: they ask no
+  `action_coverage` probe and no vacuity lane. The counterfactual code reads a
+  run's violation (kind, name, step, last action and, in a run that re-solves,
+  its trace) and its reachables, never its `action_coverage`, `vacuity` or
+  deadlock trace (its `leadsTo` verdict is always empty: both phases clear the
+  weakened model's `leadsTo` properties, as the scope note above says), and
+  those probes were most of the phase's solver time (on
+  `examples/agentic_rag/agentic_rag_design.fsl`, `html` at depth 8 spent about two thirds of its wall time in the
+  `action_coverage` probes of counterfactual runs). The output is unchanged:
+  the coverage probes and the vacuity lanes each ask inside a push/pop scope,
+  and the check that gates the lanes (`session_satisfiable`) is a bare check
+  with no assertion, so none of them leaves an assertion behind and every
+  verdict is the same, and a printed trace is re-solved from the
+  assertions alone (#1940), so the queries the run no longer asks cannot move
+  it. Before #1940 they did: skipping them changed a printed trace of
+  `examples/self/refinement_algebra.fsl`. A counterfactual run that fails is
+  not reported as an error: a failed per-invariant run contributes nothing, so
+  the invariant's entry comes from another weakening or is the note
+  `no counterfactual within depth N` (`target_invariant_outcome`); a failed
+  screening run stops the screening, and each remaining invariant gets its own
+  run (`invariants_without_bounded_violation`); a failed reachable-phase run
+  drops its weakening silently (`unreached_after` returns `None`). Before this
+  change a run also failed where a skipped question failed: a coverage probe
+  that answered `unknown`, a failed push or pop, an error evaluating a vacuity
+  lane (the `?` in `static_findings`), or a backend error on the lanes' gating
+  check. Such a run now returns its verdicts, so a counterfactual can appear
+  where none did. A vacuity lane that answers `unknown` never failed a run: it
+  is `OnUnknown::NotProved` and reports no finding; an `unknown` gating check
+  skips the lanes. The corpus compared for #1868 has no spec where a skipped
+  question failed. One path remains, as before this change: a verdict query
+  that is still asked follows a different solver history once fewer queries
+  come before it, and if that turns its `sat` or `unsat` into `unknown` or
+  back, the run fails or succeeds and that counterfactual is silently dropped
+  or appears. The witness run is not a counterfactual run and keeps both probes. Test:
+  `counterfactual_runs_ask_no_coverage_or_vacuity_probe` (`main.rs`) records the
+  query kinds the witness and counterfactual runs ask on a small spec: the
+  counterfactual runs ask `deadlock`, the first query after step 0's coverage
+  stage, and no `action_coverage` or `vacuity`; the reachable phase is checked
+  again on its own, with no invariant-phase run to reuse.
 - **Tests.** `shared_counterfactual_runs_print_the_unshared_output`
   (a unit test in `rust/fslc/src/main.rs`) compares the JSON of `explain` at depth 4
   on `examples/nfr/support_sla.fsl` and `examples/self/refinement_algebra.fsl`,

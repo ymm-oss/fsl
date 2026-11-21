@@ -265,7 +265,67 @@ pub async fn verify_bounded_selected<S: SmtSolver>(
     depth: usize,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<BmcResult, VerifyError> {
-    verify_bounded_session(model, solver, depth, checked_bounds, None, &BTreeSet::new()).await
+    verify_bounded_session(
+        model,
+        solver,
+        depth,
+        checked_bounds,
+        None,
+        &BTreeSet::new(),
+        DescriptiveProbes::Ask,
+    )
+    .await
+}
+
+/// [`verify_bounded`] without the probes that only describe the run (#1868):
+/// no `action_coverage` probe and no vacuity lane is asked. The result's
+/// `action_coverage` maps every action to `false`, `frontier_progress` is set
+/// only by a reachable witnessed at the last step, and `vacuity` is empty; the
+/// vacuity lanes are skipped with the coverage because their `requires`
+/// finding is filtered by it.
+///
+/// Do not render or read this result's `action_coverage`: its `false` does not
+/// mean "never enabled", which is how the `verify` envelope, its warnings and
+/// `scenarios` read a `false` from [`verify_bounded`]. Nor does an empty
+/// `vacuity` mean that no vacuity lane fires.
+///
+/// The coverage probes and the vacuity lanes each ask inside a push/pop
+/// scope, and the check that gates the lanes (`session_satisfiable`) is a
+/// bare check with no assertion. None of them leaves an assertion behind, so
+/// the verdicts (`violation`, `reachables`, `deadlock_step`,
+/// `leadsto_violation`) are the ones [`verify_bounded`] returns whenever both
+/// return. Where a skipped question fails, [`verify_bounded`] fails and this
+/// function does not: a coverage probe that answers `unknown`, a failed push
+/// or pop, an error evaluating a vacuity lane, or a backend error on the
+/// lanes' gating check. A vacuity lane that answers `unknown` reports no
+/// finding and fails nothing. A query this function still asks follows a
+/// different solver history, so in principle its `sat` or `unsat` can turn
+/// into `unknown` (or back) and fail (or rescue) the run. A
+/// trace is the one [`verify_bounded`] prints when the solver re-solves its
+/// output models ([`SmtSolver::resolve_output_model`], #1940): the re-solved
+/// model depends on the assertions, not on the queries asked before. A
+/// solver that keeps the check's own model can return another trace. For a
+/// caller that reads none of the skipped fields, such as `explain`'s
+/// counterfactual runs.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] for the same failures as [`verify_bounded`].
+pub async fn verify_bounded_without_coverage<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    depth: usize,
+) -> Result<BmcResult, VerifyError> {
+    verify_bounded_session(
+        model,
+        solver,
+        depth,
+        None,
+        None,
+        &BTreeSet::new(),
+        DescriptiveProbes::Skip,
+    )
+    .await
 }
 
 /// Verify from a complete concrete logical-state snapshot instead of spec init.
@@ -288,6 +348,7 @@ pub async fn verify_bounded_from_state<S: SmtSolver>(
         checked_bounds,
         Some(initial_state),
         &BTreeSet::new(),
+        DescriptiveProbes::Ask,
     )
     .await
 }
@@ -323,8 +384,17 @@ pub async fn verify_bounded_discharging<S: SmtSolver>(
         checked_bounds,
         initial_state,
         lasso_discharged,
+        DescriptiveProbes::Ask,
     )
     .await
+}
+
+/// Whether a bounded run asks the probes whose answers only describe it:
+/// `action_coverage` and the vacuity lanes (#1868). No verdict reads them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DescriptiveProbes {
+    Ask,
+    Skip,
 }
 
 /// How far the bounded search got before it returned: the last step it
@@ -368,6 +438,7 @@ async fn verify_bounded_session<S: SmtSolver>(
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
     lasso_discharged: &BTreeSet<usize>,
+    descriptive: DescriptiveProbes,
 ) -> Result<BmcResult, VerifyError> {
     let mut progress = SearchProgress::default();
     let searched = verify_bounded_config(
@@ -377,6 +448,7 @@ async fn verify_bounded_session<S: SmtSolver>(
         checked_bounds,
         initial_state,
         lasso_discharged,
+        descriptive,
         &mut progress,
     )
     .await;
@@ -734,7 +806,7 @@ async fn unroll_step<S: SmtSolver>(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 async fn verify_bounded_config<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
@@ -742,6 +814,7 @@ async fn verify_bounded_config<S: SmtSolver>(
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
     lasso_discharged: &BTreeSet<usize>,
+    descriptive: DescriptiveProbes,
     progress: &mut SearchProgress,
 ) -> Result<BmcResult, VerifyError> {
     if model.actions.is_empty() {
@@ -867,7 +940,7 @@ async fn verify_bounded_config<S: SmtSolver>(
             &states[step],
             action_carriers.as_ref(),
         )?;
-        record_coverage(solver, &instances, &enabled, step, &mut result).await?;
+        record_coverage(solver, &instances, &enabled, step, descriptive, &mut result).await?;
         if result.deadlock_step.is_none() {
             solver.set_query_context("deadlock", "deadlock");
             let mut deadlock = solver.not(&solver.or(&enabled)?)?;
@@ -982,11 +1055,24 @@ async fn verify_bounded_config<S: SmtSolver>(
     // globally unsatisfiable. In such a session every query answers `unsat`
     // and every lane would fire on nothing. Report no vacuity rather than a
     // fabricated one.
-    if session_satisfiable(solver).await? {
-        result.vacuity = static_findings(model, solver, &instances).await?;
+    record_vacuity(solver, model, &instances, descriptive, &mut result).await?;
+    Ok(result)
+}
+
+/// The vacuity lanes of a finished search (see the note at its call in
+/// `verify_bounded_config`), unless `descriptive` skips them.
+async fn record_vacuity<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    instances: &[ActionInstance<S::Term>],
+    descriptive: DescriptiveProbes,
+    result: &mut BmcResult,
+) -> Result<(), VerifyError> {
+    if descriptive == DescriptiveProbes::Ask && session_satisfiable(solver).await? {
+        result.vacuity = static_findings(model, solver, instances).await?;
         retain_covered(&mut result.vacuity, &result.action_coverage);
     }
-    Ok(result)
+    Ok(())
 }
 
 struct StatePropertyChecks<'a> {
@@ -2329,8 +2415,12 @@ async fn record_coverage<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     enabled: &[S::Term],
     step: usize,
+    descriptive: DescriptiveProbes,
     result: &mut BmcResult,
 ) -> Result<(), VerifyError> {
+    if descriptive == DescriptiveProbes::Skip {
+        return Ok(());
+    }
     for (instance, enabled) in instances.iter().zip(enabled) {
         if result.action_coverage[&instance.action] {
             continue;

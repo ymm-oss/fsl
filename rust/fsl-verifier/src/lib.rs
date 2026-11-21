@@ -33,7 +33,7 @@ pub use agreement::{
 pub use bmc::{
     BmcResult, BmcViolation, LeadsToViolation, ReachableBlocker, ReachableDiagnosis,
     ReachableWitness, diagnose_reachables, verify_bounded, verify_bounded_discharging,
-    verify_bounded_from_state, verify_bounded_selected,
+    verify_bounded_from_state, verify_bounded_selected, verify_bounded_without_coverage,
 };
 pub use induction::{
     InductionCti, InductionResult, NOT_COVERED_INT_OVERFLOW, RankFailure, RankProof,
