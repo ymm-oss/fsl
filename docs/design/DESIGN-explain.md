@@ -194,8 +194,10 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   the phase's solver time (on `examples/agentic_rag/agentic_rag_design.fsl`,
   `html` at depth 8 spent about two thirds of its wall time in the
   `action_coverage` probes of counterfactual runs). The output is unchanged:
-  both probe families are scoped push/check/pop queries that assert nothing,
-  so every verdict is the same, and a printed trace is re-solved from the
+  the coverage probes and the vacuity lanes each ask inside a push/pop scope,
+  and the check that gates the lanes (`session_satisfiable`) is a bare check
+  with no assertion, so none of them leaves an assertion behind and every
+  verdict is the same, and a printed trace is re-solved from the
   assertions alone (#1940), so the queries the run no longer asks cannot move
   it. Before #1940 they did: skipping them changed a printed trace of
   `examples/self/refinement_algebra.fsl`. A skipped probe that would have

@@ -284,7 +284,9 @@ pub async fn verify_bounded_selected<S: SmtSolver>(
 /// vacuity lanes are skipped with the coverage because their `requires`
 /// finding is filtered by it.
 ///
-/// Both probe families are push/check/pop questions that assert nothing, so
+/// The coverage probes and the vacuity lanes each ask inside a push/pop
+/// scope, and the check that gates the lanes (`session_satisfiable`) is a
+/// bare check with no assertion. None of them leaves an assertion behind, so
 /// the verdicts (`violation`, `reachables`, `deadlock_step`,
 /// `leadsto_violation`) are the ones [`verify_bounded`] returns, unless one of
 /// the skipped probes would have answered `unknown`, which fails that run. A
